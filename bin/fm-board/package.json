@@ -1,0 +1,14 @@
+{
+  "name": "fm-board",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only herdr-hosted terminal board over the firstmate fleet snapshot",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "neo-blessed": "0.2.0"
+  }
+}

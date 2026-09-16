@@ -1,0 +1,36 @@
+# herdr plugin manifest for fm-board. Link once with:
+#   herdr plugin link /path/to/firstmate-tui/bin/fm-board
+# then `bin/fm-board.sh open` opens the board as a tab pane in the current
+# workspace (never splitting the captain pane), or bind the action:
+#   [[keys.command]]
+#   key = "prefix+y"
+#   type = "plugin_action"
+#   command = "firstmate.board.focus"
+# Plugin commands run with this directory as cwd, so ../fm-board.sh is the
+# wrapper. Actions carry no FM_HOME; write it once to
+# "$(herdr plugin config-dir firstmate.board)/fm-home".
+
+id = "firstmate.board"
+name = "Firstmate board"
+version = "0.1.0"
+min_herdr_version = "0.8.2"
+description = "Read-only board over the firstmate fleet: needs-you, review, in flight, findings, landed"
+platforms = ["macos", "linux"]
+
+[[panes]]
+id = "board"
+title = "Firstmate board"
+placement = "tab"
+command = ["bash", "../fm-board.sh", "run"]
+
+[[actions]]
+id = "open"
+title = "Open the firstmate board"
+contexts = ["workspace"]
+command = ["bash", "../fm-board.sh", "open"]
+
+[[actions]]
+id = "focus"
+title = "Focus the firstmate board"
+contexts = ["workspace"]
+command = ["bash", "../fm-board.sh", "focus"]
