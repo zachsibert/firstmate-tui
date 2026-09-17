@@ -1,0 +1,145 @@
+{
+  "_comment": "In flight grouping. Two secondmate homes given as explicit ledgers: hyperion with four children (two working, one keyed needs-decision, one blocked with a hold reason) plus a live captain hold and a dated one on queued items; notes with two working children and no decisions. One main-home worker (ship-alpha) stays a plain row. now is 2026-09-16T12:00:00Z = epoch 1789560000. Ages: etl-loader 3h, etl-schema 20m, etl-cutover-runbook 5m, etl-backfill 1h, brag-week-37 2h, notes-monday 40m, ship-alpha 5m.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 44,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "ship-alpha",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/widgets/pull/41", "source": "meta", "head": "fm/ship-alpha" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-alpha.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets" }
+      },
+      {
+        "id": "hyperion",
+        "kind": "secondmate",
+        "project": "/fixture/homes/hyperion",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "supervising four children", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/hyperion.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      },
+      {
+        "id": "notes",
+        "kind": "secondmate",
+        "project": "/fixture/homes/notes",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "two summaries running", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1E:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/notes.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "ship-alpha", "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-15", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } }
+      ]
+    },
+    "scout_reports": [],
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "ledgers": [
+    {
+      "id": "hyperion",
+      "home": "/fixture/homes/hyperion",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789559880,
+        "active_children": [
+          { "id": "etl-loader", "kind": "ship", "state": "working", "repo": "acme/etl", "source": "pane", "doing": "writing the loader" },
+          { "id": "etl-schema", "kind": "ship", "state": "working", "repo": "acme/etl", "source": "pane", "doing": "adding the schema migration" },
+          { "id": "etl-cutover-runbook", "kind": "ship", "state": "working", "repo": "acme/etl", "source": "pane", "doing": "drafting the cutover runbook" }
+        ],
+        "endpoints": [
+          { "id": "etl-loader", "state": "working", "source": "pane", "endpoint": { "target": "default:w2A:p2", "exists": true } },
+          { "id": "etl-schema", "state": "working", "source": "pane", "endpoint": { "target": "default:w2C:p2", "exists": true } },
+          { "id": "etl-cutover-runbook", "state": "working", "source": "pane", "endpoint": { "target": "default:w2D:p2", "exists": true } },
+          { "id": "etl-backfill", "state": "blocked", "source": "status-log", "endpoint": { "target": "default:w2E:p2", "exists": true } }
+        ],
+        "holds": [
+          { "id": "etl-backfill", "title": "Backfill the ETL history", "blocked_by": null, "blocked_by_ids": [], "unresolved_blocker_ids": [], "reason": "waiting on the prod snapshot", "source": "child-state" }
+        ],
+        "decisions_open": [
+          { "id": "etl-cutover-runbook", "key": "cutover-day", "verb": "needs-decision", "summary": "Cut over Friday or Monday?", "reason": null, "source": "status" },
+          { "id": "etl-vendor", "key": "etl-vendor", "verb": "captain-hold", "summary": "Pick the ETL vendor", "reason": "Two quotes in the report", "hold_until": null, "hold_bucket": "live", "hold_age_days": 2, "source": "backlog" },
+          { "id": "etl-later", "key": "etl-later", "verb": "captain-hold", "summary": "Revisit ETL pricing", "reason": null, "hold_until": "2026-10-01", "hold_bucket": "dated", "hold_age_days": 9, "source": "backlog" }
+        ],
+        "landed": [],
+        "queued": [
+          { "id": "etl-vendor", "title": "Pick the ETL vendor", "repo": "acme/etl", "kind": "task", "hold_kind": "captain", "hold_bucket": "live", "hold_age_days": 2, "captain_actionable": true },
+          { "id": "etl-later", "title": "Revisit ETL pricing", "repo": "acme/etl", "kind": "task", "hold_kind": "captain", "hold_bucket": "dated", "hold_age_days": 9, "captain_actionable": false }
+        ]
+      }
+    },
+    {
+      "id": "notes",
+      "home": "/fixture/homes/notes",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789559880,
+        "active_children": [
+          { "id": "brag-week-37", "kind": "ship", "state": "working", "repo": "acme/brag", "source": "pane", "doing": "drafting week 37" },
+          { "id": "notes-monday", "kind": "task", "state": "working", "repo": "acme/brag", "source": "pane", "doing": "summarizing Monday" }
+        ],
+        "endpoints": [
+          { "id": "brag-week-37", "state": "working", "source": "pane", "endpoint": { "target": "default:w3A:p1", "exists": true } },
+          { "id": "notes-monday", "state": "working", "source": "pane", "endpoint": { "target": "default:w3B:p1", "exists": true } }
+        ],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [],
+        "queued": []
+      }
+    }
+  ],
+  "herdr": {
+    "agents": [
+      { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-alpha" },
+      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "hyperion" },
+      { "pane_id": "w1E:p1", "agent_status": "idle", "terminal_title_stripped": "notes" },
+      { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "etl-loader" },
+      { "pane_id": "w2C:p2", "agent_status": "working", "terminal_title_stripped": "etl-schema" },
+      { "pane_id": "w2D:p2", "agent_status": "idle", "terminal_title_stripped": "etl-cutover-runbook" },
+      { "pane_id": "w2E:p2", "agent_status": "blocked", "terminal_title_stripped": "etl-backfill" },
+      { "pane_id": "w3A:p1", "agent_status": "working", "terminal_title_stripped": "brag-week-37" },
+      { "pane_id": "w3B:p1", "agent_status": "working", "terminal_title_stripped": "notes-monday" }
+    ]
+  },
+  "prs": null,
+  "mtimes": {
+    "/fixture/firstmate/state/ship-alpha.status": 1789559700,
+    "/fixture/homes/hyperion/state/etl-loader.status": 1789549200,
+    "/fixture/homes/hyperion/state/etl-schema.status": 1789558800,
+    "/fixture/homes/hyperion/state/etl-cutover-runbook.status": 1789559700,
+    "/fixture/homes/hyperion/state/etl-backfill.status": 1789556400,
+    "/fixture/homes/notes/state/brag-week-37.status": 1789552800,
+    "/fixture/homes/notes/state/notes-monday.status": 1789557600
+  }
+}

@@ -6,6 +6,11 @@
 //   --render-once  print one frame to stdout and exit; with --fixture <json> the
 //                  frame comes from that facts file and no firstmate home or
 //                  herdr is touched, which is how tests/fm-board.test.sh works.
+//                  --keys <list> presses keys through lib/controller.mjs before
+//                  the frame is rendered (a PR open runs --opener-cmd when
+//                  given, and is only reported in the footer otherwise; a herdr
+//                  focus is reported, never run); --expand <all|ids> expands
+//                  In flight groups.
 //
 // Fixture file shape (see tests/fixtures/*.json):
 //   { "now": ISO time, "cols": N, "rows": N, "fm_home": path,
@@ -25,6 +30,8 @@ import { buildModel } from './lib/model.mjs';
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { agentsFromSnapshot } from './lib/herdr.mjs';
 import { collectLedgers, discoverHomes, mtime, runBearingsPrs, runSnapshot } from './lib/sources.mjs';
+import { focusProblem, handleKey } from './lib/controller.mjs';
+import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 
 function fail(msg, code = 1) {
   process.stderr.write(`fm-board: ${msg}\n`);
@@ -100,6 +107,63 @@ async function factsLive(opts) {
   };
 }
 
+// One-shot view: apply --expand and --keys through the shared key handler,
+// then hand back the model and view to render. Effects: an opened PR runs
+// --opener-cmd (awaited, so a fake opener has written its record before the
+// process exits) or, without one, only leaves a footer notice; a focus is
+// checked the same way the app checks it, then reported rather than run.
+async function driveOnce(facts, opts) {
+  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), help: false, notice: '', noticeBad: false };
+  const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds });
+  let model = build();
+  if (opts.expand.length) {
+    const inflight = model.panes.find((p) => p.id === 'inflight');
+    for (const row of inflight.rows) {
+      if (row.group && (opts.expand.includes('all') || opts.expand.includes(row.homeId))) view.expanded.add(row.group);
+    }
+    model = build();
+  }
+  const pending = [];
+  const ctx = {
+    view,
+    get model() {
+      return model;
+    },
+    rebuild: () => {
+      model = build();
+    },
+    notice: (text, bad = false) => {
+      view.notice = text;
+      view.noticeBad = bad;
+    },
+    open: (row) => {
+      if (!isOpenableUrl(row.url)) {
+        ctx.notice(`${row.name}: not an http(s) URL`, true);
+        return;
+      }
+      if (!opts.openerCmd) {
+        ctx.notice(`would open ${row.url} (${row.name}); no --opener-cmd in --render-once`);
+        return;
+      }
+      pending.push(
+        openUrl(row.url, { cmd: opts.openerCmd, wait: true })
+          .then(() => ctx.notice(`opened ${row.url} (${row.name})`))
+          .catch((e) => ctx.notice(`open failed: ${e.message} · ${row.url}`, true)),
+      );
+    },
+    focus: (row) => {
+      const pane = model.panes[view.pane];
+      const problem = focusProblem(pane, row, opts.herdr && facts.herdr && facts.herdr.state === 'connected');
+      ctx.notice(problem || `would focus ${row.paneId} (${row.name}); --render-once never runs herdr agent focus`, Boolean(problem));
+    },
+    refresh: () => ctx.notice('refresh is not available in --render-once', true),
+    quit: () => {},
+  };
+  for (const key of opts.keys) handleKey(ctx, key);
+  await Promise.all(pending);
+  return { model, view };
+}
+
 async function main() {
   let opts;
   try {
@@ -114,8 +178,8 @@ async function main() {
   }
   if (opts.renderOnce) {
     const { facts, size } = opts.fixture ? factsFromFixture(opts.fixture, opts) : await factsLive(opts);
-    const model = buildModel(facts);
-    const frame = renderFrame(model, size, { pane: 0, row: 0, stale: Boolean(facts.snapshotError) });
+    const { model, view } = await driveOnce(facts, opts);
+    const frame = renderFrame(model, size, { ...view, stale: Boolean(facts.snapshotError) });
     process.stdout.write(`${toPlain(frame.lines).join('\n')}\n`);
     if (facts.snapshotError && !opts.fixture) {
       process.stderr.write(`fm-board: snapshot failed: ${facts.snapshotError}\n`);

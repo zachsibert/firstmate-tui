@@ -1,6 +1,8 @@
 // lib/app.mjs - the interactive controller: owns the refresh schedule, the
-// herdr subscription, the view state (selected pane/row, help, notices) and
-// the key handling. It composes the pure modules and the two I/O modules; the
+// herdr subscription, the view state (selected pane/row, expanded groups, help,
+// notices) and the effects behind each key. Key semantics live in
+// lib/controller.mjs so the --render-once --keys test driver shares them; this
+// module supplies the I/O: herdr focus, the browser opener, snapshots. The
 // terminal is reached only through the adapter's screen contract.
 //
 // Cadence (scout report section 6.4): a full snapshot every --refresh seconds,
@@ -13,7 +15,10 @@ import { renderFrame } from './render.mjs';
 import { collectLedgers, discoverHomes, mtime, runBearingsPrs, runSnapshot } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { createScreen } from './tui-blessed.mjs';
-import { PANES } from './layout.mjs';
+import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
+import { focusProblem, handleKey, moveSelection } from './controller.mjs';
+
+export { moveSelection } from './controller.mjs';
 
 const SNAPSHOT_DEBOUNCE_MS = 10000;
 const PRS_INTERVAL_MS = 120000;
@@ -34,57 +39,6 @@ export function knownPaneIds(snapshot, ledgers) {
   return [...ids];
 }
 
-// Move the selection: pure on (model, view) so the list and pane modes share it.
-export function moveSelection(model, view, key) {
-  const v = { ...view };
-  const count = (i) => model.panes[i].rows.length;
-  const nextPane = (from, dir) => {
-    let i = from;
-    for (let n = 0; n < PANES.length; n += 1) {
-      i = (i + dir + PANES.length) % PANES.length;
-      if (count(i) > 0) return i;
-    }
-    return from;
-  };
-  switch (key) {
-    case 'j':
-    case 'down':
-      if (v.row + 1 < count(v.pane)) v.row += 1;
-      else if (nextPane(v.pane, 1) !== v.pane && nextPane(v.pane, 1) > v.pane) {
-        v.pane = nextPane(v.pane, 1);
-        v.row = 0;
-      }
-      break;
-    case 'k':
-    case 'up':
-      if (v.row > 0) v.row -= 1;
-      else if (nextPane(v.pane, -1) !== v.pane && nextPane(v.pane, -1) < v.pane) {
-        v.pane = nextPane(v.pane, -1);
-        v.row = Math.max(0, count(v.pane) - 1);
-      }
-      break;
-    case 'tab':
-      v.pane = nextPane(v.pane, 1);
-      v.row = 0;
-      break;
-    case 'S-tab':
-      v.pane = nextPane(v.pane, -1);
-      v.row = 0;
-      break;
-    case 'pagedown':
-      v.row = Math.max(0, Math.min(count(v.pane) - 1, v.row + 10));
-      break;
-    case 'pageup':
-      v.row = Math.max(0, v.row - 10);
-      break;
-    default:
-      break;
-  }
-  if (count(v.pane) === 0) v.row = 0;
-  else v.row = Math.min(v.row, count(v.pane) - 1);
-  return v;
-}
-
 export async function runApp(opts) {
   const state = {
     fmHome: opts.fmHome,
@@ -97,7 +51,7 @@ export async function runApp(opts) {
     lastPrsAt: 0,
     herdr: null,
     model: null,
-    view: { pane: 0, row: 0, scroll: [], help: false, notice: '', noticeBad: false, stale: false },
+    view: { pane: 0, row: 0, scroll: [], expanded: new Set(), help: false, notice: '', noticeBad: false, stale: false },
     refreshing: false,
     refreshPending: false,
     lastSnapshotStart: 0,
@@ -121,9 +75,14 @@ export async function runApp(opts) {
     mtime,
   });
 
+  const rebuild = () => {
+    state.model = buildModel(facts(), { expanded: state.view.expanded, allHomesNeeds: opts.allHomesNeeds });
+    return state.model;
+  };
+
   const draw = () => {
     if (!screen || quitting) return;
-    state.model = buildModel(facts());
+    rebuild();
     const v = moveSelection(state.model, state.view, null); // clamp only
     state.view.pane = v.pane;
     state.view.row = v.row;
@@ -193,31 +152,38 @@ export async function runApp(opts) {
     state.debounceTimer.unref?.();
   };
 
-  const focusSelected = async () => {
-    const pane = state.model && state.model.panes[state.view.pane];
-    const row = pane && pane.rows[state.view.row];
-    if (!row) return;
-    if (pane.id !== 'inflight' && pane.id !== 'needs') {
-      notice('enter focuses a worker: pick a row in In flight', true);
-      return;
-    }
-    if (!herdr) {
-      notice('herdr is off (--no-herdr); cannot focus', true);
-      return;
-    }
-    if (!row.paneId) {
-      notice(`${row.id}: no herdr pane to focus${row.extra === 'tmux' ? ' (tmux-backed task)' : ''}`, true);
-      return;
-    }
-    if (!row.focusable) {
-      notice(`${row.id}: pane lives in another host (${row.home})`, true);
+  const focusRow = async (row) => {
+    const pane = state.model.panes[state.view.pane];
+    const problem = focusProblem(pane, row, Boolean(herdr));
+    if (problem) {
+      notice(problem, true);
       return;
     }
     try {
       await herdr.focus(row.paneId);
-      notice(`focused ${row.paneId} (${row.id})`);
+      notice(`focused ${row.paneId} (${row.name})`);
     } catch (e) {
       notice(e.message.slice(0, 80), true);
+    }
+  };
+
+  // Open the row's PR in the browser. The URL travels as one argv element to
+  // `open` / `xdg-open` (or --opener-cmd); nothing is written anywhere.
+  const openRow = async (row) => {
+    if (!isOpenableUrl(row.url)) {
+      notice(`${row.name}: not an http(s) URL`, true);
+      return;
+    }
+    const cmd = opts.openerCmd || defaultOpenerCmd();
+    if (!cmd) {
+      notice(`no browser opener known for ${process.platform}; ${row.url}`, true, 15000);
+      return;
+    }
+    try {
+      await openUrl(row.url, { cmd });
+      notice(`opened ${row.url} (${row.name})`, false, 8000);
+    } catch (e) {
+      notice(`open failed: ${e.message.slice(0, 60)} · ${row.url}`, true, 15000);
     }
   };
 
@@ -229,30 +195,27 @@ export async function runApp(opts) {
     process.exit(0);
   };
 
+  const ctx = {
+    view: state.view,
+    get model() {
+      return state.model || rebuild();
+    },
+    rebuild,
+    notice: (text, bad) => notice(text, bad),
+    open: (row) => {
+      openRow(row);
+    },
+    focus: (row) => {
+      focusRow(row);
+    },
+    refresh: () => {
+      refresh('manual');
+    },
+    quit,
+  };
+
   const onKey = (key) => {
-    if (state.view.help) {
-      if (key === '?' || key === 'escape' || key === 'q' || key === 'enter') state.view.help = false;
-      if (key === 'ctrl-c') quit();
-      draw();
-      return;
-    }
-    switch (key) {
-      case 'q':
-      case 'ctrl-c':
-        quit();
-        return;
-      case '?':
-        state.view.help = true;
-        break;
-      case 'enter':
-        focusSelected();
-        return;
-      case 'r':
-        refresh('manual');
-        return;
-      default:
-        state.view = moveSelection(state.model || buildModel(facts()), state.view, key);
-    }
+    handleKey(ctx, key);
     draw();
   };
 

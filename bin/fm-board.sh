@@ -9,11 +9,13 @@
 #                                      hidden workspace); prints the pane id
 #   fm-board.sh focus [flags]          focus the pane recorded by `open`
 #   fm-board.sh --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
+#                             [--keys <list>] [--expand <all|ids>] [--opener-cmd <argv>]
 #                                      print one frame to stdout and exit
 #
 # Flags are passed through to bin/fm-board/index.mjs unchanged; see
 # `fm-board.sh --help` for the list (--home, --refresh, --prs, --no-herdr,
-# --herdr-cmd, --herdr-socket, --snapshot-timeout).
+# --all-homes-needs, --opener-cmd, --herdr-cmd, --herdr-socket,
+# --snapshot-timeout, --keys, --expand).
 #
 # FM_HOME resolution: the FM_HOME environment variable, else the one-line file
 # "$HERDR_PLUGIN_CONFIG_DIR/fm-home" (written once by the captain when the
@@ -23,7 +25,8 @@
 # The board never writes into FM_HOME, a project or a state directory. Its only
 # file is the pane record under ${XDG_STATE_HOME:-$HOME/.local/state}/fm-board/
 # (or $HERDR_PLUGIN_STATE_DIR when herdr provides one) so `focus` can find the
-# pane `open` created.
+# pane `open` created. Its two actions are `herdr agent focus` and opening a
+# PR URL in the browser (`open` / `xdg-open`, or --opener-cmd).
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -58,7 +61,7 @@ while [ "$#" -gt 0 ]; do
     --render-once) render_once=1; pass+=("$1") ;;
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
-    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home)
+    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--expand|--opener-cmd)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
   esac

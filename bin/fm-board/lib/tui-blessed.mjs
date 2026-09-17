@@ -5,7 +5,8 @@
 //   screen.size()        -> { cols, rows }
 //   screen.draw(lines)   -> paint one rendered frame (segments from render.mjs)
 //   screen.destroy()     -> restore the terminal
-// Keys are normalized to short names: j k up down tab S-tab enter r ? q escape ctrl-c.
+// Keys are normalized to short names: j k h l o up down left right tab S-tab
+// enter r ? q escape ctrl-c.
 
 const STYLE_TAGS = {
   title: ['{bold}{black-fg}{white-bg}', '{/white-bg}{/black-fg}{/bold}'],
@@ -18,6 +19,7 @@ const STYLE_TAGS = {
   dim: ['{blue-fg}', '{/blue-fg}'],
   notice: ['{yellow-fg}', '{/yellow-fg}'],
   help: ['{yellow-fg}', '{/yellow-fg}'],
+  flag: ['{yellow-fg}', '{/yellow-fg}'],
   row: ['', ''],
 };
 
@@ -43,7 +45,7 @@ export function normalizeKey(ch, key) {
   if (key && key.ctrl && name === 'c') return 'ctrl-c';
   if (name === 'tab') return key.shift ? 'S-tab' : 'tab';
   if (name === 'enter' || name === 'return') return 'enter';
-  if (name === 'up' || name === 'down' || name === 'escape' || name === 'pageup' || name === 'pagedown') return name;
+  if (name === 'up' || name === 'down' || name === 'left' || name === 'right' || name === 'escape' || name === 'pageup' || name === 'pagedown') return name;
   if (name === 'backtab') return 'S-tab';
   if (ch && ch.length === 1 && ch >= ' ') return ch;
   return name || null;

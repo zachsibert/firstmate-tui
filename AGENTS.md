@@ -17,8 +17,14 @@ the findings watermark belong to later milestones.
 - The board reads firstmate homes and never writes into `FM_HOME`, a project
   or a `state/` directory. Its only file is the pane record under
   `${XDG_STATE_HOME:-~/.local/state}/fm-board/` (or `HERDR_PLUGIN_STATE_DIR`).
-- The board owns no authority. Its one action is `herdr agent focus`.
-  Answers, merges and dispatch stay with firstmate's own owners.
+- The board owns no authority. Its actions are `herdr agent focus` and
+  opening a PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open`
+  / `xdg-open` / `--opener-cmd`, never a shell string, http(s) only). Answers,
+  merges and dispatch stay with firstmate's own owners.
+- In flight groups secondmate work by home, not by delegated item, because
+  the ledger carries no per-child parent field (the comment above
+  `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it
+  before changing the grouping.
 - `FM_HOME` is explicit, never inferred from the current directory.
 - yimbot (github.com/YiminArava4508/yimbot) ships no license: it is a pattern
   reference only. Do not copy code from it.
@@ -33,7 +39,9 @@ the findings watermark belong to later milestones.
   that file.
 - Run `tests/fm-board.test.sh` after any change; it needs Node and nothing
   else. Add a fixture under `tests/fixtures/` when a new data shape appears,
-  and name in the test comment what would make the check fail.
+  and name in the test comment what would make the check fail. Key behavior
+  is tested through `--render-once --keys <list>` (and `--expand`); a PR open
+  must go to `--opener-cmd bash tests/fake-opener.sh`, never a real browser.
 - Bash (`bin/fm-board.sh`, `tests/*.sh`) must pass ShellCheck 0.11.0, the
   same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh tests/fm-board.test.sh`
   when no local binary is installed).

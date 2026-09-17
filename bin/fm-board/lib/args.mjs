@@ -14,9 +14,19 @@ options:
   --prs                  also run fm-bearings-snapshot.sh --include-prs (about 8 s,
                          live GitHub) so Ready for review shows checks and review state
   --no-herdr             skip the herdr overlay and the socket subscription
+  --all-homes-needs      Needs you also lists every secondmate home's open decisions
+                         (default: main home only; secondmate decisions flag their
+                         In flight group instead)
+  --opener-cmd <argv>    command that opens a URL in the browser (default: open on
+                         macOS, xdg-open on Linux); quoted string, split on whitespace
   --render-once          print one frame to stdout and exit (test mode)
   --fixture <json>       with --render-once: render this facts file instead of live reads
   --cols N / --rows N    frame size for --render-once (default: terminal, else 120x40)
+  --keys <list>          with --render-once: press these keys first (comma or space
+                         separated, e.g. "tab,j,enter"); a PR open runs --opener-cmd
+                         when given and is only reported in the footer otherwise
+  --expand <all|ids>     with --render-once: expand these In flight groups (secondmate
+                         ids, or all) before rendering
   --herdr-cmd <argv>     command prefix for herdr calls (default: $HERDR_BIN_PATH or herdr);
                          quoted string, split on whitespace
   --herdr-socket <path>  herdr control socket (default: HERDR_SOCKET_PATH or herdr status)
@@ -38,6 +48,10 @@ export function parseArgs(argv, env = {}) {
     herdrCmd: null,
     herdrSocket: null,
     snapshotTimeout: 60,
+    allHomesNeeds: false,
+    openerCmd: null,
+    keys: [],
+    expand: [],
     help: false,
   };
   const args = [...argv];
@@ -91,6 +105,18 @@ export function parseArgs(argv, env = {}) {
         break;
       case '--snapshot-timeout':
         opts.snapshotTimeout = num(a, need(a), 1);
+        break;
+      case '--all-homes-needs':
+        opts.allHomesNeeds = true;
+        break;
+      case '--opener-cmd':
+        opts.openerCmd = need(a).split(/\s+/).filter(Boolean);
+        break;
+      case '--keys':
+        opts.keys.push(...need(a).split(/[\s,]+/).filter(Boolean));
+        break;
+      case '--expand':
+        opts.expand.push(...need(a).split(/[\s,]+/).filter(Boolean));
         break;
       case '-h':
       case '--help':

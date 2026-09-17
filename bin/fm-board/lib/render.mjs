@@ -14,13 +14,19 @@ export const HELP_LINES = [
   '',
   '  j / down     next row            k / up       previous row',
   '  tab          next pane           shift-tab    previous pane',
-  '  enter        focus the herdr pane of the selected worker (In flight only)',
+  '  enter        Ready for review or a Needs-you PR row: open the PR in the browser',
+  '               In flight group row: expand or collapse it',
+  '               In flight worker or Needs-you worker: focus its herdr pane',
+  '  o            open the PR of the selected row in the browser (any pane)',
+  '  l / right    expand the selected In flight group',
+  '  h / left     collapse the group (from the group row or one of its children)',
   '  r            refresh the snapshot now',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
   'The board is read-only: it never answers, merges or dispatches.',
+  'In flight shows one group row per secondmate home (! = a child decision or',
+  'blocker inside it); Needs you lists the main home only (--all-homes-needs).',
   'Every pane header shows the snapshot age and the herdr connection state.',
-  'Rows from another home carry the home name; remote or cached homes say so.',
 ];
 
 function seg(text, style = 'row') {
@@ -50,7 +56,8 @@ function rowSegments(row, spec, selected) {
     if (i < spec.length - 1) parts.push(' ');
   });
   const text = parts.join('');
-  const style = selected ? 'selected' : row.tag === 'blocked' || row.tag === 'failed' || row.tag === 'failing' ? 'bad' : 'row';
+  const bad = row.tag === 'blocked' || row.tag === 'failed' || row.tag === 'failing';
+  const style = selected ? 'selected' : bad ? 'bad' : row.flag ? 'flag' : 'row';
   return [seg(text, style)];
 }
 
@@ -73,8 +80,11 @@ function titleLine(model, cols, view) {
   return line([seg(padRight(text, cols), view.stale ? 'bad' : 'title')], cols);
 }
 
+const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus  o open PR  l/h expand  r refresh  ? help  q quit';
+const FOOTER_KEYS_SHORT = ' j/k move  tab pane  enter  o open  l/h expand  r  ? help  q quit';
+
 function footerLine(model, cols, view) {
-  const keys = ' j/k move  tab pane  enter focus  r refresh  ? help  q quit';
+  const keys = cols >= width(FOOTER_KEYS) + 24 ? FOOTER_KEYS : FOOTER_KEYS_SHORT;
   const notice = view.notice ? ` ${view.notice} ` : '';
   const gap = cols - width(keys) - width(notice);
   const text = gap >= 0 ? `${keys}${' '.repeat(gap)}${notice}` : truncate(`${keys} ${notice}`, cols);
@@ -182,7 +192,7 @@ function overlayHelp(lines, cols) {
   const left = Math.max(0, Math.floor((cols - boxW) / 2));
   const box = [];
   box.push(`┌${H.repeat(boxW - 2)}┐`);
-  for (const h of HELP_LINES) box.push(`${V}${fit(` ${h}`, boxW - 2)}${V}`);
+  for (const h of HELP_LINES) box.push(`${V}${fitRaw(` ${h}`, boxW - 2)}${V}`); // fitRaw keeps the key/description columns aligned
   box.push(`└${H.repeat(boxW - 2)}┘`);
   box.forEach((text, i) => {
     const target = top + i;
@@ -195,7 +205,8 @@ function overlayHelp(lines, cols) {
   return lines;
 }
 
-// view: { pane, row, scroll[], help, notice, noticeBad, stale }
+// view: { pane, row, scroll[], help, notice, noticeBad, stale } (the app's view
+// also carries `expanded`, which only buildModel reads)
 // Returns { lines, cols, rows, mode, scroll } where scroll holds the start
 // offsets actually used so the app can keep them for the next frame.
 export function renderFrame(model, size, view = {}) {

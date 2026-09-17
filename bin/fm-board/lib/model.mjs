@@ -14,10 +14,17 @@
 //                 fm-bearings-snapshot.sh --json --include-prs (only with --prs)
 //   mtime(path)   epoch seconds of a file's last write, or null
 //
+// Options (second argument of buildModel):
+//   expanded      Set of In flight group keys currently expanded
+//   allHomesNeeds also list every secondmate ledger's open decisions in Needs
+//                 you (the --all-homes-needs flag); default off, main home only
+//
 // Output: { panes: [ { id, title, empty, header, rows[] } x5 ], meta }.
 // Every row carries tag, extra, id, text, repo, home, age (display fields) plus
-// ageSeconds, paneId (herdr pane id when the row has one) and focusable.
-// The mapping follows the scout report's section 1 table row for row.
+// name (the undecorated id for notices), ageSeconds, paneId (herdr pane id when
+// the row has one), focusable, url (a PR URL the row can open, or null) and,
+// for In flight grouping, group / expanded / flag on a group row and parent on
+// its children. The mapping follows the scout report's section 1 table.
 
 import { PANES } from './layout.mjs';
 import { basename, clean, fmtAge, parseTime, relativeTo, repoFromUrl } from './text.mjs';
@@ -88,10 +95,17 @@ function makeRow(fields) {
     ageSeconds: null,
     paneId: null,
     focusable: false,
+    url: null,
+    group: null,
+    parent: null,
+    expanded: false,
+    flag: false,
     ...fields,
   };
+  row.name = fields.name ?? row.id;
   row.age = fmtAge(row.ageSeconds);
   row.repo = row.repo || '-';
+  row.url = row.url && /^https?:\/\//.test(row.url) ? row.url : null;
   return row;
 }
 
@@ -113,7 +127,11 @@ function childStatusAge(facts, ledger, id) {
 }
 
 // ---------------------------------------------------------------- Needs you
-function needsRows(facts) {
+// Main home only by default: the captain reads this pane for what the main
+// firstmate needs from him. A secondmate's open decisions flag its In flight
+// group instead (and list under it when expanded); --all-homes-needs restores
+// them here.
+function needsRows(facts, opts) {
   const rows = [];
   const snap = facts.snapshot || {};
   const tasks = Array.isArray(snap.tasks) ? snap.tasks : [];
@@ -169,6 +187,7 @@ function needsRows(facts) {
           ageSeconds: statusLogAge(facts, task),
           paneId: herdr.paneId,
           focusable: Boolean(herdr.paneId),
+          url: task.pr.url,
         }),
       );
     }
@@ -190,24 +209,9 @@ function needsRows(facts) {
     }
   }
 
-  for (const ledger of facts.ledgers || []) {
-    const summary = ledger.summary || {};
-    const queued = Array.isArray(summary.queued) ? summary.queued : [];
-    const queuedById = new Map(queued.map((q) => [q.id, q]));
-    for (const d of Array.isArray(summary.decisions_open) ? summary.decisions_open : []) {
-      if (d.hold_bucket && d.hold_bucket !== 'live') continue;
-      const q = queuedById.get(d.id);
-      rows.push(
-        makeRow({
-          tag: decisionTag(d.verb),
-          extra: d.key && d.key !== d.id ? d.key : '-',
-          id: d.id,
-          text: d.reason && d.reason !== d.summary ? `${d.summary} · ${d.reason}` : d.summary,
-          repo: q ? q.repo : '-',
-          home: homeLabel(ledger),
-          ageSeconds: daysToSeconds(d.hold_age_days),
-        }),
-      );
+  if (opts.allHomesNeeds) {
+    for (const ledger of facts.ledgers || []) {
+      for (const d of liveDecisions(ledger)) rows.push(decisionRow(ledger, d));
     }
   }
 
@@ -264,6 +268,7 @@ function reviewRows(facts) {
           id: taskId === '-' ? `${basename(c.repo)}#${c.num}` : taskId,
           text: parts.join(' · '),
           repo: c.repo,
+          url: c.url,
         }),
       );
     }
@@ -278,6 +283,7 @@ function reviewRows(facts) {
         id: r.task,
         text: `${r.url} · checks: not fetched`,
         repo: pr ? pr.repo : '-',
+        url: r.url,
       }),
     );
   }
@@ -289,74 +295,224 @@ function reviewRows(facts) {
 }
 
 // ---------------------------------------------------------------- In flight
-function inflightRows(facts) {
+//
+// One row per main-home worker, and one GROUP row per secondmate home.
+//
+// The captain asked for one row per initiative the main firstmate delegated,
+// not one row per secondmate worker. What the ledger
+// (fm-secondmate-home-summary.v1, produced by fm-fleet-snapshot.sh
+// --secondmate-home-summary) carries per child is:
+//   active_children[] {id, kind, state, repo, source, doing}   working only
+//   endpoints[]       {id, state, source, endpoint.target}     every task record
+//   holds[]           {id, title, reason, source}              held queued items
+//                     and in-flight children that are parked, paused or blocked
+//   decisions_open[]  {id, key, verb, summary, reason, hold_bucket, ...}
+//   queued[]          {id, title, repo, kind, hold_*}
+// The handoff that delegates an item (fm-backlog-handoff.sh -> tasks-axi mv)
+// moves the backlog block byte-exact and writes no origin marker; a child's
+// task id IS the mate's backlog item id, and nothing in the ledger, the fleet
+// snapshot or state/<id>.meta names a parent item above it. A child can thus be
+// tied to its own item (holds/decisions_open/queued by id, used below for the
+// child's title, decision text or hold reason) but not to a coarser
+// initiative, and item-level grouping would reproduce one row per worker.
+// FALLBACK IN EFFECT: group by home. The group row shows the worst child state,
+// the live worker count, the child ids, the shared repo and the newest child
+// event; expanding it lists the mate's own agent row, every child and the
+// home's live captain decisions. When the ledger grows a per-child parent
+// field, make groupKeyFor() read it and the rest of this builder stands.
+
+// Worst-state ranking for a group row: blocked > decision > working > failed >
+// everything else (idle, unknown, done, parked). A failed child is the mate's
+// own cleanup, so it does not outrank live work; it shows on expansion.
+const STATE_RANK = { blocked: 0, failed: 3, decide: 1, 'needs-decision': 1, hold: 1, working: 2 };
+const INFLIGHT_ORDER = { working: 0, blocked: 1, decide: 1, 'needs-decision': 1, hold: 1, unknown: 2, done: 3, failed: 4 };
+const FLAG_TAGS = new Set(['blocked', 'decide', 'needs-decision', 'hold']);
+const TERMINAL_TAGS = new Set(['done', 'failed']);
+
+function stateRank(tag) {
+  return STATE_RANK[tag] ?? 4;
+}
+
+function sortInflight(entries) {
+  return entries
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => (INFLIGHT_ORDER[a.e.row.tag] ?? 2) - (INFLIGHT_ORDER[b.e.row.tag] ?? 2) || a.i - b.i)
+    .map((x) => x.e);
+}
+
+function groupKeyFor(ledger) {
+  return `home:${ledger.home}`;
+}
+
+function kindPrefix(kind) {
+  return kind && kind !== 'ship' && kind !== 'task' ? `(${kind}) ` : '';
+}
+
+function liveDecisions(ledger) {
+  const summary = ledger.summary || {};
+  const list = Array.isArray(summary.decisions_open) ? summary.decisions_open : [];
+  return list.filter((d) => d && d.id && (!d.hold_bucket || d.hold_bucket === 'live'));
+}
+
+function decisionRow(ledger, d, extraFields = {}) {
+  const summary = ledger.summary || {};
+  const queued = Array.isArray(summary.queued) ? summary.queued : [];
+  const q = queued.find((x) => x.id === d.id);
+  return makeRow({
+    tag: decisionTag(d.verb),
+    extra: d.key && d.key !== d.id ? d.key : '-',
+    id: d.id,
+    text: d.reason && d.reason !== d.summary ? `${d.summary} · ${d.reason}` : d.summary,
+    repo: q ? q.repo : '-',
+    home: homeLabel(ledger),
+    ageSeconds: daysToSeconds(d.hold_age_days),
+    ...extraFields,
+  });
+}
+
+function mainTaskRow(facts, task) {
+  const cs = task.current_state || {};
+  const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
+  const doing = cs.detail || (task.hints && task.hints.last_event_text) || (task.paths && task.paths.status_log && task.paths.status_log.last_event && task.paths.status_log.last_event.note) || '';
+  return makeRow({
+    tag: cs.state || 'unknown',
+    extra: herdr.extra,
+    id: task.id,
+    text: `${kindPrefix(task.kind)}${doing}`,
+    repo: taskRepo(task),
+    ageSeconds: statusLogAge(facts, task),
+    paneId: herdr.paneId,
+    focusable: Boolean(herdr.paneId),
+    url: task.pr && task.pr.url ? task.pr.url : null,
+  });
+}
+
+// Child worker rows of one secondmate ledger, in ledger order. A child keyed by
+// an open decision shows the decision text; a held child shows its hold title
+// and reason; otherwise its `doing`.
+function ledgerChildRows(facts, ledger, decisionByChild) {
+  const summary = ledger.summary || {};
+  const endpoints = Array.isArray(summary.endpoints) ? summary.endpoints : [];
+  const endpointById = new Map(endpoints.map((e) => [e.id, e]));
+  const holdsById = new Map((Array.isArray(summary.holds) ? summary.holds : []).map((h) => [h.id, h]));
+  const heldText = (h) => (h.reason && h.reason !== h.title ? `${h.title} · ${h.reason}` : h.title);
+  const decisionText = (d) => (d.reason && d.reason !== d.summary ? `${d.summary} · ${d.reason}` : d.summary);
   const rows = [];
-  const snap = facts.snapshot || {};
-  for (const task of Array.isArray(snap.tasks) ? snap.tasks : []) {
-    const cs = task.current_state || {};
-    const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
-    const doing = cs.detail || (task.hints && task.hints.last_event_text) || (task.paths && task.paths.status_log && task.paths.status_log.last_event && task.paths.status_log.last_event.note) || '';
-    const kind = task.kind && task.kind !== 'ship' && task.kind !== 'task' ? `(${task.kind}) ` : '';
+  const covered = new Set();
+  for (const child of Array.isArray(summary.active_children) ? summary.active_children : []) {
+    covered.add(child.id);
+    const ep = endpointById.get(child.id);
+    const herdr = herdrColumn(facts, ep && ep.endpoint ? ep.endpoint.target : null);
+    const d = decisionByChild.get(child.id);
+    const h = holdsById.get(child.id);
     rows.push(
       makeRow({
-        tag: cs.state || 'unknown',
+        tag: d ? decisionTag(d.verb) : child.state || 'working',
         extra: herdr.extra,
-        id: task.id,
-        text: `${kind}${doing}`,
-        repo: taskRepo(task),
-        ageSeconds: statusLogAge(facts, task),
+        id: child.id,
+        text: d ? decisionText(d) : h && h.title ? heldText(h) : `${kindPrefix(child.kind)}${child.doing || child.name || ''}`,
+        repo: child.repo,
+        home: homeLabel(ledger),
+        ageSeconds: childStatusAge(facts, ledger, child.id),
         paneId: herdr.paneId,
-        focusable: Boolean(herdr.paneId),
+        focusable: Boolean(herdr.paneId) && !ledger.remote,
       }),
     );
   }
-  for (const ledger of facts.ledgers || []) {
-    const summary = ledger.summary || {};
-    const endpoints = Array.isArray(summary.endpoints) ? summary.endpoints : [];
-    const endpointById = new Map(endpoints.map((e) => [e.id, e]));
-    const covered = new Set();
-    for (const child of Array.isArray(summary.active_children) ? summary.active_children : []) {
-      covered.add(child.id);
-      const ep = endpointById.get(child.id);
-      const herdr = herdrColumn(facts, ep && ep.endpoint ? ep.endpoint.target : null);
-      const kind = child.kind && child.kind !== 'ship' && child.kind !== 'task' ? `(${child.kind}) ` : '';
-      rows.push(
-        makeRow({
-          tag: child.state || 'working',
-          extra: herdr.extra,
-          id: child.id,
-          text: `${kind}${child.doing || child.name || ''}`,
-          repo: child.repo,
-          home: homeLabel(ledger),
-          ageSeconds: childStatusAge(facts, ledger, child.id),
-          paneId: herdr.paneId,
-          focusable: Boolean(herdr.paneId) && !ledger.remote,
-        }),
-      );
-    }
-    for (const ep of endpoints) {
-      if (covered.has(ep.id)) continue;
-      const herdr = herdrColumn(facts, ep.endpoint ? ep.endpoint.target : null);
-      rows.push(
-        makeRow({
-          tag: ep.state || 'unknown',
-          extra: herdr.extra,
-          id: ep.id,
-          text: `endpoint ${ep.endpoint && ep.endpoint.target ? ep.endpoint.target : '?'} (${ep.source || 'pane'})`,
-          repo: '-',
-          home: homeLabel(ledger),
-          ageSeconds: childStatusAge(facts, ledger, ep.id),
-          paneId: herdr.paneId,
-          focusable: Boolean(herdr.paneId) && !ledger.remote,
-        }),
-      );
-    }
+  for (const ep of endpoints) {
+    if (covered.has(ep.id)) continue;
+    const herdr = herdrColumn(facts, ep.endpoint ? ep.endpoint.target : null);
+    const d = decisionByChild.get(ep.id);
+    const h = holdsById.get(ep.id);
+    rows.push(
+      makeRow({
+        tag: d ? decisionTag(d.verb) : ep.state || 'unknown',
+        extra: herdr.extra,
+        id: ep.id,
+        text: d ? decisionText(d) : h && h.title ? heldText(h) : `endpoint ${ep.endpoint && ep.endpoint.target ? ep.endpoint.target : '?'} (${ep.source || 'pane'})`,
+        repo: '-',
+        home: homeLabel(ledger),
+        ageSeconds: childStatusAge(facts, ledger, ep.id),
+        paneId: herdr.paneId,
+        focusable: Boolean(herdr.paneId) && !ledger.remote,
+      }),
+    );
   }
-  const order = { working: 0, blocked: 1, 'needs-decision': 1, unknown: 2, done: 3, failed: 4 };
-  return rows
-    .map((r, i) => ({ r, i }))
-    .sort((a, b) => (order[a.r.tag] ?? 2) - (order[b.r.tag] ?? 2) || a.i - b.i)
-    .map((x) => x.r);
+  return rows;
+}
+
+function childMarker(row) {
+  return { ...row, id: `↳ ${row.id}`, name: row.name, parent: row.parent };
+}
+
+// One group per secondmate home: { row, children } where children is the list
+// of rows shown under it when expanded (the mate's own agent row from the main
+// snapshot first, then workers by state, then the home's live decisions).
+function ledgerGroup(facts, ledger, mateTask, expanded) {
+  const key = groupKeyFor(ledger);
+  const decisions = liveDecisions(ledger);
+  const summary = ledger.summary || {};
+  const childIds = new Set([
+    ...(Array.isArray(summary.active_children) ? summary.active_children : []).map((c) => c.id),
+    ...(Array.isArray(summary.endpoints) ? summary.endpoints : []).map((e) => e.id),
+  ]);
+  const decisionByChild = new Map(decisions.filter((d) => childIds.has(d.id)).map((d) => [d.id, d]));
+  const homeDecisions = decisions.filter((d) => !childIds.has(d.id));
+  const workers = sortInflight(ledgerChildRows(facts, ledger, decisionByChild).map((row) => ({ row }))).map((e) => e.row);
+  const mateRow = mateTask ? mainTaskRow(facts, mateTask) : null;
+  const ranked = [...(mateRow ? [mateRow] : []), ...workers];
+  const worst = ranked.reduce((w, r) => (w === null || stateRank(r.tag) < stateRank(w.tag) ? r : w), null);
+  const live = workers.filter((r) => !TERMINAL_TAGS.has(r.tag)).length;
+  const flag = homeDecisions.length > 0 || workers.some((r) => FLAG_TAGS.has(r.tag));
+  const ages = workers.map((r) => r.ageSeconds).filter((a) => a !== null && a !== undefined);
+  const repos = [...new Set(workers.map((r) => r.repo).filter((r) => r && r !== '-'))];
+  const groupRow = makeRow({
+    tag: worst ? worst.tag : 'idle',
+    extra: `${live} live`,
+    id: `${flag ? '!' : ''}${expanded ? '▾' : '▸'} ${ledger.id || basename(ledger.home)}`,
+    name: ledger.id || basename(ledger.home),
+    text: workers.length ? workers.map((r) => r.name).join(', ') : mateRow ? mateRow.text : 'no workers',
+    repo: repos.length === 1 ? repos[0] : repos.length > 1 ? `${repos.length} repos` : '-',
+    home: homeLabel(ledger),
+    ageSeconds: ages.length ? Math.min(...ages) : mateRow ? mateRow.ageSeconds : null,
+    paneId: mateRow ? mateRow.paneId : null,
+    focusable: false,
+    group: key,
+    homeId: ledger.id || basename(ledger.home),
+    expanded,
+    flag,
+  });
+  const children = expanded
+    ? [...(mateRow ? [mateRow] : []), ...workers, ...homeDecisions.map((d) => decisionRow(ledger, d))].map((r) => childMarker({ ...r, parent: key }))
+    : [];
+  return { row: groupRow, children };
+}
+
+// The main-snapshot task that is this ledger's secondmate agent, if any: same
+// id, or a project path equal to the mate's home.
+function mateTaskFor(tasks, ledger) {
+  return tasks.find((t) => t.kind === 'secondmate' && (t.id === ledger.id || String(t.project || '').replace(/\/+$/, '') === ledger.home)) || null;
+}
+
+function inflightRows(facts, opts) {
+  const snap = facts.snapshot || {};
+  const tasks = Array.isArray(snap.tasks) ? snap.tasks : [];
+  const expanded = opts.expanded || new Set();
+  const folded = new Set();
+  const entries = [];
+  for (const ledger of facts.ledgers || []) {
+    const mate = mateTaskFor(tasks, ledger);
+    if (mate) folded.add(mate.id);
+    entries.push(ledgerGroup(facts, ledger, mate, expanded.has(groupKeyFor(ledger))));
+  }
+  const mainEntries = tasks.filter((t) => !folded.has(t.id)).map((t) => ({ row: mainTaskRow(facts, t), children: [] }));
+  const ordered = sortInflight([...mainEntries, ...entries]);
+  const rows = [];
+  for (const e of ordered) {
+    rows.push(e.row);
+    for (const c of e.children) rows.push(c);
+  }
+  return rows;
 }
 
 // ----------------------------------------------------------------- Findings
@@ -448,6 +604,7 @@ function landedRows(facts) {
         text: r.pr_url ? `${r.title} · ${r.pr_url}` : r.title,
         repo: r.repo,
         ageSeconds: ageSince(facts.now, parseTime(date)),
+        url: r.pr_url || null,
       }),
     );
   }
@@ -476,6 +633,7 @@ function landedRows(facts) {
         repo: pr ? pr.repo : '-',
         home: homeLabel(ledger),
         ageSeconds: ageSince(facts.now, parseTime(date)),
+        url: rec.pr_url || null,
       }),
     );
   }
@@ -521,7 +679,11 @@ function paneHeader(facts, pane, count) {
   return parts.join(' · ');
 }
 
-export function buildModel(facts) {
+export function buildModel(facts, options = {}) {
+  const opts = {
+    expanded: options.expanded instanceof Set ? options.expanded : new Set(Array.isArray(options.expanded) ? options.expanded : []),
+    allHomesNeeds: Boolean(options.allHomesNeeds),
+  };
   const f = {
     now: facts.now,
     fmHome: facts.fmHome || '',
@@ -535,7 +697,7 @@ export function buildModel(facts) {
   };
   const builders = { needs: needsRows, review: reviewRows, inflight: inflightRows, findings: findingsRows, landed: landedRows };
   const panes = PANES.map((p) => {
-    const rows = builders[p.id](f);
+    const rows = builders[p.id](f, opts);
     return { id: p.id, title: p.title, empty: p.empty, rows, header: paneHeader(f, p, rows.length) };
   });
   const homes = 1 + f.ledgers.length;
