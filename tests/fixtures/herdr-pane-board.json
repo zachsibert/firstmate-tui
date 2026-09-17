@@ -1,0 +1,8 @@
+{
+  "_comment": "herdr pane get for the board pane wZZ:p1: a tab pane in the captain's workspace w1 (plugin route), tab w1:t2.",
+  "id": "cli:pane:get",
+  "result": {
+    "type": "pane_info",
+    "pane": { "pane_id": "wZZ:p1", "workspace_id": "w1", "tab_id": "w1:t2", "cwd": "/fixture/firstmate-tui/bin/fm-board", "foreground_cwd": "/fixture/firstmate-tui/bin/fm-board", "terminal_title": "fm-board", "terminal_title_stripped": "fm-board" }
+  }
+}

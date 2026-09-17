@@ -1,0 +1,57 @@
+{
+  "_comment": "Narrow terminal (70x24): the five panes collapse into one scrolling list with section headers and no REPO or AGE column. Includes a locally cached home so the (cached) label is exercised.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 70,
+  "rows": 24,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "ship-alpha",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-alpha.status", "present": true } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets" }
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "ship-alpha", "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-15", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "decide-vendor", "state": "queued", "title": "Pick the vendor for the address API", "repo": "acme/api", "kind": "task", "hold_kind": "captain", "hold_reason": "Two quotes are in the report", "hold_until": null, "hold_set": "2026-09-13T12:00:00Z", "hold_bucket": "live", "hold_age_days": 3, "captain_actionable": true, "since": "2026-09-13", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "ship-old", "state": "done", "title": "Rename the widget table", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-10", "pr_url": "https://github.com/acme/widgets/pull/30", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-14" } }
+      ]
+    },
+    "scout_reports": [],
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "ledgers": [
+    {
+      "id": "notes",
+      "home": "/fixture/homes/notes",
+      "remote": false,
+      "cached": true,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789556400,
+        "active_children": [{ "id": "notes-child", "kind": "task", "state": "working", "repo": "acme/notes", "name": "Notes child", "source": "pane", "doing": "summarizing Monday" }],
+        "endpoints": [{ "id": "notes-child", "state": "working", "source": "pane", "endpoint": { "target": "default:w3A:p1", "exists": true } }],
+        "decisions_open": [],
+        "landed": [],
+        "queued": []
+      }
+    }
+  ],
+  "herdr": { "agents": [{ "pane_id": "w1A:p1", "agent_status": "working" }] },
+  "prs": null,
+  "mtimes": { "/fixture/firstmate/state/ship-alpha.status": 1789559700 }
+}

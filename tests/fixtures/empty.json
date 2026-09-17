@@ -1,0 +1,20 @@
+{
+  "_comment": "Every pane empty and no herdr block: each pane shows its empty message and the headers say herdr off.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 120,
+  "rows": 40,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [],
+    "backlog": { "records": [] },
+    "scout_reports": [],
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "herdr": null,
+  "prs": null,
+  "mtimes": {}
+}

@@ -1,0 +1,122 @@
+{
+  "_comment": "Lost panes and reports for M2. now is 2026-09-16T12:00:00Z = epoch 1789560000. Main worker ship-alpha has a live pane (w1A:p1, working, keyed decision); ship-lost's pane w1L:p1 is absent from the herdr block, so its Needs you and In flight rows are lost; hyperion's child-one is live and child-lost's pane w2L:p2 is absent. Findings: a main scout report and a hyperion landed report (a secondmate report resolved against /fixture/homes/hyperion). Landed: two main rows plus hyperion's report row.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 40,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "ship-alpha",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": {
+          "pending_decision": true,
+          "blocked_event": false,
+          "open_decisions": [{ "key": "db-choice", "verb": "needs-decision", "summary": "Postgres or SQLite for the cache?" }],
+          "scout_report_present": false,
+          "last_event_text": "needs-decision [key=db-choice]: Postgres or SQLite for the cache?"
+        },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-alpha.status", "present": true, "kind": "event_history", "last_event": { "state": "needs-decision", "note": "Postgres or SQLite for the cache?", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets" }
+      },
+      {
+        "id": "ship-lost",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "status-log", "detail": "adding the retry loop", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1L:p1", "exists": false, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": {
+          "pending_decision": true,
+          "blocked_event": false,
+          "open_decisions": [{ "key": "cache-size", "verb": "needs-decision", "summary": "Cache 1k or 10k entries?" }],
+          "scout_report_present": false,
+          "last_event_text": "needs-decision [key=cache-size]: Cache 1k or 10k entries?"
+        },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-lost.status", "present": true, "kind": "event_history", "last_event": { "state": "needs-decision", "note": "Cache 1k or 10k entries?", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "acme/api" }
+      },
+      {
+        "id": "hyperion",
+        "kind": "secondmate",
+        "project": "/fixture/homes/hyperion",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "supervising two children", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/hyperion.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "ship-alpha", "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-15", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "ship-lost", "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "acme/api", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-16", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "ship-old", "state": "done", "title": "Rename the widget table", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-10", "pr_url": "https://github.com/acme/widgets/pull/30", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-14" } },
+        { "id": "ship-older", "state": "done", "title": "Drop the legacy widget view", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-08", "pr_url": "https://github.com/acme/widgets/pull/28", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-10" } }
+      ]
+    },
+    "scout_reports": [{ "id": "scout-beta", "path": "/fixture/firstmate/data/scout-beta/report.md", "kind": "scout" }],
+    "secondmate_current": {
+      "records": [
+        {
+          "id": "hyperion",
+          "home": "/fixture/homes/hyperion",
+          "host": null,
+          "remote": false,
+          "registered": true,
+          "provenance": { "selected": "structured-home", "summary_source": "local-ledger", "summary_valid": true, "trust": "complete" },
+          "freshness": { "status": "fresh", "observed_at": "2026-09-16T11:58:00Z", "age_seconds": 120 },
+          "active_children": [
+            { "id": "child-one", "kind": "ship", "state": "working", "repo": "acme/etl", "name": "Child one", "source": "pane", "doing": "writing the loader" },
+            { "id": "child-lost", "kind": "ship", "state": "working", "repo": "acme/etl", "name": "Child lost", "source": "pane", "doing": "indexing the warehouse" }
+          ],
+          "endpoints": [
+            { "id": "child-one", "state": "working", "source": "pane", "endpoint": { "target": "default:w2A:p2", "exists": true } },
+            { "id": "child-lost", "state": "working", "source": "pane", "endpoint": { "target": "default:w2L:p2", "exists": false } }
+          ],
+          "decisions_open": [],
+          "landed": [{ "id": "etl-report", "title": "Scout: warehouse index options", "pr_url": null, "report_path": "data/etl-report/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-14" } }],
+          "queued": []
+        }
+      ]
+    },
+    "secondmate_landed": {
+      "records": [
+        { "id": "etl-report", "title": "Scout: warehouse index options", "pr_url": null, "report_path": "data/etl-report/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-14" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" }
+      ]
+    }
+  },
+  "herdr": {
+    "agents": [
+      { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-alpha" },
+      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "hyperion" },
+      { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "child-one" }
+    ]
+  },
+  "prs": null,
+  "mtimes": {
+    "/fixture/firstmate/state/ship-alpha.status": 1789559700,
+    "/fixture/firstmate/state/ship-lost.status": 1789559400,
+    "/fixture/homes/hyperion/state/child-one.status": 1789300800,
+    "/fixture/homes/hyperion/state/child-lost.status": 1789556400,
+    "/fixture/firstmate/data/scout-beta/report.md": 1789559400,
+    "/fixture/homes/hyperion/data/etl-report/report.md": 1789387200
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "_comment": "herdr agent list: the firstmate pane is already in the board's tab (w1:t2, see herdr-pane-board.json), so the toggle moves it back out.",
+  "id": "cli:agent:list",
+  "result": {
+    "type": "agent_list",
+    "agents": [
+      { "agent": "claude", "agent_status": "working", "cwd": "/fixture/firstmate/projects/widgets", "foreground_cwd": "/fixture/firstmate/projects/widgets", "pane_id": "w1A:p1", "tab_id": "w1:t1", "terminal_title": "◐ ship-alpha", "terminal_title_stripped": "ship-alpha", "workspace_id": "w1" },
+      { "agent": "claude", "agent_status": "idle", "cwd": "/fixture/firstmate", "foreground_cwd": "/fixture/firstmate", "pane_id": "w9F:p1", "tab_id": "w1:t2", "terminal_title": "✳ First mate", "terminal_title_stripped": "First mate", "workspace_id": "w1" }
+    ]
+  }
+}

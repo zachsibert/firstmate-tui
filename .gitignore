@@ -1,0 +1,3 @@
+node_modules/
+# firstmate crewmate hook file for the worktree session; never part of the project
+.claude/settings.local.json
