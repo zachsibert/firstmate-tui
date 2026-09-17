@@ -17,24 +17,33 @@ export const HELP_LINES = [
   '  enter        Ready for review or a Needs-you PR row: open the PR in the browser',
   '               In flight group row: expand or collapse it',
   '               In flight worker or Needs-you worker: focus its herdr pane',
+  '               Findings row: open the report in the viewer (glow, $EDITOR, vim, less)',
   '  o            open the PR of the selected row in the browser (any pane)',
   '  l / right    expand the selected In flight group',
   '  h / left     collapse the group (from the group row or one of its children)',
+  '  x            hide the selected row from view (x on a shown hidden row unhides it)',
+  '  X            unhide every row in the current pane',
+  '  H            toggle showing hidden rows, greyed and marked (hidden)',
+  '  1 - 5        show or hide a pane: 1 Needs you  2 Ready for review  3 In flight',
+  '               4 Findings  5 Landed            0            show every pane',
+  '  f            put the firstmate pane beside the board, or move it back out',
   '  r            refresh the snapshot now',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
-  'The board is read-only: it never answers, merges or dispatches.',
-  'In flight shows one group row per secondmate home (! = a child decision or',
-  'blocker inside it); Needs you lists the main home only (--all-homes-needs).',
-  'Every pane header shows the snapshot age and the herdr connection state.',
+  'The board is read-only: it never answers, merges or dispatches. Hidden rows and',
+  'panes are view state in the board\'s own file, never in a firstmate home.',
+  'HERDR "pane lost" (red): the worker pane is gone from herdr. "unknown" (grey):',
+  'herdr is disconnected, so absence cannot be proved.',
 ];
 
 function seg(text, style = 'row') {
   return { text, style };
 }
 
-function line(segments, cols) {
-  // Pad or clip the segments to exactly cols columns.
+// Pad or clip a list of segments to exactly `cols` columns; the padding takes
+// `padStyle` (the row's base style, so a selected row stays inverse to the
+// border).
+function fitSegments(segments, cols, padStyle = 'row') {
   const out = [];
   let used = 0;
   for (const s of segments) {
@@ -44,21 +53,36 @@ function line(segments, cols) {
     out.push(seg(t, s.style));
     used += width(t);
   }
-  if (used < cols) out.push(seg(' '.repeat(cols - used), 'row'));
+  if (used < cols) out.push(seg(' '.repeat(cols - used), padStyle));
   return out;
 }
 
-function rowSegments(row, spec, selected) {
-  const parts = [];
+function line(segments, cols) {
+  return fitSegments(segments, cols, 'row');
+}
+
+// One segment per cell so a single cell can carry its own color. Styles are
+// space-separated tag names (lib/tui-blessed.mjs composes them):
+//   whole row   selected > grey (a hidden row shown by H) > bad (blocked,
+//               failed, failing, or a lost pane in a pane without a HERDR
+//               column) > flag > row
+//   HERDR cell  "pane lost" adds `lost` (red); "unknown" adds `grey`
+function rowSegments(row, spec, selected, paneId = null) {
+  const herdrCell = paneId === 'inflight' && spec.some((c) => c.key === 'extra');
+  const bad = row.tag === 'blocked' || row.tag === 'failed' || row.tag === 'failing' || (row.lost && !herdrCell);
+  const base = selected ? 'selected' : row.hidden ? 'grey' : bad ? 'bad' : row.flag ? 'flag' : 'row';
+  const out = [];
   spec.forEach((c, i) => {
     const value = row[c.key] ?? '';
-    parts.push(fit(value, c.width, c.align));
-    if (i < spec.length - 1) parts.push(' ');
+    let style = base;
+    if (c.key === 'extra' && herdrCell && !row.hidden) {
+      if (row.lost) style = `${base} lost`;
+      else if (row.unknown) style = `${base} grey`;
+    }
+    out.push(seg(fit(value, c.width, c.align), style));
+    if (i < spec.length - 1) out.push(seg(' ', base));
   });
-  const text = parts.join('');
-  const bad = row.tag === 'blocked' || row.tag === 'failed' || row.tag === 'failing';
-  const style = selected ? 'selected' : bad ? 'bad' : row.flag ? 'flag' : 'row';
-  return [seg(text, style)];
+  return out;
 }
 
 function headSegments(spec) {
@@ -73,22 +97,33 @@ function headSegments(spec) {
 function titleLine(model, cols, view) {
   const m = model.meta;
   const home = cols >= 100 ? m.fmHome : m.fmHome.split('/').filter(Boolean).slice(-1)[0] || m.fmHome;
-  const left = ` fm-board · ${home} · ${m.homes} home${m.homes === 1 ? '' : 's'}`;
+  const hiddenPanes = m.hiddenPanes && m.hiddenPanes.length ? ` · panes hidden: ${m.hiddenPanes.join(',')}` : '';
+  const left = ` fm-board · ${home} · ${m.homes} home${m.homes === 1 ? '' : 's'}${hiddenPanes}`;
   const right = `${m.snapshot} · ${m.herdr} `;
   const gap = cols - width(left) - width(right);
   const text = gap >= 1 ? `${left}${' '.repeat(gap)}${right}` : truncate(`${left} · ${right}`, cols);
   return line([seg(padRight(text, cols), view.stale ? 'bad' : 'title')], cols);
 }
 
-const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus  o open PR  l/h expand  r refresh  ? help  q quit';
-const FOOTER_KEYS_SHORT = ' j/k move  tab pane  enter  o open  l/h expand  r  ? help  q quit';
+const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  o open PR  l/h expand  x hide  H hidden  1-5 panes  f firstmate  r refresh  ? help  q quit';
+const FOOTER_KEYS_SHORT = ' j/k  tab  enter  o open  l/h  x hide  H  1-5 panes  f  r  ? help  q quit';
+const FOOTER_KEYS_MIN = ' ? help';
 
+// The key hint and the transient notice share the footer; the notice wins.
+// The full hint needs its own width plus 24 spare columns, the short hint
+// whatever is left beside the notice, and a notice too long for even the
+// minimal hint is truncated after it.
 function footerLine(model, cols, view) {
-  const keys = cols >= width(FOOTER_KEYS) + 24 ? FOOTER_KEYS : FOOTER_KEYS_SHORT;
   const notice = view.notice ? ` ${view.notice} ` : '';
-  const gap = cols - width(keys) - width(notice);
-  const text = gap >= 0 ? `${keys}${' '.repeat(gap)}${notice}` : truncate(`${keys} ${notice}`, cols);
-  return line([seg(keys, 'dim'), seg(text.slice(keys.length), view.noticeBad ? 'bad' : 'notice')], cols);
+  const fits = (k) => width(k) + width(notice) + (notice ? 2 : 0) <= cols;
+  let keys;
+  if (cols >= width(FOOTER_KEYS) + 24 && fits(FOOTER_KEYS)) keys = FOOTER_KEYS;
+  else if (fits(FOOTER_KEYS_SHORT)) keys = FOOTER_KEYS_SHORT;
+  else keys = FOOTER_KEYS_MIN;
+  const room = Math.max(0, cols - width(keys));
+  const shown = width(notice) > room ? truncate(notice, room) : notice;
+  const gap = cols - width(keys) - width(shown);
+  return line([seg(keys, 'dim'), seg(`${' '.repeat(Math.max(0, gap))}${shown}`, view.noticeBad ? 'bad' : 'notice')], cols);
 }
 
 // Visible window [start, start+height) of a pane's rows so the selected row
@@ -113,10 +148,15 @@ export function tagColumnWidth(model) {
 function renderPanes(model, cols, rows, view) {
   const lines = [];
   lines.push(titleLine(model, cols, view));
-  const heights = paneHeights(rows, model.panes.map((p) => paneDemand(p.rows.length)));
+  const heights = paneHeights(
+    rows,
+    model.panes.map((p) => paneDemand(p.rows.length)),
+    model.panes.map((p) => !p.hidden),
+  );
   const inner = cols - 4; // two border cells and one space padding each side
   const tagWidth = tagColumnWidth(model);
   model.panes.forEach((pane, idx) => {
+    if (pane.hidden) return;
     const focused = view.pane === idx;
     const spec = columns(cols, inner, pane.id, tagWidth);
     const borderStyle = focused ? 'border-focus' : 'border';
@@ -135,13 +175,14 @@ function renderPanes(model, cols, rows, view) {
       const start = scrollStart(pane.rows.length, roomForRows, focused ? view.row : 0, view.scroll[idx] || 0);
       view.scrollOut[idx] = start;
       const visible = pane.rows.slice(start, start + roomForRows);
-      visible.forEach((r, i) => body.push(rowSegments(r, spec, focused && start + i === view.row)));
+      visible.forEach((r, i) => body.push(rowSegments(r, spec, focused && start + i === view.row, pane.id)));
       hiddenAbove = start;
       hiddenBelow = pane.rows.length - (start + visible.length);
     }
     while (body.length < height) body.push([seg(' '.repeat(inner), 'row')]);
     for (const b of body.slice(0, height)) {
-      lines.push(line([seg(`${V} `, borderStyle), ...b.map((s) => seg(fitRaw(s.text, inner), s.style)), seg(` ${V}`, borderStyle)], cols));
+      const padStyle = b.length && b[0].style.startsWith('selected') ? 'selected' : 'row';
+      lines.push(line([seg(`${V} `, borderStyle), ...fitSegments(b, inner, padStyle), seg(` ${V}`, borderStyle)], cols));
     }
     const markers = [];
     if (hiddenAbove > 0) markers.push(`${hiddenAbove} above`);
@@ -160,6 +201,7 @@ function renderPanes(model, cols, rows, view) {
 export function flattenRows(model) {
   const out = [];
   model.panes.forEach((pane, paneIdx) => {
+    if (pane.hidden) return;
     out.push({ kind: 'section', paneIdx, text: pane.header });
     if (pane.rows.length === 0) out.push({ kind: 'empty', paneIdx, text: pane.empty });
     pane.rows.forEach((row, rowIdx) => out.push({ kind: 'row', paneIdx, rowIdx, row }));
@@ -187,7 +229,7 @@ function renderList(model, cols, rows, view) {
     } else if (entry.kind === 'empty') {
       lines.push(line([seg(' ', 'row'), seg(fit(entry.text, inner), 'empty')], cols));
     } else {
-      lines.push(line([seg(' ', 'row'), ...rowSegments(entry.row, spec, entry.paneIdx === view.pane && entry.rowIdx === view.row)], cols));
+      lines.push(line([seg(' ', 'row'), ...rowSegments(entry.row, spec, entry.paneIdx === view.pane && entry.rowIdx === view.row, null)], cols));
     }
   }
   while (lines.length < height + 2) lines.push(line([], cols));
@@ -216,7 +258,8 @@ function overlayHelp(lines, cols) {
 }
 
 // view: { pane, row, scroll[], help, notice, noticeBad, stale } (the app's view
-// also carries `expanded`, which only buildModel reads)
+// also carries `expanded`, `hidden`, `hiddenPanes` and `showHidden`, which only
+// buildModel reads)
 // Returns { lines, cols, rows, mode, scroll } where scroll holds the start
 // offsets actually used so the app can keep them for the next frame.
 export function renderFrame(model, size, view = {}) {

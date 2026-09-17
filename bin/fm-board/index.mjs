@@ -3,35 +3,56 @@
 //
 // Modes:
 //   run (default)  interactive board (neo-blessed through lib/tui-blessed.mjs)
+//   split-firstmate / unsplit-firstmate / toggle-firstmate
+//                  move the firstmate pane beside the board pane (--board-pane,
+//                  default $HERDR_PANE_ID) or back out to its own workspace,
+//                  through lib/split.mjs; prints one result line and exits 0,
+//                  or exits 1 with the reason (no firstmate pane found, herdr
+//                  failure). The herdr plugin actions firstmate.board.* run
+//                  these through the wrapper.
 //   --render-once  print one frame to stdout and exit; with --fixture <json> the
 //                  frame comes from that facts file and no firstmate home or
 //                  herdr is touched, which is how tests/fm-board.test.sh works.
 //                  --keys <list> presses keys through lib/controller.mjs before
 //                  the frame is rendered (a PR open runs --opener-cmd when
 //                  given, and is only reported in the footer otherwise; a herdr
-//                  focus is reported, never run); --expand <all|ids> expands
-//                  In flight groups.
+//                  focus and the f toggle are reported, never run; enter on a
+//                  Findings row runs --viewer-cmd when given and otherwise only
+//                  reports the viewer the chain resolved to, naming the binary
+//                  found on PATH, so a test can shadow glow with a fake without
+//                  ever launching a real viewer); --expand <all|ids>
+//                  expands In flight groups; --tags prints the color tags;
+//                  --view-state <file> loads hidden rows and panes from that
+//                  file and saves x/X/1-5/0 changes back to it (without the
+//                  flag a fixture render loads nothing and saves nothing).
 //
 // Fixture file shape (see tests/fixtures/*.json):
 //   { "now": ISO time, "cols": N, "rows": N, "fm_home": path,
 //     "snapshot": fm-fleet-snapshot.v1 document,
 //     "ledgers": [ { id, home, remote, cached, summary, error } ]   (optional;
 //                 derived from snapshot.secondmate_current when absent),
-//     "herdr": { "agents": [ { pane_id, agent_status, terminal_title_stripped } ] } | null,
+//     "herdr": { "state": "connected" | "disconnected" | ... (optional),
+//                "agents": [ { pane_id, agent_status, terminal_title_stripped } ] } | null,
 //     "prs": { "candidate_prs": [...] } | null,
 //     "mtimes": { "<absolute path>": epoch seconds } }
 // With --no-herdr the fixture's herdr block is still applied as an offline
 // overlay (header says "herdr fixture") so the join is testable without a
-// live server; without a herdr block the header says "herdr off".
+// live server; a "state" in the block overrides that label (a "disconnected"
+// fixture shows the grey "unknown" HERDR cells); without a herdr block the
+// header says "herdr off".
 
 import { readFileSync } from 'node:fs';
 import { parseArgs, USAGE } from './lib/args.mjs';
 import { buildModel } from './lib/model.mjs';
 import { renderFrame, toPlain } from './lib/render.mjs';
-import { agentsFromSnapshot } from './lib/herdr.mjs';
+import { toTags } from './lib/tui-blessed.mjs';
+import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
 import { collectLedgers, discoverHomes, mtime, runBearingsPrs, runSnapshot } from './lib/sources.mjs';
-import { focusProblem, handleKey } from './lib/controller.mjs';
+import { focusProblem, handleKey, viewProblem } from './lib/controller.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
+import { resolveViewer, runViewer } from './lib/viewer.mjs';
+import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
+import { moveFirstmatePane } from './lib/split.mjs';
 
 function fail(msg, code = 1) {
   process.stderr.write(`fm-board: ${msg}\n`);
@@ -69,7 +90,8 @@ function factsFromFixture(path, opts) {
   let herdr;
   if (fx.herdr && (Array.isArray(fx.herdr.agents) || fx.herdr.snapshot)) {
     const agents = fx.herdr.snapshot ? agentsFromSnapshot({ snapshot: fx.herdr.snapshot }) : agentsFromSnapshot({ agents: fx.herdr.agents });
-    herdr = { state: opts.herdr ? 'connected' : 'fixture', detail: '', agents };
+    const state = typeof fx.herdr.state === 'string' && fx.herdr.state ? fx.herdr.state : opts.herdr ? 'connected' : 'fixture';
+    herdr = { state, detail: fx.herdr.detail || '', agents };
   } else {
     herdr = { state: 'off', detail: '', agents: {} };
   }
@@ -96,7 +118,6 @@ async function factsLive(opts) {
   }
   let herdr = { state: 'off', detail: '', agents: {} };
   if (opts.herdr) {
-    const { HerdrClient } = await import('./lib/herdr.mjs');
     const client = new HerdrClient({ cmd: opts.herdrCmd, socketPath: opts.herdrSocket });
     const ok = await client.bootstrap();
     herdr = ok ? { state: 'connected', detail: 'one-shot', agents: client.agents } : { state: 'unavailable', detail: client.detail, agents: {} };
@@ -107,14 +128,25 @@ async function factsLive(opts) {
   };
 }
 
+// The view-state file for a one-shot render: the explicit --view-state, or the
+// default location when rendering a live home. A fixture render without the
+// flag loads nothing, so the frame depends on the fixture alone.
+function viewStateFor(opts, fmHome) {
+  if (opts.fixture && !opts.viewState) return { path: null, problem: null };
+  return resolveViewStatePath({ explicit: opts.viewState, fmHome, env: process.env });
+}
+
 // One-shot view: apply --expand and --keys through the shared key handler,
 // then hand back the model and view to render. Effects: an opened PR runs
 // --opener-cmd (awaited, so a fake opener has written its record before the
 // process exits) or, without one, only leaves a footer notice; a focus is
-// checked the same way the app checks it, then reported rather than run.
+// checked the same way the app checks it, then reported rather than run; a
+// viewed report runs the resolved viewer (awaited); the f toggle is reported.
 async function driveOnce(facts, opts) {
-  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), help: false, notice: '', noticeBad: false };
-  const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds });
+  const vs = viewStateFor(opts, facts.fmHome);
+  const loaded = loadViewState(vs.path);
+  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, showHidden: false, help: false, notice: '', noticeBad: false };
+  const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
   let model = build();
   if (opts.expand.length) {
     const inflight = model.panes.find((p) => p.id === 'inflight');
@@ -156,12 +188,53 @@ async function driveOnce(facts, opts) {
       const problem = focusProblem(pane, row, opts.herdr && facts.herdr && facts.herdr.state === 'connected');
       ctx.notice(problem || `would focus ${row.paneId} (${row.name}); --render-once never runs herdr agent focus`, Boolean(problem));
     },
+    viewReport: (row) => {
+      const pane = model.panes[view.pane];
+      const problem = viewProblem(pane, row);
+      if (problem) {
+        ctx.notice(problem, true);
+        return;
+      }
+      const { argv, source } = resolveViewer({ cmd: opts.viewerCmd, env: process.env });
+      if (!opts.viewerCmd) {
+        ctx.notice(`would view ${row.reportPath} with ${argv.join(' ')} (${source}); no --viewer-cmd in --render-once`);
+        return;
+      }
+      pending.push(
+        runViewer(row.reportPath, { argv })
+          .then((r) => ctx.notice(r.code === 0 || r.code === null ? `viewed ${row.reportPath} (${source})` : `${argv[0]} exited ${r.code} · ${row.reportPath}`, r.code !== 0 && r.code !== null))
+          .catch((e) => ctx.notice(`viewer failed (${argv[0]}): ${e.message} · ${row.reportPath}`, true)),
+      );
+    },
+    firstmate: () => ctx.notice('would toggle the firstmate pane beside the board; --render-once never moves panes'),
     refresh: () => ctx.notice('refresh is not available in --render-once', true),
+    persist: () => {
+      if (!vs.path) return;
+      const err = saveViewState(vs.path, { hidden: view.hidden, hiddenPanes: view.hiddenPanes });
+      if (err) ctx.notice(`view state not saved: ${err}`, true);
+    },
     quit: () => {},
   };
+  if (loaded.error) ctx.notice(`view state: ${loaded.error}`, true);
+  if (vs.problem) ctx.notice(vs.problem, true);
   for (const key of opts.keys) handleKey(ctx, key);
   await Promise.all(pending);
   return { model, view };
+}
+
+// split-firstmate / unsplit-firstmate / toggle-firstmate: no TUI, one herdr
+// round trip through lib/split.mjs, one line of output.
+async function runPaneCommand(opts) {
+  if (!opts.herdr) fail('the firstmate pane toggle needs herdr; drop --no-herdr', 2);
+  if (!opts.fmHome) fail('FM_HOME is not set and --fm-home was not given', 2);
+  const mode = opts.command.replace(/-firstmate$/, '');
+  const client = new HerdrClient({ cmd: opts.herdrCmd, socketPath: opts.herdrSocket });
+  try {
+    const r = await moveFirstmatePane({ client, fmHome: opts.fmHome.replace(/\/+$/, ''), boardPane: opts.boardPane, mode });
+    process.stdout.write(`${r.action}: ${r.message}\n`);
+  } catch (e) {
+    fail(e.message, 1);
+  }
 }
 
 async function main() {
@@ -176,11 +249,15 @@ async function main() {
     process.stdout.write(`${USAGE}\n`);
     return;
   }
+  if (opts.command.endsWith('-firstmate')) {
+    await runPaneCommand(opts);
+    return;
+  }
   if (opts.renderOnce) {
     const { facts, size } = opts.fixture ? factsFromFixture(opts.fixture, opts) : await factsLive(opts);
     const { model, view } = await driveOnce(facts, opts);
     const frame = renderFrame(model, size, { ...view, stale: Boolean(facts.snapshotError) });
-    process.stdout.write(`${toPlain(frame.lines).join('\n')}\n`);
+    process.stdout.write(opts.tags ? `${toTags(frame.lines)}\n` : `${toPlain(frame.lines).join('\n')}\n`);
     if (facts.snapshotError && !opts.fixture) {
       process.stderr.write(`fm-board: snapshot failed: ${facts.snapshotError}\n`);
       process.exit(1);

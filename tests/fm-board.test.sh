@@ -10,7 +10,17 @@
 # Key-driven checks use `--keys <list>` (pressed through lib/controller.mjs
 # before the frame renders) and `--expand <all|ids>`; a PR open goes to
 # `--opener-cmd`, here tests/fake-opener.sh, which only appends its argv to
-# FM_BOARD_TEST_OPENER_LOG. No browser is ever launched.
+# FM_BOARD_TEST_OPENER_LOG. No browser is ever launched. A Findings enter
+# goes to `--viewer-cmd`, here tests/fake-viewer.sh (argv to
+# FM_BOARD_TEST_VIEWER_LOG); without --viewer-cmd a one-shot render only
+# reports the viewer the PATH chain resolved to, so the suite shadows glow with
+# the fake on PATH and no real viewer ever runs. Hidden rows and panes go to
+# `--view-state <temp file>`. The firstmate pane toggle runs the wrapper's
+# split-firstmate / unsplit-firstmate / toggle-firstmate against
+# tests/fake-herdr.sh installed on PATH as `herdr` AND named by HERDR_BIN_PATH
+# (herdr sets that variable inside its panes; the real binary must never be
+# reached from a test); the fake records every argv and answers agent list and
+# pane get from the herdr-*.json fixtures.
 #
 # Fixtures (tests/fixtures/):
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
@@ -23,15 +33,38 @@
 #                   reason) plus live and dated captain holds, one quiet
 #   empty.json      120x40, every pane empty, no herdr block
 #   narrow.json     70x24, list mode with section headers, a cached local home
+#   lost.json       160x40, a main worker and a secondmate child whose panes
+#                   are absent from the herdr block (pane lost), a live one, a
+#                   main scout report and a secondmate landed report
+#   lost-disconnected.json  160x30, the same lost pane with herdr disconnected
+#   herdr-agents-{split,beside,title,none}.json, herdr-pane-board.json
+#                   canned `herdr agent list` / `pane get` answers for the
+#                   firstmate pane toggle
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BOARD="$ROOT/bin/fm-board.sh"
 FIX="$ROOT/tests/fixtures"
 FAKE_OPENER="bash $ROOT/tests/fake-opener.sh"
+FAKE_VIEWER="bash $ROOT/tests/fake-viewer.sh"
 OPENER_LOG=$(mktemp "${TMPDIR:-/tmp}/fm-board-opener.XXXXXX")
-rm -f "$OPENER_LOG"
-trap 'rm -f "$OPENER_LOG"' EXIT
+VIEWER_LOG=$(mktemp "${TMPDIR:-/tmp}/fm-board-viewer.XXXXXX")
+HERDR_LOG=$(mktemp "${TMPDIR:-/tmp}/fm-board-herdr.XXXXXX")
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-board-test.XXXXXX")
+rm -f "$OPENER_LOG" "$VIEWER_LOG" "$HERDR_LOG"
+trap 'rm -rf "$OPENER_LOG" "$VIEWER_LOG" "$HERDR_LOG" "$SCRATCH"' EXIT
+# Fakes on PATH: `glow` (the viewer chain's first rung) and `herdr`.
+FAKE_BIN="$SCRATCH/bin"
+mkdir -p "$FAKE_BIN"
+cp "$ROOT/tests/fake-viewer.sh" "$FAKE_BIN/glow"
+cp "$ROOT/tests/fake-herdr.sh" "$FAKE_BIN/herdr"
+chmod +x "$FAKE_BIN/glow" "$FAKE_BIN/herdr"
+# A stand-in firstmate home for the wrapper's FM_HOME check in the pane toggle
+# runs (it only needs an executable bin/fm-fleet-snapshot.sh; nothing runs it).
+FAKE_HOME="$SCRATCH/firstmate"
+mkdir -p "$FAKE_HOME/bin"
+printf '#!/usr/bin/env bash\necho "{}"\n' > "$FAKE_HOME/bin/fm-fleet-snapshot.sh"
+chmod +x "$FAKE_HOME/bin/fm-fleet-snapshot.sh"
 
 fails=0
 checks=0
@@ -108,6 +141,36 @@ assert_opened() {
 assert_not_opened() {
   if [ -e "$OPENER_LOG" ]; then fail "$1: opener was called with '$(cat "$OPENER_LOG")'"; else pass; fi
 }
+# render_view <fixture> <keys> [viewer argv]: render with the fake viewer recording into VIEWER_LOG (reset first)
+render_view() {
+  rm -f "$VIEWER_LOG"
+  FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" "$BOARD" --render-once --fixture "$FIX/$1" --no-herdr --keys "$2" --viewer-cmd "${3:-$FAKE_VIEWER}"
+}
+assert_viewed() {
+  if [ -f "$VIEWER_LOG" ] && [ "$(cat "$VIEWER_LOG")" = "$1" ]; then pass; else fail "$2: viewer log is '$(cat "$VIEWER_LOG" 2>/dev/null || echo '<absent>')', expected '$1'"; fi
+}
+assert_not_viewed() {
+  if [ -e "$VIEWER_LOG" ]; then fail "$1: viewer was called with '$(cat "$VIEWER_LOG")'"; else pass; fi
+}
+# assert_file_contains <file> <fixed string> <label>
+assert_file_contains() {
+  if [ -f "$1" ] && grep -Fq -- "$2" "$1"; then pass; else fail "$3: expected '$2' in $1 (content: $(tr -d '\n' < "$1" 2>/dev/null || echo '<absent>'))"; fi
+}
+assert_file_not_contains() {
+  if [ -f "$1" ] && grep -Fq -- "$2" "$1"; then fail "$3: did not expect '$2' in $1"; else pass; fi
+}
+# run_move <agents fixture> <subcommand> [extra flags]: the wrapper's pane toggle against the fake herdr.
+# Output (stdout+stderr) in MOVE_OUT, exit code in MOVE_RC, every herdr argv line in HERDR_LOG.
+run_move() {
+  rm -f "$HERDR_LOG"
+  MOVE_OUT=$(FM_BOARD_TEST_HERDR_LOG="$HERDR_LOG" FM_BOARD_TEST_HERDR_PANE="$FIX/herdr-pane-board.json" FM_BOARD_TEST_HERDR_AGENTS="$FIX/$1" \
+    FM_HOME="$FAKE_HOME" HERDR_BIN_PATH="$FAKE_BIN/herdr" HERDR_SOCKET_PATH='' PATH="$FAKE_BIN:$PATH" \
+    "$BOARD" "$2" --fm-home /fixture/firstmate "${@:3}" 2>&1)
+  MOVE_RC=$?
+}
+assert_herdr_log() { # <expected lines> <label>
+  if [ -f "$HERDR_LOG" ] && [ "$(cat "$HERDR_LOG")" = "$1" ]; then pass; else fail "$2: herdr log is '$(cat "$HERDR_LOG" 2>/dev/null || echo '<absent>')', expected '$1'"; fi
+}
 
 # ------------------------------------------------------------- populated
 frame=$(render populated.json) || fail "populated: render exited non-zero"
@@ -163,12 +226,12 @@ assert_row "$frame" '^│ STATE +HERDR +ID +WHAT +REPO +HOME +AGE │$' "in-flig
 assert_row "$frame" '^│ working +working +ship-alpha +harness busy \(claude-hook\) +acme/widgets +main +5m │$' "task with herdr working and status-log age"
 assert_row "$frame" '^│ blocked +blocked +scout-beta +\(scout\) gh auth expired +acme/api +main +2h │$' "task with herdr blocked"
 assert_row "$frame" '^│ awaiting merge +done +ship-gamma +PR https://github.com/acme/api/pull/7 checks green +acme/api +main +1m │$' "worker said done with an unmerged PR: STATE reads awaiting merge (falsify: drop awaitingMerge from mainTaskRow)"
-assert_row "$frame" '^│ done +absent +ship-old +PR https://github.com/acme/widgets/pull/30 merged +acme/widgets +main +2d │$' "done task whose backlog row is done stays done"
+assert_row "$frame" '^│ done +pane lost +ship-old +PR https://github.com/acme/widgets/pull/30 merged +acme/widgets +main +2d │$' "done task whose backlog row is done stays done; its closed pane reads pane lost"
 assert_row "$frame" '^│ working +tmux +tmux-task +running the migration +acme/legacy +main +- │$' "tmux-backed task shows tmux in HERDR"
 assert_row "$frame" '^│ STATE {10}KEY ' "STATE column widens to fit awaiting merge (falsify: fix the width in tagColumnWidth)"
 assert_before "$frame" '^│ working +working +ship-alpha' '^│ blocked +blocked +scout-beta' "in flight: working sorts before blocked"
 assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ awaiting merge +done +ship-gamma' "in flight: blocked sorts before awaiting merge"
-assert_before "$frame" '^│ awaiting merge +done +ship-gamma' '^│ done +absent +ship-old' "in flight: awaiting merge keeps the done slot, before plain done"
+assert_before "$frame" '^│ awaiting merge +done +ship-gamma' '^│ done +pane lost +ship-old' "in flight: awaiting merge keeps the done slot, before plain done"
 
 # In flight groups, collapsed: one row per secondmate home with worst state, live count, child ids,
 # shared repo and newest child age; the mate's own agent row is folded into its group (falsify:
@@ -190,9 +253,9 @@ assert_row "$frame_x" '^│ decide +1 live +!▾ hyperion +child-one, child-fail
 assert_row "$frame_x" '^│ working +idle +↳ hyperion +\(secondmate\) supervising two children +acme/etl +main +- │$' "expanded: the secondmate agent row is the first child"
 assert_row "$frame_x" '^│ decide +etl-wind… +↳ hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "expanded: the relayed keyed decision lists under the group (falsify: drop relayed from ledgerGroup)"
 assert_row "$frame_x" '^│ working +working +↳ child-one +writing the loader +acme/etl +hyperion +3d │$' "expanded: active child with age from its home state file"
-assert_row "$frame_x" '^│ failed +absent +↳ child-failed +endpoint default:w2B:p2 \(run-step\) +- +hyperion +1h │$' "expanded: failed endpoint child with no herdr agent"
+assert_row "$frame_x" '^│ failed +pane lost +↳ child-failed +endpoint default:w2B:p2 \(run-step\) +- +hyperion +1h │$' "expanded: failed endpoint child whose pane is gone reads pane lost"
 assert_row "$frame_x" '^│ hold +- +↳ etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +hyperion +1d │$' "expanded: the home's live captain hold lists under the group"
-assert_row "$frame_x" '^│ working +absent +↳ remote-child +porting the login screen +acme/mobile +remote-sm \(remote\) +- │$' "expanded: remote home child row labelled remote"
+assert_row "$frame_x" '^│ working +remote +↳ remote-child +porting the login screen +acme/mobile +remote-sm \(remote\) +- │$' "expanded: remote home child row reads remote in HERDR, never pane lost (falsify: drop the remote branch in herdrColumn)"
 assert_before "$frame_x" '!▾ hyperion' '↳ child-one' "children follow their group row"
 assert_before "$frame_x" '↳ remote-child' '^│ blocked +blocked +scout-beta' "the next top-level row starts after the previous group's children"
 assert_before "$frame_x" '↳ etl-cutover' '↳ hyperion +Which maintenance' "the ledger's home decisions come before the relayed ones"
@@ -217,7 +280,7 @@ assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship
 assert_lines "$frame" 40 "populated frame is 40 lines"
 assert_widths "$frame" 160 "populated frame lines are 160 columns"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
-assert_row "$frame" '^ j/k move  tab pane  enter open/focus  o open PR  l/h expand  r refresh  \? help  q quit +$' "footer keys"
+assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  o open PR  l/h expand  x hide  H hidden  1-5 panes  f firstmate  r refresh  \? help  q quit +$' "footer keys"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs).
 frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l") || fail "keys l: render exited non-zero"
@@ -277,7 +340,7 @@ assert_no_row "$frame_med" ' REPO +HOME' "medium drops REPO"
 assert_no_row "$frame_med" ' HOME +AGE' "medium drops AGE"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$frame_med" '^ j/k move  tab pane  enter  o open  l/h expand  r  \? help  q quit +$' "medium width uses the short footer"
+assert_row "$frame_med" '^ j/k  tab  enter  o open  l/h  x hide  H  1-5 panes  f  r  \? help  q quit +$' "medium width uses the short footer"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -364,6 +427,231 @@ assert_widths "$frame_g" 160 "grouped frame lines are 160 columns"
 assert_lines "$frame_g" 44 "grouped frame is 44 lines"
 assert_widths "$frame_gx" 160 "grouped expanded frame lines are 160 columns"
 
+
+# ------------------------------------------------------------ report viewer
+# The chain (falsify: reorder the rungs in resolveViewer, or drop the executable check in whichOnPath).
+chain_dir="$SCRATCH/chain"
+mkdir -p "$chain_dir/a" "$chain_dir/b" "$chain_dir/none"
+printf '#!/bin/sh\n' > "$chain_dir/a/glow"; chmod +x "$chain_dir/a/glow"
+printf '#!/bin/sh\n' > "$chain_dir/b/vim"; chmod +x "$chain_dir/b/vim"
+: > "$chain_dir/b/glow" # present but not executable: skipped
+chain=$(node --input-type=module -e "
+  import { resolveViewer } from '$ROOT/bin/fm-board/lib/viewer.mjs';
+  const d = '$chain_dir';
+  const show = (env, cmd = null) => { const r = resolveViewer({ env, cmd }); console.log(r.source + ' ' + r.argv.join(' ')); };
+  show({ PATH: d + '/a:' + d + '/b', EDITOR: 'nano' });
+  show({ PATH: d + '/b', EDITOR: 'code --wait' });
+  show({ PATH: d + '/b' });
+  show({ PATH: d + '/none', EDITOR: '   ' });
+  show({ PATH: d + '/a' }, ['bash', 'fake']);
+")
+assert_row "$chain" "^glow $chain_dir/a/glow -p\$" "chain: glow on PATH wins and is returned as the path found, with -p"
+assert_row "$chain" '^EDITOR code --wait$' "chain: without glow, \$EDITOR is used and split on whitespace"
+assert_row "$chain" "^vim $chain_dir/b/vim\$" "chain: without glow or EDITOR, vim on PATH (a non-executable glow is skipped)"
+assert_row "$chain" '^less less$' "chain: less is the last resort"
+assert_row "$chain" '^viewer-cmd bash fake$' "chain: --viewer-cmd overrides everything"
+
+# Enter in Findings without --viewer-cmd only reports the viewer the chain resolved to, naming the fake glow
+# shadowing PATH; nothing runs (falsify: run the viewer without --viewer-cmd in driveOnce, or drop whichOnPath).
+rm -f "$VIEWER_LOG"
+frame_v=$(FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" PATH="$FAKE_BIN:$PATH" render lost.json --keys "tab,tab,enter") || fail "viewer report-only: render exited non-zero"
+assert_contains "$frame_v" "would view /fixture/firstmate/data/scout-beta/report.md with $FAKE_BIN/glow -p (glow)" "fake glow on PATH is the resolved viewer, reported with its path and -p"
+assert_not_viewed "without --viewer-cmd the resolved viewer is never spawned"
+# With --viewer-cmd the report path is the only appended argument (falsify: drop reportPath from findingsRows).
+frame_v=$(render_view lost.json "tab,tab,enter") || fail "viewer main: render exited non-zero"
+assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "enter on a main-home scout report hands its absolute path to the viewer"
+assert_contains "$frame_v" "viewed /fixture/firstmate/data/scout-beta/report.md (viewer-cmd)" "footer names the viewed report"
+frame_v=$(render_view lost.json "tab,tab,j,enter") || fail "viewer secondmate: render exited non-zero"
+assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "a secondmate report resolves against its own home, not FM_HOME (falsify: use fmHome for ledger reports)"
+frame_v=$(render_view lost.json "tab,tab,enter" "$FAKE_VIEWER -p") || fail "viewer flags: render exited non-zero"
+assert_viewed "-p
+/fixture/firstmate/data/scout-beta/report.md" "viewer flags stay separate argv elements, the path last (falsify: join argv into one string)"
+frame_v=$(render_view populated.json "tab,tab,tab,j,enter") || fail "viewer remote: render exited non-zero"
+assert_not_viewed "a remote home's report is never opened"
+assert_contains "$frame_v" "mobile-fix: report lives on another host (remote-sm (remote)); not reachable from here" "remote report: red notice instead (falsify: drop reportRemote)"
+frame_v=$(render_view lost.json "enter") || fail "viewer wrong pane: render exited non-zero"
+assert_not_viewed "enter outside Findings never runs the viewer"
+frame_v=$(render lost.json --keys "?") || fail "help: render exited non-zero"
+assert_contains "$frame_v" "Findings row: open the report in the viewer (glow, \$EDITOR, vim, less)" "help overlay documents the viewer"
+assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
+assert_contains "$frame_v" "1 - 5        show or hide a pane" "help overlay documents 1-5"
+assert_contains "$frame_v" "f            put the firstmate pane beside the board" "help overlay documents f"
+
+# ------------------------------------------------------------- lost panes
+frame_l=$(render lost.json --expand all) || fail "lost: render exited non-zero"
+tags_l=$(render lost.json --expand all --tags) || fail "lost --tags: render exited non-zero"
+# A recorded pane absent from the herdr overlay reads "pane lost" (falsify: drop the lost branch in herdrColumn).
+assert_row "$frame_l" '^│ working +pane lost +ship-lost +adding the retry loop +acme/api +main +10m │$' "main worker whose pane is gone: HERDR reads pane lost"
+assert_row "$frame_l" '^│ working +pane lost +↳ child-lost +indexing the warehouse +acme/etl +hyperion +1h │$' "secondmate child whose pane is gone: HERDR reads pane lost"
+assert_row "$frame_l" '^│ working +working +ship-alpha ' "a worker whose pane is present keeps its agent status"
+assert_count "$tags_l" "{red-fg}pane lost{/red-fg}" 2 "--tags: both lost HERDR cells carry the red tag (falsify: drop the lost style in rowSegments)"
+# Needs you has no HERDR column, so the whole lost row is red; the live decision row is not (falsify: drop
+# the `row.lost && !herdrCell` term from bad in rowSegments).
+assert_row "$tags_l" '\{red-fg\}decide.*\{red-fg\}ship-lost' "Needs you row of the lost worker is red"
+assert_no_row "$tags_l" '\{red-fg\}decide.*ship-alpha' "Needs you row of the live worker is not red"
+# Enter on a lost row: a footer notice, never a focus (falsify: drop the lost check in focusProblem).
+frame_k=$(render lost.json --keys "tab,j,enter") || fail "lost enter inflight: render exited non-zero"
+assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "enter on the lost In flight row says pane lost"
+frame_k=$(render lost.json --keys "j,enter") || fail "lost enter needs: render exited non-zero"
+assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "enter on the lost Needs you row says pane lost"
+# Disconnected herdr: absence is unproved, so the cell reads unknown in grey and nothing is red (falsify: drop
+# the unknown branch in herdrColumn, or the grey style in rowSegments).
+frame_d=$(render lost-disconnected.json) || fail "disconnected: render exited non-zero"
+tags_d=$(render lost-disconnected.json --tags) || fail "disconnected --tags: render exited non-zero"
+assert_contains "$frame_d" "herdr disconnected (ECONNREFUSED)" "disconnected fixture: header carries the herdr state"
+assert_row "$frame_d" '^│ working +unknown +ship-lost +adding the retry loop ' "disconnected: the missing pane reads unknown, not pane lost"
+assert_row "$tags_d" '\{grey-fg\}unknown +\{/grey-fg\}' "disconnected: the unknown cell is grey"
+assert_count "$tags_d" "{red-fg}" 0 "disconnected: nothing is red"
+assert_widths "$frame_l" 160 "lost frame lines are 160 columns"
+
+# -------------------------------------------------------------------- hide
+vs="$SCRATCH/view-state.json"
+rm -f "$vs"
+# x hides the selected row and persists its key (falsify: drop the filter in applyHidden, or the date from the
+# Landed hideKey).
+frame_h=$(render populated.json --view-state "$vs" --keys "tab,tab,tab,tab,x") || fail "hide: render exited non-zero"
+assert_contains "$frame_h" "Landed (3, 1 hidden)" "x on the first Landed row: header counts it hidden"
+assert_no_row "$frame_h" '^│ merged +09-15 +etl-index ' "the hidden row is out of view"
+assert_contains "$frame_h" "hidden etl-index · H shows hidden rows, X unhides this pane" "x leaves a notice"
+assert_file_contains "$vs" '"landed:hyperion:etl-index:2026-09-15"' "the key is pane:home:id:completion date, so a re-landed item reappears"
+assert_file_contains "$vs" '"schema": "fm-board-view-state.v1"' "the file names its schema"
+# Restart: the file is loaded again (falsify: drop loadViewState from driveOnce).
+frame_h=$(render populated.json --view-state "$vs") || fail "hide reload: render exited non-zero"
+assert_contains "$frame_h" "Landed (3, 1 hidden)" "after a restart the row stays hidden"
+assert_no_row "$frame_h" '^│ merged +09-15 +etl-index ' "after a restart the row is still out of view"
+# H shows hidden rows greyed with a marker (falsify: drop showHidden from applyHidden, or the grey style).
+frame_h=$(render populated.json --view-state "$vs" --keys "H") || fail "hide H: render exited non-zero"
+tags_h=$(render populated.json --view-state "$vs" --keys "H" --tags) || fail "hide H --tags: render exited non-zero"
+assert_contains "$frame_h" "Landed (4, 1 hidden shown)" "H: header says the hidden row is shown"
+assert_row "$frame_h" '^│ merged +09-15 +etl-index +\(hidden\) Add the ETL index ' "H: the hidden row is listed with a (hidden) marker"
+assert_row "$tags_h" '\{grey-fg\}\(hidden\) Add the ETL index' "H: the hidden row is grey"
+assert_contains "$frame_h" "showing hidden rows (greyed); H hides them again" "H leaves a notice"
+# x on a shown hidden row unhides it (falsify: drop the unhide action in keyAction).
+frame_h=$(render populated.json --view-state "$vs" --keys "H,tab,tab,tab,tab,x") || fail "hide toggle: render exited non-zero"
+assert_contains "$frame_h" "unhidden etl-index" "x on the shown hidden row unhides it"
+assert_contains "$frame_h" "Landed (4)" "after unhiding the header shows the plain count"
+assert_file_not_contains "$vs" "etl-index" "unhiding removes the key from the file"
+# X clears the pane (falsify: drop the prefix filter in unhide-pane).
+frame_h=$(render populated.json --view-state "$vs" --keys "tab,tab,tab,tab,x,j,x,X") || fail "hide X: render exited non-zero"
+assert_contains "$frame_h" "unhidden 2 rows in Landed" "X unhides every hidden row of the pane"
+assert_contains "$frame_h" "Landed (4)" "X: all four Landed rows are back"
+assert_file_contains "$vs" '"hidden": []' "X empties the hidden list in the file"
+# A hidden group takes its children with it (falsify: drop the parent lookup in applyHidden).
+frame_h=$(render populated.json --rows 48 --keys "tab,tab,j,j,j,j,l,x") || fail "hide group: render exited non-zero"
+assert_contains "$frame_h" "In flight (6, 6 hidden)" "hiding the expanded hyperion group hides its five children too"
+assert_not_contains "$frame_h" "↳ child-one" "hidden group: children are out of view"
+# A fixture render without --view-state loads and saves nothing (falsify: drop the fixture guard in viewStateFor).
+fake_home_dir="$SCRATCH/home"
+mkdir -p "$fake_home_dir"
+frame_h=$(HOME="$fake_home_dir" XDG_CONFIG_HOME='' render populated.json --keys "tab,tab,tab,tab,x") || fail "hide no file: render exited non-zero"
+assert_contains "$frame_h" "Landed (3, 1 hidden)" "without --view-state hiding still works for the frame"
+if [ -e "$fake_home_dir/.config/fm-board/view-state.json" ]; then fail "a fixture render without --view-state wrote the default view-state file"; else pass; fi
+# A view-state path inside FM_HOME is refused (falsify: drop insideHome from resolveViewStatePath).
+frame_h=$(XDG_CONFIG_HOME="$SCRATCH/xdg" render populated.json --view-state /fixture/firstmate/state/view-state.json) || fail "hide FM_HOME guard: render exited non-zero"
+assert_contains "$frame_h" "refusing --view-state inside FM_HOME (/fixture/firstmate/state/view-state.json)" "a view-state path inside FM_HOME is refused with a notice"
+frame_h=$(XDG_CONFIG_HOME="$SCRATCH/xdg" render populated.json --view-state /fixture/firstmate/state/view-state.json --keys "tab,tab,tab,tab,x") || fail "hide FM_HOME fallback: render exited non-zero"
+if [ -f "$SCRATCH/xdg/fm-board/view-state.json" ]; then pass; else fail "the refused path falls back to \$XDG_CONFIG_HOME/fm-board/view-state.json"; fi
+if [ -e /fixture/firstmate/state/view-state.json ]; then fail "the refused path was written"; else pass; fi
+
+# ------------------------------------------------------------ pane toggles
+rm -f "$vs"
+# 5 hides Landed; its rows go to the other panes; the title lists it (falsify: drop the visible list from
+# paneHeights, or the hidden skip in renderPanes).
+frame_p=$(render populated.json --view-state "$vs" --keys "5") || fail "panes 5: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 5" "title lists the hidden pane number"
+assert_not_contains "$frame_p" "Landed (" "the hidden pane draws nothing"
+assert_count "$frame_p" "┌─" 4 "four pane frames remain"
+assert_lines "$frame_p" 40 "one pane hidden: the frame is still 40 lines"
+assert_widths "$frame_p" 160 "one pane hidden: lines are 160 columns"
+assert_contains "$frame_p" "pane hidden: Landed · 5 or 0 shows it again" "5 leaves a notice"
+assert_file_contains "$vs" '"landed"' "the hidden pane is persisted"
+frame_p=$(render populated.json --view-state "$vs") || fail "panes reload: render exited non-zero"
+assert_count "$frame_p" "┌─" 4 "after a restart the pane stays hidden (falsify: drop hidden_panes from loadViewState)"
+frame_p=$(render populated.json --view-state "$vs" --keys "1,2,4") || fail "panes 1,2,4: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 1,2,4,5" "four panes hidden: the title lists all four"
+assert_count "$frame_p" "┌─" 1 "four panes hidden: one frame"
+assert_contains "$frame_p" "In flight (7)" "four panes hidden: In flight remains"
+assert_lines "$frame_p" 40 "four panes hidden: still 40 lines"
+assert_widths "$frame_p" 160 "four panes hidden: lines are 160 columns"
+assert_row "$frame_p" '^│ decide +1 live +!▸ hyperion ' "four panes hidden: In flight rows render in the freed space"
+frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "panes last: render exited non-zero"
+assert_contains "$frame_p" "at least one pane stays visible" "the last visible pane cannot be hidden (falsify: drop the shown <= 1 guard)"
+assert_count "$frame_p" "┌─" 1 "the last visible pane is still drawn"
+frame_p=$(render populated.json --view-state "$vs" --keys "0") || fail "panes 0: render exited non-zero"
+assert_count "$frame_p" "┌─" 5 "0 shows every pane again"
+assert_contains "$frame_p" "all panes shown" "0 leaves a notice"
+assert_not_contains "$frame_p" "panes hidden" "0 clears the title note"
+assert_file_contains "$vs" '"hidden_panes": []' "0 empties the persisted list"
+# Hiding the selected pane moves the selection to the next shown pane (falsify: drop the shown() clamp in
+# moveSelection): 1 hides Needs you, then enter opens the first Ready for review PR.
+frame_o=$(render_open populated.json "1,enter") || fail "panes selection: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "after hiding the selected pane, enter acts on the next shown pane"
+frame_p=$(render narrow.json --keys "5") || fail "panes narrow: render exited non-zero"
+assert_not_contains "$frame_p" "── Landed" "list mode: the hidden pane's section is gone (falsify: drop the hidden skip in flattenRows)"
+assert_contains "$frame_p" "panes hidden: 5" "list mode: the title lists the hidden pane"
+assert_widths "$frame_p" 70 "list mode with a hidden pane: lines are 70 columns"
+
+# ---------------------------------------------------- firstmate pane toggle
+# Every run goes to tests/fake-herdr.sh (on PATH and HERDR_BIN_PATH); the log is the exact argv sequence.
+run_move herdr-agents-split.json toggle-firstmate --board-pane wZZ:p1
+if [ "$MOVE_RC" -eq 0 ]; then pass; else fail "toggle (away): exit $MOVE_RC: $MOVE_OUT"; fi
+assert_herdr_log "agent list
+pane get wZZ:p1
+pane move w9F:p1 --workspace w1 --target-pane wZZ:p1 --split right --ratio 0.55
+agent focus w9F:p1" "toggle with the firstmate pane in another tab: find, locate the board, move it right of the board at 0.55, focus it (falsify: change SPLIT_RATIO or the argv order in splitArgs, or compare workspaces instead of tabs in besideBoard)"
+assert_contains "$MOVE_OUT" "split: firstmate pane w9F:p1 (cwd) split right of the board" "toggle (away) reports the split and that the pane was found by cwd"
+run_move herdr-agents-beside.json toggle-firstmate --board-pane wZZ:p1
+if [ "$MOVE_RC" -eq 0 ]; then pass; else fail "toggle (beside): exit $MOVE_RC: $MOVE_OUT"; fi
+assert_herdr_log "agent list
+pane get wZZ:p1
+pane move w9F:p1 --new-workspace
+agent focus wZZ:p1" "toggle with the firstmate pane beside the board: move it to a new workspace, focus the board (falsify: drop --new-workspace from unsplitArgs)"
+assert_contains "$MOVE_OUT" "unsplit: firstmate pane w9F:p1 moved to its own workspace" "toggle (beside) reports the unsplit"
+run_move herdr-agents-beside.json split-firstmate --board-pane wZZ:p1
+assert_herdr_log "agent list
+pane get wZZ:p1" "split when already beside: no move (falsify: drop the mode check in moveFirstmatePane)"
+assert_contains "$MOVE_OUT" "none: firstmate pane w9F:p1 is already beside the board" "split when already beside says so"
+run_move herdr-agents-split.json unsplit-firstmate --board-pane wZZ:p1
+assert_herdr_log "agent list
+pane get wZZ:p1" "unsplit when not beside: no move"
+run_move herdr-agents-title.json split-firstmate --board-pane wZZ:p1
+assert_contains "$MOVE_OUT" "split: firstmate pane w9T:p1 (title)" "no agent in FM_HOME: the pane titled First mate is used (falsify: drop the title fallback in findFirstmatePane)"
+assert_herdr_log "agent list
+pane get wZZ:p1
+pane move w9T:p1 --workspace w1 --target-pane wZZ:p1 --split right --ratio 0.55
+agent focus w9T:p1" "title fallback: the same split argv for that pane"
+run_move herdr-agents-none.json toggle-firstmate --board-pane wZZ:p1
+if [ "$MOVE_RC" -eq 1 ]; then pass; else fail "toggle (none): expected exit 1, got $MOVE_RC: $MOVE_OUT"; fi
+assert_contains "$MOVE_OUT" 'no firstmate pane found: no claude agent with cwd /fixture/firstmate and no pane titled "First mate"' "no firstmate pane: the reason is named (falsify: drop the throw in moveFirstmatePane)"
+assert_herdr_log "agent list" "no firstmate pane: only agent list ran, nothing moved"
+# The wrapper supplies the board pane from the record `open` wrote (falsify: drop the record read in move_firstmate).
+record_state="$SCRATCH/state"
+mkdir -p "$record_state/fm-board"
+printf 'wZZ:p1 - plugin\n' > "$record_state/fm-board/pane-$(printf '%s' "$FAKE_HOME" | cksum | cut -d' ' -f1)"
+XDG_STATE_HOME="$record_state" run_move herdr-agents-split.json split-firstmate
+if [ "$MOVE_RC" -eq 0 ]; then pass; else fail "split via record: exit $MOVE_RC: $MOVE_OUT"; fi
+assert_herdr_log "agent list
+pane get wZZ:p1
+pane move w9F:p1 --workspace w1 --target-pane wZZ:p1 --split right --ratio 0.55
+agent focus w9F:p1" "split via the recorded board pane: the same argv"
+XDG_STATE_HOME="$SCRATCH/no-record" run_move herdr-agents-split.json toggle-firstmate
+if [ "$MOVE_RC" -eq 2 ]; then pass; else fail "toggle without a record: expected exit 2, got $MOVE_RC: $MOVE_OUT"; fi
+assert_contains "$MOVE_OUT" "no board pane recorded" "toggle without a record or --board-pane names the fix"
+if [ -e "$HERDR_LOG" ]; then fail "toggle without a board pane must not call herdr"; else pass; fi
+if out=$(FM_HOME="$FAKE_HOME" "$BOARD" toggle-firstmate --no-herdr --board-pane wZZ:p1 2>&1); then fail "toggle with --no-herdr should exit non-zero"; else pass; fi
+if printf '%s\n' "$out" | grep -Fq "needs herdr"; then pass; else fail "toggle with --no-herdr names herdr: $out"; fi
+# The board key only reports in a one-shot render (falsify: drop the 'f' case in keyAction).
+frame_f=$(render populated.json --keys "f") || fail "keys f: render exited non-zero"
+assert_contains "$frame_f" "would toggle the firstmate pane beside the board; --render-once never moves panes" "f in --render-once is reported, not run"
+# Contract: no run above ever closed a pane.
+if grep -rq "pane close" "$HERDR_LOG" 2>/dev/null; then fail "a pane toggle called pane close"; else pass; fi
+if grep -Eq "'close'|\"close\"" "$ROOT/bin/fm-board/lib/split.mjs"; then fail "split.mjs must not build a pane close argv"; else pass; fi
+# Plugin manifest and keybinding doc (falsify: delete an action block from herdr-plugin.toml).
+for action in split-firstmate unsplit-firstmate toggle-firstmate; do
+  if grep -Fq "id = \"$action\"" "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml declares the $action action"; fi
+done
+if grep -Fq 'command = "firstmate.board.toggle-firstmate"' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml documents the prefix+f keybinding"; fi
+
 # ----------------------------------------------------------- wrapper checks
 # (falsify: delete the FM_HOME die() in bin/fm-board.sh, or the default case in lib/args.mjs)
 if out=$(env -u FM_HOME "$BOARD" --render-once --no-herdr 2>&1); then
@@ -374,6 +662,15 @@ fi
 if printf '%s\n' "$out" | grep -Fq "FM_HOME is not set"; then pass; else fail "wrapper names FM_HOME in its error: $out"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--render-once"; then pass; else fail "wrapper --help lists --render-once"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--keys"; then pass; else fail "wrapper --help lists --keys"; fi
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "--viewer-cmd"; then pass; else fail "wrapper --help lists --viewer-cmd"; fi
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "--view-state"; then pass; else fail "wrapper --help lists --view-state"; fi
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "toggle-firstmate"; then pass; else fail "wrapper --help lists toggle-firstmate"; fi
+if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --view-state 2>&1); then
+  fail "--view-state without a value should exit non-zero"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- "--view-state needs a value"; then pass; else fail "--view-state without a value is named in the error: $out"; fi
 if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --keys 2>&1); then
   fail "--keys without a value should exit non-zero"
 else

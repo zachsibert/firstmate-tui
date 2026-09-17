@@ -1,14 +1,20 @@
 // lib/app.mjs - the interactive controller: owns the refresh schedule, the
-// herdr subscription, the view state (selected pane/row, expanded groups, help,
-// notices) and the effects behind each key. Key semantics live in
-// lib/controller.mjs so the --render-once --keys test driver shares them; this
-// module supplies the I/O: herdr focus, the browser opener, snapshots. The
-// terminal is reached only through the adapter's screen contract.
+// herdr subscription, the view state (selected pane/row, expanded groups,
+// hidden rows and panes, help, notices) and the effects behind each key. Key
+// semantics live in lib/controller.mjs so the --render-once --keys test driver
+// shares them; this module supplies the I/O: herdr focus, the browser opener,
+// the report viewer, the firstmate pane move, snapshots and the view-state
+// file. The terminal is reached only through the adapter's screen contract.
 //
 // Cadence (scout report section 6.4): a full snapshot every --refresh seconds,
 // or sooner on any herdr event that touches a known task pane, debounced so no
 // more than one snapshot starts per 10 s and never two at once. Herdr pushes
 // redraw the frame immediately because the agents map is already updated.
+//
+// The report viewer takes the terminal over: the screen is suspended (normal
+// buffer, raw mode off, input paused), the viewer runs with inherited stdio,
+// and the screen is resumed and repainted when it exits. SIGINT is ignored by
+// the board meanwhile so a ctrl-c meant for the viewer never quits the board.
 
 import { buildModel, parseTarget } from './model.mjs';
 import { renderFrame } from './render.mjs';
@@ -16,7 +22,10 @@ import { collectLedgers, discoverHomes, mtime, runBearingsPrs, runSnapshot } fro
 import { HerdrClient } from './herdr.mjs';
 import { createScreen } from './tui-blessed.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
-import { focusProblem, handleKey, moveSelection } from './controller.mjs';
+import { focusProblem, handleKey, moveSelection, viewProblem } from './controller.mjs';
+import { resolveViewer, runViewer } from './viewer.mjs';
+import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.mjs';
+import { moveFirstmatePane } from './split.mjs';
 
 export { moveSelection } from './controller.mjs';
 
@@ -40,6 +49,8 @@ export function knownPaneIds(snapshot, ledgers) {
 }
 
 export async function runApp(opts) {
+  const viewStatePath = resolveViewStatePath({ explicit: opts.viewState, fmHome: opts.fmHome, env: process.env });
+  const loaded = loadViewState(viewStatePath.path);
   const state = {
     fmHome: opts.fmHome,
     homes: discoverHomes(opts.fmHome, opts.homes),
@@ -51,12 +62,25 @@ export async function runApp(opts) {
     lastPrsAt: 0,
     herdr: null,
     model: null,
-    view: { pane: 0, row: 0, scroll: [], expanded: new Set(), help: false, notice: '', noticeBad: false, stale: false },
+    view: {
+      pane: 0,
+      row: 0,
+      scroll: [],
+      expanded: new Set(),
+      hidden: loaded.state.hidden,
+      hiddenPanes: loaded.state.hiddenPanes,
+      showHidden: false,
+      help: false,
+      notice: '',
+      noticeBad: false,
+      stale: false,
+    },
     refreshing: false,
     refreshPending: false,
     lastSnapshotStart: 0,
     debounceTimer: null,
     noticeTimer: null,
+    viewing: false,
   };
 
   const herdr = opts.herdr ? new HerdrClient({ cmd: opts.herdrCmd, socketPath: opts.herdrSocket }) : null;
@@ -76,12 +100,18 @@ export async function runApp(opts) {
   });
 
   const rebuild = () => {
-    state.model = buildModel(facts(), { expanded: state.view.expanded, allHomesNeeds: opts.allHomesNeeds });
+    state.model = buildModel(facts(), {
+      expanded: state.view.expanded,
+      allHomesNeeds: opts.allHomesNeeds,
+      hidden: state.view.hidden,
+      showHidden: state.view.showHidden,
+      hiddenPanes: state.view.hiddenPanes,
+    });
     return state.model;
   };
 
   const draw = () => {
-    if (!screen || quitting) return;
+    if (!screen || quitting || state.viewing) return;
     rebuild();
     const v = moveSelection(state.model, state.view, null); // clamp only
     state.view.pane = v.pane;
@@ -103,6 +133,16 @@ export async function runApp(opts) {
     }, ttlMs);
     state.noticeTimer.unref?.();
     draw();
+  };
+
+  // View state: hidden rows and panes, written to the board's own file only.
+  const persist = () => {
+    if (!viewStatePath.path) {
+      notice(viewStatePath.problem || 'view state not saved: no config directory (set XDG_CONFIG_HOME or HOME)', true, 10000);
+      return;
+    }
+    const err = saveViewState(viewStatePath.path, { hidden: state.view.hidden, hiddenPanes: state.view.hiddenPanes });
+    if (err) notice(`view state not saved: ${err}`, true, 15000);
   };
 
   const refresh = async (why) => {
@@ -187,6 +227,57 @@ export async function runApp(opts) {
     }
   };
 
+  // Show a Findings report: suspend the screen, run the viewer with the
+  // terminal, resume and repaint. Refreshes keep running underneath; their
+  // draws are skipped until the viewer has exited.
+  const viewRow = async (row) => {
+    const pane = state.model.panes[state.view.pane];
+    const problem = viewProblem(pane, row);
+    if (problem) {
+      notice(problem, true);
+      return;
+    }
+    if (state.viewing) return;
+    const { argv, source } = resolveViewer({ cmd: opts.viewerCmd, env: process.env });
+    state.viewing = true;
+    const sigint = process.listeners('SIGINT');
+    process.removeAllListeners('SIGINT');
+    const ignore = () => {};
+    process.on('SIGINT', ignore);
+    screen.suspend();
+    let result = null;
+    let failure = null;
+    try {
+      result = await runViewer(row.reportPath, { argv });
+    } catch (e) {
+      failure = e;
+    } finally {
+      screen.resume();
+      process.removeListener('SIGINT', ignore);
+      for (const fn of sigint) process.on('SIGINT', fn);
+      state.viewing = false;
+    }
+    if (failure) notice(`viewer failed (${argv[0]}): ${failure.message.slice(0, 60)} · ${row.reportPath}`, true, 15000);
+    else if (result && result.code !== 0 && result.code !== null) notice(`${argv[0]} exited ${result.code} · ${row.reportPath}`, true, 10000);
+    else notice(`viewed ${row.reportPath} (${source})`, false, 8000);
+    draw();
+  };
+
+  // The `f` key: put the firstmate pane beside the board or move it back out.
+  // The board's own pane id comes from herdr's HERDR_PANE_ID (injected into
+  // every process herdr spawns) or --board-pane.
+  const firstmate = async () => {
+    const boardPane = opts.boardPane || process.env.HERDR_PANE_ID || null;
+    notice('finding the firstmate pane…', false, 20000);
+    try {
+      const r = await moveFirstmatePane({ client: herdr, fmHome: state.fmHome, boardPane, mode: 'toggle' });
+      notice(r.message, false, 10000);
+      scheduleRefresh('pane move');
+    } catch (e) {
+      notice(e.message.slice(0, 120), true, 15000);
+    }
+  };
+
   const quit = () => {
     if (quitting) return;
     quitting = true;
@@ -208,13 +299,21 @@ export async function runApp(opts) {
     focus: (row) => {
       focusRow(row);
     },
+    viewReport: (row) => {
+      viewRow(row);
+    },
+    firstmate: () => {
+      firstmate();
+    },
     refresh: () => {
       refresh('manual');
     },
+    persist,
     quit,
   };
 
   const onKey = (key) => {
+    if (state.viewing) return;
     handleKey(ctx, key);
     draw();
   };
@@ -225,6 +324,8 @@ export async function runApp(opts) {
   process.on('SIGHUP', quit);
 
   draw();
+  if (loaded.error) notice(`view state: ${loaded.error}`, true, 15000);
+  if (viewStatePath.problem) notice(viewStatePath.problem, true, 15000);
   if (herdr) {
     herdr.on('state', () => draw());
     herdr.on('event', (ev) => {

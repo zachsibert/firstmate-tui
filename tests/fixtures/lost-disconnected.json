@@ -1,0 +1,67 @@
+{
+  "_comment": "The herdr block carries state=disconnected: the agents map is what the board last saw, and ship-lost's pane w1L:p1 is not in it. Absence cannot be proved while disconnected, so the HERDR cell reads unknown (grey), not pane lost (red). now is 2026-09-16T12:00:00Z.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 30,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "ship-alpha",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-alpha.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets" }
+      },
+      {
+        "id": "ship-lost",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "status-log", "detail": "adding the retry loop", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1L:p1", "exists": false, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": {
+          "pending_decision": true,
+          "blocked_event": false,
+          "open_decisions": [{ "key": "cache-size", "verb": "needs-decision", "summary": "Cache 1k or 10k entries?" }],
+          "scout_report_present": false,
+          "last_event_text": "needs-decision [key=cache-size]: Cache 1k or 10k entries?"
+        },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-lost.status", "present": true, "kind": "event_history", "last_event": { "state": "needs-decision", "note": "Cache 1k or 10k entries?", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "acme/api" }
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "ship-alpha", "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-15", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "ship-lost", "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "acme/api", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-16", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } }
+      ]
+    },
+    "scout_reports": [],
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "herdr": {
+    "state": "disconnected",
+    "detail": "ECONNREFUSED",
+    "agents": [{ "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-alpha" }]
+  },
+  "prs": null,
+  "mtimes": {
+    "/fixture/firstmate/state/ship-alpha.status": 1789559700,
+    "/fixture/firstmate/state/ship-lost.status": 1789559400
+  }
+}

@@ -18,13 +18,21 @@
 //   expanded      Set of In flight group keys currently expanded
 //   allHomesNeeds also list every secondmate ledger's open decisions in Needs
 //                 you (the --all-homes-needs flag); default off, main home only
+//   hidden        Set of row hide keys the captain hid with `x` (view state)
+//   showHidden    list hidden rows anyway, marked "(hidden)" (the `H` toggle)
+//   hiddenPanes   Set of pane ids switched off with `1`-`5`
 //
-// Output: { panes: [ { id, title, empty, header, rows[] } x5 ], meta }.
+// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount } x5 ], meta }.
 // Every row carries tag, extra, id, text, repo, home, age (display fields) plus
-// name (the undecorated id for notices), ageSeconds, paneId (herdr pane id when
-// the row has one), focusable, url (a PR URL the row can open, or null) and,
-// for In flight grouping, group / expanded / flag on a group row and parent on
-// its children. The mapping follows the scout report's section 1 table.
+// name (the undecorated id for notices), homeId (main or the secondmate id),
+// hideKey (pane:home:name, plus the completion date for Landed), ageSeconds,
+// paneId (herdr pane id when the row has one), lost (that pane is absent from
+// a connected herdr), unknown (herdr is disconnected, so absence is unproved),
+// focusable, url (a PR URL the row can open, or null), reportPath (Findings:
+// the absolute report path on this host, or null) and, for In flight grouping,
+// group / expanded / flag on a group row and parent on its children. A row
+// listed under showHidden carries hidden: true. The mapping follows the scout
+// report's section 1 table.
 
 import { PANES } from './layout.mjs';
 import { basename, clean, fmtAge, parseTime, relativeTo, repoFromUrl } from './text.mjs';
@@ -57,18 +65,35 @@ function daysToSeconds(days) {
 function homeLabel(ledger) {
   if (!ledger) return MAIN_HOME_LABEL;
   const suffix = ledger.remote ? ' (remote)' : ledger.cached ? ' (cached)' : '';
-  return `${ledger.id || basename(ledger.home) || 'home'}${suffix}`;
+  return `${homeIdOf(ledger)}${suffix}`;
 }
 
-function herdrColumn(facts, target) {
+// The undecorated home id used in hide keys and group rows.
+function homeIdOf(ledger) {
+  if (!ledger) return MAIN_HOME_LABEL;
+  return ledger.id || basename(ledger.home) || 'home';
+}
+
+// The HERDR cell for one endpoint target and the join flags behind it.
+//   lost     the pane is absent from a herdr we are connected to (or from the
+//            fixture overlay): the worker pane is gone, red in the frame
+//   unknown  herdr is connecting or disconnected: the pane may be gone, but
+//            absence cannot be proved, grey in the frame
+// A remote home's panes live in another host's herdr, so they are neither.
+function herdrColumn(facts, target, { remote = false } = {}) {
+  const none = { extra: '-', paneId: null, lost: false, unknown: false };
   const parsed = parseTarget(target);
-  if (!parsed) return { extra: '-', paneId: null };
-  if (parsed.tmux) return { extra: 'tmux', paneId: null };
+  if (!parsed) return none;
+  if (parsed.tmux) return { ...none, extra: 'tmux' };
+  if (remote) return { ...none, extra: 'remote', paneId: parsed.paneId };
   const state = facts.herdr ? facts.herdr.state : 'off';
-  if (state === 'off' || state === 'unavailable') return { extra: '-', paneId: parsed.paneId };
+  if (state === 'off' || state === 'unavailable') return { ...none, paneId: parsed.paneId };
   const agent = facts.herdr.agents ? facts.herdr.agents[parsed.paneId] : null;
-  if (!agent) return { extra: state === 'connected' || state === 'fixture' ? 'absent' : '?', paneId: parsed.paneId };
-  return { extra: agent.agent_status || 'unknown', paneId: parsed.paneId };
+  if (!agent) {
+    if (state === 'connected' || state === 'fixture') return { ...none, extra: 'pane lost', paneId: parsed.paneId, lost: true };
+    return { ...none, extra: 'unknown', paneId: parsed.paneId, unknown: true };
+  }
+  return { ...none, extra: agent.agent_status || 'unknown', paneId: parsed.paneId };
 }
 
 function decisionTag(verb) {
@@ -92,14 +117,21 @@ function makeRow(fields) {
     text: '',
     repo: '-',
     home: MAIN_HOME_LABEL,
+    homeId: MAIN_HOME_LABEL,
+    hideKey: null,
     ageSeconds: null,
     paneId: null,
+    lost: false,
+    unknown: false,
     focusable: false,
     url: null,
+    reportPath: null,
+    reportRemote: false,
     group: null,
     parent: null,
     expanded: false,
     flag: false,
+    hidden: false,
     ...fields,
   };
   row.name = fields.name ?? row.id;
@@ -169,6 +201,8 @@ function taskDecisionRows(facts, task, decisions = null) {
         repo: taskRepo(task),
         ageSeconds: statusLogAge(facts, task),
         paneId: herdr.paneId,
+        lost: herdr.lost,
+        unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId),
       }),
     );
@@ -183,6 +217,8 @@ function taskDecisionRows(facts, task, decisions = null) {
         repo: taskRepo(task),
         ageSeconds: statusLogAge(facts, task),
         paneId: herdr.paneId,
+        lost: herdr.lost,
+        unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId),
       }),
     );
@@ -217,6 +253,8 @@ function needsRows(facts, opts) {
           repo: pr ? pr.repo : taskRepo(task),
           ageSeconds: statusLogAge(facts, task),
           paneId: herdr.paneId,
+          lost: herdr.lost,
+          unknown: herdr.unknown,
           focusable: Boolean(herdr.paneId),
           url: task.pr.url,
         }),
@@ -415,6 +453,7 @@ function decisionRow(ledger, d, extraFields = {}) {
     text: d.reason && d.reason !== d.summary ? `${d.summary} · ${d.reason}` : d.summary,
     repo: q ? q.repo : '-',
     home: homeLabel(ledger),
+    homeId: homeIdOf(ledger),
     ageSeconds: daysToSeconds(d.hold_age_days),
     ...extraFields,
   });
@@ -432,6 +471,8 @@ function mainTaskRow(facts, task, backlogById = new Map()) {
     repo: taskRepo(task),
     ageSeconds: statusLogAge(facts, task),
     paneId: herdr.paneId,
+    lost: herdr.lost,
+    unknown: herdr.unknown,
     focusable: Boolean(herdr.paneId),
     url: task.pr && task.pr.url ? task.pr.url : null,
   });
@@ -452,7 +493,7 @@ function ledgerChildRows(facts, ledger, decisionByChild) {
   for (const child of Array.isArray(summary.active_children) ? summary.active_children : []) {
     covered.add(child.id);
     const ep = endpointById.get(child.id);
-    const herdr = herdrColumn(facts, ep && ep.endpoint ? ep.endpoint.target : null);
+    const herdr = herdrColumn(facts, ep && ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) });
     const d = decisionByChild.get(child.id);
     const h = holdsById.get(child.id);
     rows.push(
@@ -463,15 +504,18 @@ function ledgerChildRows(facts, ledger, decisionByChild) {
         text: d ? decisionText(d) : h && h.title ? heldText(h) : `${kindPrefix(child.kind)}${child.doing || child.name || ''}`,
         repo: child.repo,
         home: homeLabel(ledger),
+        homeId: homeIdOf(ledger),
         ageSeconds: childStatusAge(facts, ledger, child.id),
         paneId: herdr.paneId,
+        lost: herdr.lost,
+        unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId) && !ledger.remote,
       }),
     );
   }
   for (const ep of endpoints) {
     if (covered.has(ep.id)) continue;
-    const herdr = herdrColumn(facts, ep.endpoint ? ep.endpoint.target : null);
+    const herdr = herdrColumn(facts, ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) });
     const d = decisionByChild.get(ep.id);
     const h = holdsById.get(ep.id);
     rows.push(
@@ -482,8 +526,11 @@ function ledgerChildRows(facts, ledger, decisionByChild) {
         text: d ? decisionText(d) : h && h.title ? heldText(h) : `endpoint ${ep.endpoint && ep.endpoint.target ? ep.endpoint.target : '?'} (${ep.source || 'pane'})`,
         repo: '-',
         home: homeLabel(ledger),
+        homeId: homeIdOf(ledger),
         ageSeconds: childStatusAge(facts, ledger, ep.id),
         paneId: herdr.paneId,
+        lost: herdr.lost,
+        unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId) && !ledger.remote,
       }),
     );
@@ -524,16 +571,17 @@ function ledgerGroup(facts, ledger, mateTask, expanded) {
   const groupRow = makeRow({
     tag: worst ? worst.tag : 'idle',
     extra: `${live} live`,
-    id: `${flag ? '!' : ''}${expanded ? '▾' : '▸'} ${ledger.id || basename(ledger.home)}`,
-    name: ledger.id || basename(ledger.home),
+    id: `${flag ? '!' : ''}${expanded ? '▾' : '▸'} ${homeIdOf(ledger)}`,
+    name: homeIdOf(ledger),
     text: workers.length ? workers.map((r) => r.name).join(', ') : mateRow ? mateRow.text : 'no workers',
     repo: repos.length === 1 ? repos[0] : repos.length > 1 ? `${repos.length} repos` : '-',
     home: homeLabel(ledger),
+    homeId: homeIdOf(ledger),
+    hideKey: `inflight:${homeIdOf(ledger)}:home`,
     ageSeconds: ages.length ? Math.min(...ages) : mateRow ? mateRow.ageSeconds : null,
     paneId: mateRow ? mateRow.paneId : null,
     focusable: false,
     group: key,
-    homeId: ledger.id || basename(ledger.home),
     expanded,
     flag,
   });
@@ -572,6 +620,17 @@ function inflightRows(facts, opts) {
 }
 
 // ----------------------------------------------------------------- Findings
+//
+// Every row carries reportPath, the absolute path of the report on this host,
+// resolved against the home that owns it (the main home for scout reports and
+// backlog report_path values, the secondmate home for its landed reports), so
+// `enter` can hand it to the viewer. A remote home's report lives on another
+// host: reportPath stays null and reportRemote says why.
+function absolutePath(path, home) {
+  if (!path) return null;
+  return path.startsWith('/') ? path : `${String(home || '').replace(/\/+$/, '')}/${path}`;
+}
+
 function findingsRows(facts) {
   const rows = [];
   const snap = facts.snapshot || {};
@@ -591,6 +650,7 @@ function findingsRows(facts) {
         text: relativeTo(rep.path, facts.fmHome),
         repo: b ? b.repo : '-',
         ageSeconds: ageSince(facts.now, facts.mtime(rep.path)),
+        reportPath: absolutePath(rep.path, facts.fmHome),
       }),
     );
   }
@@ -601,7 +661,7 @@ function findingsRows(facts) {
     if (seenPaths.has(relativeTo(r.report_path, facts.fmHome))) continue;
     seen.add(`main:${r.id}`);
     seenPaths.add(relativeTo(r.report_path, facts.fmHome));
-    const abs = r.report_path.startsWith('/') ? r.report_path : `${facts.fmHome}/${r.report_path}`;
+    const abs = absolutePath(r.report_path, facts.fmHome);
     rows.push(
       makeRow({
         tag: r.kind || 'report',
@@ -610,6 +670,7 @@ function findingsRows(facts) {
         text: relativeTo(r.report_path, facts.fmHome),
         repo: r.repo,
         ageSeconds: ageSince(facts.now, facts.mtime(abs)) ?? ageSince(facts.now, parseTime(r.completion && r.completion.date)),
+        reportPath: abs,
       }),
     );
   }
@@ -628,7 +689,7 @@ function findingsRows(facts) {
     if (seen.has(key)) continue;
     seen.add(key);
     const ledger = ledgerById.get(home) || { id, home };
-    const abs = rec.report_path.startsWith('/') ? rec.report_path : `${home}/${rec.report_path}`;
+    const abs = absolutePath(rec.report_path, home);
     rows.push(
       makeRow({
         tag: 'report',
@@ -637,7 +698,10 @@ function findingsRows(facts) {
         text: rec.report_path,
         repo: '-',
         home: homeLabel(ledger),
+        homeId: homeIdOf(ledger),
         ageSeconds: ageSince(facts.now, facts.mtime(abs)) ?? ageSince(facts.now, parseTime(rec.completion && rec.completion.date)),
+        reportPath: ledger.remote ? null : abs,
+        reportRemote: Boolean(ledger.remote),
       }),
     );
   }
@@ -659,6 +723,7 @@ function landedRows(facts) {
         id: r.id,
         text: r.pr_url ? `${r.title} · ${r.pr_url}` : r.title,
         repo: r.repo,
+        hideKey: `landed:${MAIN_HOME_LABEL}:${r.id}:${date || '-'}`,
         ageSeconds: ageSince(facts.now, parseTime(date)),
         url: r.pr_url || null,
       }),
@@ -688,6 +753,8 @@ function landedRows(facts) {
         text: rec.pr_url ? `${rec.title} · ${rec.pr_url}` : rec.title,
         repo: pr ? pr.repo : '-',
         home: homeLabel(ledger),
+        homeId: homeIdOf(ledger),
+        hideKey: `landed:${homeIdOf(ledger)}:${rec.id}:${date || '-'}`,
         ageSeconds: ageSince(facts.now, parseTime(date)),
         url: rec.pr_url || null,
       }),
@@ -723,8 +790,9 @@ export function snapshotLabel(facts) {
   return facts.snapshotError ? `snapshot ${age} ago (stale)` : `snapshot ${age} ago`;
 }
 
-function paneHeader(facts, pane, count) {
-  const parts = [`${pane.title} (${count})`, snapshotLabel(facts), herdrLabel(facts.herdr)];
+function paneHeader(facts, pane, count, hiddenCount, showHidden) {
+  const hiddenNote = hiddenCount > 0 ? `, ${hiddenCount} hidden${showHidden ? ' shown' : ''}` : '';
+  const parts = [`${pane.title} (${count}${hiddenNote})`, snapshotLabel(facts), herdrLabel(facts.herdr)];
   if (pane.id === 'review') {
     const prs = facts.prs || { enabled: false };
     if (!prs.enabled) parts.push('checks not fetched');
@@ -735,10 +803,31 @@ function paneHeader(facts, pane, count) {
   return parts.join(' · ');
 }
 
+function asSet(value) {
+  if (value instanceof Set) return value;
+  return new Set(Array.isArray(value) ? value : []);
+}
+
+// Hide keys: pane:home:name, except group rows (inflight:<home>:home) and
+// Landed rows, which carry the completion date so a re-landed item reappears.
+// A child of a hidden group is hidden with it.
+function applyHidden(paneId, rows, opts) {
+  for (const r of rows) if (!r.hideKey) r.hideKey = `${paneId}:${r.homeId}:${r.name}`;
+  const groupHideKey = new Map(rows.filter((r) => r.group).map((r) => [r.group, r.hideKey]));
+  const isHidden = (r) => opts.hidden.has(r.hideKey) || (r.parent ? opts.hidden.has(groupHideKey.get(r.parent)) : false);
+  const marked = rows.map((r) => (isHidden(r) ? { ...r, hidden: true, text: `(hidden) ${r.text}` } : r));
+  const hiddenCount = marked.filter((r) => r.hidden).length;
+  const listed = opts.showHidden ? marked : marked.filter((r) => !r.hidden);
+  return { rows: listed, hiddenCount };
+}
+
 export function buildModel(facts, options = {}) {
   const opts = {
-    expanded: options.expanded instanceof Set ? options.expanded : new Set(Array.isArray(options.expanded) ? options.expanded : []),
+    expanded: asSet(options.expanded),
     allHomesNeeds: Boolean(options.allHomesNeeds),
+    hidden: asSet(options.hidden),
+    showHidden: Boolean(options.showHidden),
+    hiddenPanes: asSet(options.hiddenPanes),
   };
   const f = {
     now: facts.now,
@@ -752,9 +841,9 @@ export function buildModel(facts, options = {}) {
     mtime: typeof facts.mtime === 'function' ? facts.mtime : () => null,
   };
   const builders = { needs: needsRows, review: reviewRows, inflight: inflightRows, findings: findingsRows, landed: landedRows };
-  const panes = PANES.map((p) => {
-    const rows = builders[p.id](f, opts);
-    return { id: p.id, title: p.title, empty: p.empty, rows, header: paneHeader(f, p, rows.length) };
+  const panes = PANES.map((p, i) => {
+    const { rows, hiddenCount } = applyHidden(p.id, builders[p.id](f, opts), opts);
+    return { id: p.id, title: p.title, key: String(i + 1), empty: p.empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden) };
   });
   const homes = 1 + f.ledgers.length;
   return {
@@ -765,6 +854,9 @@ export function buildModel(facts, options = {}) {
       snapshot: snapshotLabel(f),
       snapshotError: f.snapshotError,
       herdr: herdrLabel(f.herdr),
+      hiddenPanes: panes.filter((p) => p.hidden).map((p) => p.key),
+      hiddenRows: panes.reduce((n, p) => n + p.hiddenCount, 0),
+      showHidden: opts.showHidden,
       ledgerErrors: f.ledgers.filter((l) => l.error).map((l) => `${l.id || basename(l.home)}: ${l.error}`),
     },
   };

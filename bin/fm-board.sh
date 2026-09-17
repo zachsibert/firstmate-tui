@@ -8,25 +8,38 @@
 #                                      firstmate.board is linked, otherwise a
 #                                      hidden workspace); prints the pane id
 #   fm-board.sh focus [flags]          focus the pane recorded by `open`
+#   fm-board.sh split-firstmate | unsplit-firstmate | toggle-firstmate [--board-pane <id>]
+#                                      move the firstmate pane beside the board
+#                                      pane (right split, 55 %) or back out to
+#                                      its own workspace; the board's `f` key and
+#                                      the herdr plugin actions firstmate.board.*
+#                                      run these. The board pane is --board-pane,
+#                                      else the pane recorded by `open`
 #   fm-board.sh --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
 #                             [--keys <list>] [--expand <all|ids>] [--opener-cmd <argv>]
+#                             [--viewer-cmd <argv>] [--view-state <file>] [--tags]
 #                                      print one frame to stdout and exit
 #
 # Flags are passed through to bin/fm-board/index.mjs unchanged; see
 # `fm-board.sh --help` for the list (--home, --refresh, --prs, --no-herdr,
-# --all-homes-needs, --opener-cmd, --herdr-cmd, --herdr-socket,
-# --snapshot-timeout, --keys, --expand).
+# --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state, --board-pane,
+# --herdr-cmd, --herdr-socket, --snapshot-timeout, --keys, --expand, --tags).
 #
 # FM_HOME resolution: the FM_HOME environment variable, else the one-line file
 # "$HERDR_PLUGIN_CONFIG_DIR/fm-home" (written once by the captain when the
 # board runs as a herdr plugin action, which carries no FM_HOME), else a clear
 # error. --fixture mode needs no home at all.
 #
-# The board never writes into FM_HOME, a project or a state directory. Its only
-# file is the pane record under ${XDG_STATE_HOME:-$HOME/.local/state}/fm-board/
+# The board never writes into FM_HOME, a project or a state directory. Its
+# files are the pane record under ${XDG_STATE_HOME:-$HOME/.local/state}/fm-board/
 # (or $HERDR_PLUGIN_STATE_DIR when herdr provides one) so `focus` can find the
-# pane `open` created. Its two actions are `herdr agent focus` and opening a
-# PR URL in the browser (`open` / `xdg-open`, or --opener-cmd).
+# pane `open` created, and the view-state file (hidden rows and panes) at
+# $(herdr plugin config-dir firstmate.board)/view-state.json when herdr is
+# present, else $XDG_CONFIG_HOME/fm-board/view-state.json, else
+# ~/.config/fm-board/view-state.json (--view-state overrides). Its actions are
+# `herdr agent focus`, opening a PR URL in the browser (`open` / `xdg-open`, or
+# --opener-cmd), showing a report in a terminal viewer (glow, $EDITOR, vim,
+# less, or --viewer-cmd) and moving the firstmate pane with `herdr pane move`.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -46,12 +59,14 @@ usage() {
 # ---------------------------------------------------------------- arguments
 command=run
 case "${1:-}" in
-  run|open|focus) command=$1; shift ;;
+  run|open|focus|split-firstmate|unsplit-firstmate|toggle-firstmate) command=$1; shift ;;
 esac
 
 want_herdr=1
 render_once=0
 fixture=
+view_state=
+board_pane=
 herdr_cmd=${HERDR_BIN_PATH:-herdr}
 pass=()
 while [ "$#" -gt 0 ]; do
@@ -61,7 +76,9 @@ while [ "$#" -gt 0 ]; do
     --render-once) render_once=1; pass+=("$1") ;;
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
-    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--expand|--opener-cmd)
+    --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
+    --board-pane) [ "$#" -ge 2 ] || die "--board-pane needs a value"; board_pane=$2; pass+=("$1" "$2"); shift ;;
+    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--expand|--opener-cmd|--viewer-cmd)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
   esac
@@ -98,7 +115,7 @@ if [ "$want_herdr" -eq 1 ]; then
   command -v "$herdr_bin" >/dev/null 2>&1 || die "herdr is required for the live overlay (found none as '$herdr_bin'); install herdr 0.8.x or pass --no-herdr"
 fi
 
-if [ "$render_once" -eq 0 ] && [ ! -d "$BOARD_DIR/node_modules/neo-blessed" ]; then
+if [ "$command" = run ] && [ "$render_once" -eq 0 ] && [ ! -d "$BOARD_DIR/node_modules/neo-blessed" ]; then
   die "neo-blessed is not installed; run: (cd '$BOARD_DIR' && npm ci)"
 fi
 
@@ -125,6 +142,25 @@ record_path() {
 plugin_linked() {
   herdr_run plugin list 2>/dev/null | grep -Fq "$PLUGIN_ID"
 }
+
+# Where hidden rows and hidden panes are remembered. herdr's per-plugin config
+# directory when herdr is present (the same place the fm-home file lives; the
+# path is printed whether or not the plugin is linked), else index.mjs falls
+# back to $XDG_CONFIG_HOME/fm-board or ~/.config/fm-board. A fixture render
+# gets no default so the frame depends on the fixture alone. Never FM_HOME.
+view_state_default() {
+  local dir=
+  if [ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ]; then
+    dir=$HERDR_PLUGIN_CONFIG_DIR
+  elif [ "$want_herdr" -eq 1 ]; then
+    dir=$(herdr_run plugin config-dir "$PLUGIN_ID" 2>/dev/null | head -n 1) || dir=
+  fi
+  [ -n "$dir" ] && printf '%s/view-state.json' "${dir%/}"
+}
+if [ -z "$view_state" ] && [ -z "$fixture" ] && [ "$command" = run ]; then
+  vs=$(view_state_default)
+  [ -n "$vs" ] && pass+=(--view-state "$vs")
+fi
 
 # Open the board in its own pane without splitting the captain's pane.
 # Route 1: the linked plugin, placement=tab in the current workspace.
@@ -180,8 +216,27 @@ focus_board() {
   printf 'focused %s\n' "$pane"
 }
 
+# split-firstmate / unsplit-firstmate / toggle-firstmate: the pane-finding and
+# `herdr pane move` calls live in bin/fm-board/lib/split.mjs; this only supplies
+# the board pane (--board-pane, else the pane `open` recorded) and never calls
+# pane close.
+move_firstmate() {
+  [ "$want_herdr" -eq 1 ] || die "$command needs herdr; drop --no-herdr"
+  if [ -z "$board_pane" ]; then
+    local rec pane wsid route
+    rec=$(record_path)
+    [ -r "$rec" ] || die "no board pane recorded at $rec; run 'fm-board.sh open' first or pass --board-pane <id>"
+    read -r pane wsid route < "$rec"
+    [ -n "$pane" ] || die "empty board pane record at $rec; run 'fm-board.sh open' again"
+    : "$wsid" "$route"
+    pass+=(--board-pane "$pane")
+  fi
+  exec node "$ENTRY" "$command" "${pass[@]+"${pass[@]}"}"
+}
+
 case "$command" in
   open) open_board ;;
   focus) focus_board ;;
+  split-firstmate|unsplit-firstmate|toggle-firstmate) move_firstmate ;;
   run) exec node "$ENTRY" "${pass[@]+"${pass[@]}"}" ;;
 esac

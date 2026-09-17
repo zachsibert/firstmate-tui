@@ -51,17 +51,22 @@ export function columns(cols, innerWidth, paneId, tagWidth = TAG_WIDTH_MIN) {
   return spec.map((c) => (c.flex ? { ...c, width: flexWidth } : c));
 }
 
-// Content heights (rows inside the borders) for the five panes. Every pane
-// gets at least one content row; spare rows go where the demand is, then to
-// In flight and Needs you, which are the panes the captain watches most.
-export function paneHeights(totalRows, demands) {
+// Content heights (rows inside the borders) for the five panes. Every shown
+// pane gets at least one content row; spare rows go where the demand is, then
+// to In flight and Needs you, which are the panes the captain watches most.
+// `visible[i] === false` switches pane i off (the 1-5 keys): it draws nothing
+// and its rows go to the panes still shown. The result always has one entry
+// per pane, 0 for a hidden one.
+export function paneHeights(totalRows, demands, visible = []) {
   const rows = Math.max(totalRows, MIN_ROWS);
+  const shown = PANES.map((_, i) => visible[i] !== false);
+  const shownCount = shown.filter(Boolean).length;
   const chrome = 2; // title line + footer line
-  const borders = PANES.length * 2;
-  let spare = rows - chrome - borders - PANES.length;
-  const heights = PANES.map(() => 1);
+  const borders = shownCount * 2;
+  let spare = rows - chrome - borders - shownCount;
+  const heights = PANES.map((_, i) => (shown[i] ? 1 : 0));
   const want = PANES.map((_, i) => Math.max(1, demands[i] || 0));
-  const priority = [0, 2, 1, 3, 4];
+  const priority = [0, 2, 1, 3, 4].filter((i) => shown[i]);
   let progressed = true;
   while (spare > 0 && progressed) {
     progressed = false;
@@ -76,6 +81,7 @@ export function paneHeights(totalRows, demands) {
   }
   for (const i of [2, 0, 1, 3, 4]) {
     if (spare <= 0) break;
+    if (!shown[i]) continue;
     heights[i] += spare;
     spare = 0;
   }

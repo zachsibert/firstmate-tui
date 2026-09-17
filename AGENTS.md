@@ -15,11 +15,18 @@ the findings watermark belong to later milestones.
 ## Hard rules
 
 - The board reads firstmate homes and never writes into `FM_HOME`, a project
-  or a `state/` directory. Its only file is the pane record under
-  `${XDG_STATE_HOME:-~/.local/state}/fm-board/` (or `HERDR_PLUGIN_STATE_DIR`).
-- The board owns no authority. Its actions are `herdr agent focus` and
-  opening a PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open`
-  / `xdg-open` / `--opener-cmd`, never a shell string, http(s) only). Answers,
+  or a `state/` directory. Its files are the pane record under
+  `${XDG_STATE_HOME:-~/.local/state}/fm-board/` (or `HERDR_PLUGIN_STATE_DIR`)
+  and `view-state.json` (hidden rows and panes; `lib/viewstate.mjs` names the
+  location chain and refuses a path inside `FM_HOME`). Hiding is view state
+  because firstmate retires Done rows itself; never turn it into a firstmate
+  write.
+- The board owns no authority. Its actions are `herdr agent focus`, opening a
+  PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
+  `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
+  report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended)
+  and moving the firstmate pane beside the board (`lib/split.mjs`: `herdr
+  pane move`, the pane found at press time, never `pane close`). Answers,
   merges and dispatch stay with firstmate's own owners.
 - In flight groups secondmate work by home, not by delegated item, because
   the ledger carries no per-child parent field (the comment above
@@ -40,8 +47,15 @@ the findings watermark belong to later milestones.
 - Run `tests/fm-board.test.sh` after any change; it needs Node and nothing
   else. Add a fixture under `tests/fixtures/` when a new data shape appears,
   and name in the test comment what would make the check fail. Key behavior
-  is tested through `--render-once --keys <list>` (and `--expand`); a PR open
-  must go to `--opener-cmd bash tests/fake-opener.sh`, never a real browser.
+  is tested through `--render-once --keys <list>` (and `--expand`,
+  `--view-state`, `--tags`); a PR open must go to `--opener-cmd bash
+  tests/fake-opener.sh` and a report view to `--viewer-cmd bash
+  tests/fake-viewer.sh`, never a real browser or editor (a one-shot render
+  without `--viewer-cmd` only reports the resolved viewer for that reason).
+  Anything that calls herdr from a test must run against `tests/fake-herdr.sh`
+  with `HERDR_BIN_PATH` pointing at it as well as PATH: herdr sets
+  `HERDR_BIN_PATH` inside its panes, so PATH alone still reaches the captain's
+  live server.
 - Bash (`bin/fm-board.sh`, `tests/*.sh`) must pass ShellCheck 0.11.0, the
   same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh tests/fm-board.test.sh`
   when no local binary is installed).

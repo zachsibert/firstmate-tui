@@ -1,0 +1,106 @@
+// lib/viewstate.mjs - the one file the board owns besides the pane record:
+// which rows the captain hid (`x`) and which panes he switched off (`1`-`5`).
+// Hiding is view state, not firstmate state: firstmate retires Done rows on
+// its own (done_keep per home, archived to data/done-archive.md), so nothing
+// here is ever written into FM_HOME, a project or a state directory.
+//
+// Location, first match wins:
+//   --view-state <path>                                  (the wrapper passes
+//       $(herdr plugin config-dir firstmate.board)/view-state.json when herdr
+//       is present; tests pass a temp file)
+//   $XDG_CONFIG_HOME/fm-board/view-state.json
+//   ~/.config/fm-board/view-state.json
+// A path inside FM_HOME is refused and the default is used instead.
+//
+// File shape (fm-board-view-state.v1):
+//   { "schema": "fm-board-view-state.v1",
+//     "hidden": [ "<pane>:<home>:<row id>[:<completion date>]", ... ],
+//     "hidden_panes": [ "landed", ... ],
+//     "updated": ISO time }
+// The row key is built by lib/model.mjs (hideKey); Landed keys carry the
+// completion date so an item that lands again reappears.
+
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+export const VIEW_STATE_SCHEMA = 'fm-board-view-state.v1';
+
+export function defaultViewStatePath(env = process.env) {
+  const base = env.XDG_CONFIG_HOME && env.XDG_CONFIG_HOME.startsWith('/') ? env.XDG_CONFIG_HOME : env.HOME ? `${env.HOME.replace(/\/+$/, '')}/.config` : null;
+  return base ? `${base.replace(/\/+$/, '')}/fm-board/view-state.json` : null;
+}
+
+function insideHome(path, fmHome) {
+  if (!fmHome) return false;
+  const home = fmHome.replace(/\/+$/, '');
+  return path === home || path.startsWith(`${home}/`);
+}
+
+// The path the board will read and write, or null when there is nowhere safe.
+// `problem` names a refused explicit path so the caller can say so once.
+export function resolveViewStatePath({ explicit = null, fmHome = null, env = process.env } = {}) {
+  const fallback = defaultViewStatePath(env);
+  if (explicit) {
+    if (insideHome(explicit, fmHome)) return { path: fallback && !insideHome(fallback, fmHome) ? fallback : null, problem: `refusing --view-state inside FM_HOME (${explicit})` };
+    return { path: explicit, problem: null };
+  }
+  if (fallback && insideHome(fallback, fmHome)) return { path: null, problem: `refusing view state inside FM_HOME (${fallback})` };
+  return { path: fallback, problem: null };
+}
+
+export function emptyViewState() {
+  return { hidden: new Set(), hiddenPanes: new Set() };
+}
+
+// Read the file; a missing file is an empty state, a damaged one is reported
+// and treated as empty (the board never overwrites it until the captain hides
+// something, so a hand edit can be repaired).
+export function loadViewState(path) {
+  const state = emptyViewState();
+  if (!path) return { state, error: null };
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (e) {
+    return { state, error: e.code === 'ENOENT' ? null : `${path}: ${e.message}` };
+  }
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch (e) {
+    return { state, error: `${path}: bad JSON (${e.message})` };
+  }
+  if (!doc || typeof doc !== 'object') return { state, error: `${path}: not an object` };
+  if (doc.schema && doc.schema !== VIEW_STATE_SCHEMA) return { state, error: `${path}: unexpected schema ${doc.schema}` };
+  for (const k of Array.isArray(doc.hidden) ? doc.hidden : []) if (typeof k === 'string' && k) state.hidden.add(k);
+  for (const p of Array.isArray(doc.hidden_panes) ? doc.hidden_panes : []) if (typeof p === 'string' && p) state.hiddenPanes.add(p);
+  return { state, error: null };
+}
+
+export function serializeViewState(state, now = new Date()) {
+  return `${JSON.stringify(
+    {
+      schema: VIEW_STATE_SCHEMA,
+      hidden: [...state.hidden].sort(),
+      hidden_panes: [...state.hiddenPanes].sort(),
+      updated: now.toISOString(),
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+// Write atomically (temp file in the same directory, then rename). Returns
+// null or an error message.
+export function saveViewState(path, state) {
+  if (!path) return 'no view-state path';
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, serializeViewState(state));
+    renameSync(tmp, path);
+    return null;
+  } catch (e) {
+    return `${path}: ${e.message}`;
+  }
+}
