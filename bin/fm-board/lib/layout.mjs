@@ -23,13 +23,18 @@ export function layoutMode(cols) {
   return cols < LIST_BREAKPOINT ? 'list' : 'panes';
 }
 
+export const TAG_WIDTH_MIN = 8;
+export const TAG_WIDTH_MAX = 14; // "awaiting merge"
+
 // Column spec for one pane. `cols` is the terminal width, which decides the
 // breakpoints; `innerWidth` is the room the row text may use. Fixed columns
-// keep the same width in every pane so the grid lines up across the board.
-export function columns(cols, innerWidth, paneId) {
+// keep the same width in every pane so the grid lines up across the board;
+// the renderer passes one `tagWidth` for the whole board (the widest STATE
+// word on it, between TAG_WIDTH_MIN and TAG_WIDTH_MAX).
+export function columns(cols, innerWidth, paneId, tagWidth = TAG_WIDTH_MIN) {
   const mode = layoutMode(cols);
   const wide = cols >= WIDE_BREAKPOINT;
-  const spec = [{ key: 'tag', label: mode === 'panes' ? TAG_LABEL[paneId] || 'STATE' : 'STATE', width: 8 }];
+  const spec = [{ key: 'tag', label: mode === 'panes' ? TAG_LABEL[paneId] || 'STATE' : 'STATE', width: Math.min(TAG_WIDTH_MAX, Math.max(TAG_WIDTH_MIN, tagWidth | 0)) }];
   if (mode === 'panes') spec.push({ key: 'extra', label: EXTRA_LABEL[paneId] || 'INFO', width: 9 });
   spec.push({ key: 'id', label: 'ID', width: 22 });
   spec.push({ key: 'text', label: paneId === 'findings' ? 'REPORT' : 'WHAT', width: 0, flex: true });

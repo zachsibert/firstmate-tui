@@ -4,9 +4,9 @@
 
 Panes, top to bottom by urgency:
 
-1. **Needs you** - what the main firstmate needs from you: blocked workers, keyed worker decisions, live captain holds and green PRs whose worker said done while the backlog row is still open. Main home only by default; a secondmate's open decisions flag its In flight group instead (`--all-homes-needs` lists them here too)
-2. **Ready for review** - one row per recorded pull request; with `--prs` the live check, review and mergeable state from GitHub. `enter` opens the PR in your browser
-3. **In flight** - one row per main-home worker, and one group row per secondmate home: the worst child state, the live worker count, the child ids, the shared repo and the age of the newest child event, with a leading `!` when a child has an open decision or is blocked. Expand a group (`l`, `right` or `enter`) to see the mate's own agent row, each worker with the herdr agent state beside firstmate's own state, and the home's live captain decisions
+1. **Needs you** - what the main firstmate needs from you: blocked workers, keyed worker decisions, live captain holds and green PRs whose worker said done while the backlog row is still open. Main home only by default; a secondmate's own decisions (its ledger's open decisions, and the keyed decisions its task record relays into the main home) flag its In flight group instead (`--all-homes-needs` lists them here too)
+2. **Ready for review** - one row per recorded pull request of an unfinished task; a task whose backlog row is done, and a PR a secondmate record merely mentions, stay out. With `--prs` the live check, review and mergeable state from GitHub, and a PR GitHub reports merged or closed is dropped. `enter` opens the PR in your browser
+3. **In flight** - one row per main-home worker (a worker that said done while its PR is unmerged reads `awaiting merge`), and one group row per secondmate home: the worst state among the mate, its children and its relayed decisions, the live worker count, the child ids, the shared repo and the age of the newest child event, with a leading `!` when a child has an open decision or is blocked. Expand a group (`l`, `right` or `enter`) to see the mate's own agent row, each worker with the herdr agent state beside firstmate's own state, the home's live captain decisions and the mate's relayed decisions
 4. **Findings** - scout reports and other report files, newest first, from every home
 5. **Landed** - done backlog rows and every secondmate home's landed work, newest first
 

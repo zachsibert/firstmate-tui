@@ -14,9 +14,10 @@
 #
 # Fixtures (tests/fixtures/):
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
-#                   decision, a live captain hold, a secondmate hold, a
-#                   green-unmerged PR, recorded PRs, herdr statuses, a tmux
-#                   task, a remote cached home, reports and landed rows
+#                   decision, a live captain hold, a secondmate hold and a
+#                   secondmate-relayed decision, a green-unmerged PR, a done
+#                   task with a merged PR, recorded PRs, herdr statuses, a
+#                   tmux task, a remote cached home, reports and landed rows
 #   grouped.json    160x44, In flight grouping: two secondmate homes, one with
 #                   four children (a keyed decision, a blocked child with a hold
 #                   reason) plus live and dated captain holds, one quiet
@@ -114,12 +115,12 @@ frame=$(render populated.json) || fail "populated: render exited non-zero"
 # Pane order and counts (falsify: reorder PANES in lib/layout.mjs, or delete a row source in the fixture).
 assert_contains "$frame" "Needs you (4)" "populated needs-you count (main home only)"
 assert_contains "$frame" "Ready for review (2)" "populated review count"
-assert_contains "$frame" "In flight (6)" "populated in-flight count (four main rows, two home groups)"
+assert_contains "$frame" "In flight (7)" "populated in-flight count (five main rows, two home groups)"
 assert_contains "$frame" "Findings (3)" "populated findings count"
 assert_contains "$frame" "Landed (4)" "populated landed count"
 assert_before "$frame" "Needs you \(4\)" "Ready for review \(2\)" "pane order 1"
-assert_before "$frame" "Ready for review \(2\)" "In flight \(6\)" "pane order 2"
-assert_before "$frame" "In flight \(6\)" "Findings \(3\)" "pane order 3"
+assert_before "$frame" "Ready for review \(2\)" "In flight \(7\)" "pane order 2"
+assert_before "$frame" "In flight \(7\)" "Findings \(3\)" "pane order 3"
 assert_before "$frame" "Findings \(3\)" "Landed \(4\)" "pane order 4"
 
 # Freshness header on every pane (falsify: drop herdrLabel() from paneHeader in lib/model.mjs).
@@ -140,50 +141,62 @@ assert_before "$frame" '^│ hold +- +decide-vendor' '^│ merge\?' "hold sorts 
 # Secondmate decisions stay out of Needs you by default and flag their In flight group instead
 # (falsify: drop the opts.allHomesNeeds guard in needsRows, or the flag in ledgerGroup).
 assert_not_contains "$frame" "etl-cutover" "secondmate captain hold is not in Needs you by default (and hyperion is collapsed)"
-assert_row "$frame" '^│ working +1 live +!▸ hyperion ' "the home holding that decision is flagged with ! in In flight"
+assert_not_contains "$frame" "etl-window" "a decision the secondmate record relays into the main home is not in Needs you by default"
+assert_row "$frame" '^│ decide +1 live +!▸ hyperion ' "the home holding those decisions is flagged with ! in In flight and reads decide"
 frame_all=$(render populated.json --all-homes-needs) || fail "populated --all-homes-needs: render exited non-zero"
-assert_contains "$frame_all" "Needs you (5)" "--all-homes-needs adds the secondmate decision"
+assert_contains "$frame_all" "Needs you (6)" "--all-homes-needs adds the secondmate ledger decision and the relayed one"
 assert_row "$frame_all" '^│ hold +- +etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +hyperion +1d │$' "--all-homes-needs: secondmate captain hold row labelled with its home"
+assert_row "$frame_all" '^│ decide +etl-wind… +hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record"
 assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ merge\?' "--all-homes-needs: hold sorts before merge?"
 
 # Ready for review without --prs (falsify: drop the "checks: not fetched" suffix in reviewRows).
 assert_row "$frame" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: not fetched +acme/widgets +main +- │$' "recorded PR 41 row"
 assert_row "$frame" '^│ PR +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched' "recorded PR 7 row"
 assert_not_contains "$frame" "passing" "no live check state without --prs"
+# Finished work stays out (falsify: drop the taskBacklogState or the secondmate check in recordedPrs).
+assert_no_row "$frame" '^│ PR +#30 ' "a task whose backlog row is done does not list its PR"
+assert_no_row "$frame" '^│ PR +#12 ' "a PR mentioned on a secondmate record is not ready for review"
 
 # In flight rows: state, herdr join, tmux (falsify: remove the herdr agents block, or change
 # tmux-task's endpoint target).
 assert_row "$frame" '^│ STATE +HERDR +ID +WHAT +REPO +HOME +AGE │$' "in-flight column headers"
 assert_row "$frame" '^│ working +working +ship-alpha +harness busy \(claude-hook\) +acme/widgets +main +5m │$' "task with herdr working and status-log age"
 assert_row "$frame" '^│ blocked +blocked +scout-beta +\(scout\) gh auth expired +acme/api +main +2h │$' "task with herdr blocked"
-assert_row "$frame" '^│ done +done +ship-gamma +PR https://github.com/acme/api/pull/7 checks green +acme/api +main +1m │$' "task with herdr done"
+assert_row "$frame" '^│ awaiting merge +done +ship-gamma +PR https://github.com/acme/api/pull/7 checks green +acme/api +main +1m │$' "worker said done with an unmerged PR: STATE reads awaiting merge (falsify: drop awaitingMerge from mainTaskRow)"
+assert_row "$frame" '^│ done +absent +ship-old +PR https://github.com/acme/widgets/pull/30 merged +acme/widgets +main +2d │$' "done task whose backlog row is done stays done"
 assert_row "$frame" '^│ working +tmux +tmux-task +running the migration +acme/legacy +main +- │$' "tmux-backed task shows tmux in HERDR"
+assert_row "$frame" '^│ STATE {10}KEY ' "STATE column widens to fit awaiting merge (falsify: fix the width in tagColumnWidth)"
 assert_before "$frame" '^│ working +working +ship-alpha' '^│ blocked +blocked +scout-beta' "in flight: working sorts before blocked"
-assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ done +done +ship-gamma' "in flight: blocked sorts before done"
+assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ awaiting merge +done +ship-gamma' "in flight: blocked sorts before awaiting merge"
+assert_before "$frame" '^│ awaiting merge +done +ship-gamma' '^│ done +absent +ship-old' "in flight: awaiting merge keeps the done slot, before plain done"
 
 # In flight groups, collapsed: one row per secondmate home with worst state, live count, child ids,
 # shared repo and newest child age; the mate's own agent row is folded into its group (falsify:
 # remove child-one from hyperion's active_children, w2A:p2 from the herdr block, or the mateTaskFor
 # fold in inflightRows).
-assert_row "$frame" '^│ working +1 live +!▸ hyperion +child-one, child-failed +acme/etl +hyperion +1h │$' "hyperion group: worst state working, one live worker, flagged, newest age 1h"
+assert_row "$frame" '^│ decide +1 live +!▸ hyperion +child-one, child-failed +acme/etl +hyperion +1h │$' "hyperion group: the relayed decision is the worst state, one live worker, flagged, newest age 1h"
 assert_row "$frame" '^│ working +1 live +▸ remote-sm +remote-child +acme/mobile +remote-sm \(remote\) +- │$' "remote home group row, not flagged"
 assert_no_row "$frame" '^│ working +idle +hyperion ' "the secondmate agent row is folded into its group when collapsed"
 assert_not_contains "$frame" "child-one  " "children are hidden while collapsed (id appears only in the group text)"
 assert_not_contains "$frame" "↳" "no child rows while collapsed"
-assert_before "$frame" '^│ working +1 live +!▸ hyperion' '^│ blocked +blocked +scout-beta' "a working group sorts with the working rows, before blocked"
+assert_before "$frame" '^│ working +1 live +▸ remote-sm' '^│ blocked +blocked +scout-beta' "a working group sorts with the working rows, before blocked"
+assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ decide +1 live +!▸ hyperion' "a group with a pending decision sorts with the blocked/decide rows"
 
 # In flight groups, expanded with --expand all (falsify: drop the children list in ledgerGroup, or
 # the etl-cutover decision from hyperion's decisions_open).
-frame_x=$(render populated.json --expand all) || fail "populated --expand all: render exited non-zero"
-assert_contains "$frame_x" "In flight (11)" "expanding both groups adds the mate rows, children and home decisions"
-assert_row "$frame_x" '^│ working +1 live +!▾ hyperion +child-one, child-failed +acme/etl +hyperion +1h │$' "expanded group row shows ▾"
-assert_row "$frame_x" '^│ working +idle +↳ hyperion +\(secondmate\) supervising two children +hyperion +main +- │$' "expanded: the secondmate agent row is the first child"
+frame_x=$(render populated.json --expand all --rows 48) || fail "populated --expand all: render exited non-zero"
+assert_contains "$frame_x" "In flight (13)" "expanding both groups adds the mate rows, children, home decisions and the relayed decision"
+assert_row "$frame_x" '^│ decide +1 live +!▾ hyperion +child-one, child-failed +acme/etl +hyperion +1h │$' "expanded group row shows ▾"
+assert_row "$frame_x" '^│ working +idle +↳ hyperion +\(secondmate\) supervising two children +acme/etl +main +- │$' "expanded: the secondmate agent row is the first child"
+assert_row "$frame_x" '^│ decide +etl-wind… +↳ hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "expanded: the relayed keyed decision lists under the group (falsify: drop relayed from ledgerGroup)"
 assert_row "$frame_x" '^│ working +working +↳ child-one +writing the loader +acme/etl +hyperion +3d │$' "expanded: active child with age from its home state file"
 assert_row "$frame_x" '^│ failed +absent +↳ child-failed +endpoint default:w2B:p2 \(run-step\) +- +hyperion +1h │$' "expanded: failed endpoint child with no herdr agent"
 assert_row "$frame_x" '^│ hold +- +↳ etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +hyperion +1d │$' "expanded: the home's live captain hold lists under the group"
 assert_row "$frame_x" '^│ working +absent +↳ remote-child +porting the login screen +acme/mobile +remote-sm \(remote\) +- │$' "expanded: remote home child row labelled remote"
 assert_before "$frame_x" '!▾ hyperion' '↳ child-one' "children follow their group row"
-assert_before "$frame_x" '↳ etl-cutover' '▾ remote-sm' "the next group starts after the previous group's children"
+assert_before "$frame_x" '↳ remote-child' '^│ blocked +blocked +scout-beta' "the next top-level row starts after the previous group's children"
+assert_before "$frame_x" '↳ etl-cutover' '↳ hyperion +Which maintenance' "the ledger's home decisions come before the relayed ones"
+assert_before "$frame_x" '↳ hyperion +Which maintenance' '^│ awaiting merge' "the group's rows end before the next top-level row"
 assert_before "$frame_x" '↳ child-one' '↳ child-failed' "children sort working before failed"
 
 # Findings (falsify: remove scout_reports[0], the mobile-fix report_path, or the report mtimes).
@@ -194,7 +207,8 @@ assert_before "$frame" 'data/scout-beta/report.md' 'data/mobile-fix/report.md' "
 assert_before "$frame" 'data/mobile-fix/report.md' 'data/old-scout/report.md' "findings newest first (2)"
 
 # Landed (falsify: change ship-old's state from done, or etl-index's completion date).
-assert_row "$frame" '^│ merged +09-14 +ship-old +Rename the widget table · https://github.com/acme/widgets/pull/30 +acme/widgets +main +2d │$' "landed merged row with PR"
+assert_row "$frame" '^│ merged +09-14 +ship-old +Rename the widget table · https://github.com/acme/widgets/pu' "landed merged row with PR (text truncated to the flex column at 160 cols)"
+assert_row "$frame" '^│ merged +09-14 +ship-old .* acme/widgets +main +2d │$' "landed merged row keeps repo, home and age"
 assert_row "$frame" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +hyperion +1d │$' "secondmate landed row"
 assert_row "$frame" '^│ reported +09-06 +old-scout +Scout: legacy import path +acme/legacy +main +10d │$' "reported row in landed"
 assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship-old' "landed newest first"
@@ -206,16 +220,16 @@ assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layo
 assert_row "$frame" '^ j/k move  tab pane  enter open/focus  o open PR  l/h expand  r refresh  \? help  q quit +$' "footer keys"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs).
-frame_k=$(render populated.json --keys "tab,tab,j,j,l") || fail "keys l: render exited non-zero"
-assert_row "$frame_k" '^│ working +1 live +!▾ hyperion ' "l on the third In flight row expands the hyperion group"
+frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l") || fail "keys l: render exited non-zero"
+assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "l on the fifth In flight row expands the hyperion group"
 assert_contains "$frame_k" "↳ child-one" "expanded by key: child rows appear"
-assert_contains "$frame_k" "In flight (10)" "expanded by key: only hyperion's rows are added"
+assert_contains "$frame_k" "In flight (12)" "expanded by key: only hyperion's rows are added"
 assert_not_contains "$frame_k" "▾ remote-sm" "expanded by key: the other group stays collapsed"
-frame_k=$(render populated.json --keys "tab,tab,j,j,l,j,h") || fail "keys h: render exited non-zero"
+frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l,j,h") || fail "keys h: render exited non-zero"
 assert_not_contains "$frame_k" "▾" "h from a child row collapses its group"
-assert_contains "$frame_k" "In flight (6)" "collapsed again by key"
-frame_k=$(render populated.json --keys "tab,tab,j,j,enter") || fail "keys enter group: render exited non-zero"
-assert_row "$frame_k" '^│ working +1 live +!▾ hyperion ' "enter on a group row expands it"
+assert_contains "$frame_k" "In flight (7)" "collapsed again by key"
+frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,enter") || fail "keys enter group: render exited non-zero"
+assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "enter on a group row expands it"
 frame_k=$(render populated.json --keys "tab,tab,enter") || fail "keys enter worker: render exited non-zero"
 assert_contains "$frame_k" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus"
 frame_k=$(render populated.json --keys "?") || fail "keys ?: render exited non-zero"
@@ -251,6 +265,8 @@ assert_contains "$frame_prs" "checks 30s ago" "review header shows the checks ag
 assert_row "$frame_prs" '^│ failing +changes +api#8 +https://github.com/acme/api/pull/8 · conflicting +acme/api +main +- │$' "failing candidate with review and mergeable"
 assert_row "$frame_prs" '^│ passing +review +ship-alpha +https://github.com/acme/widgets/pull/41 +acme/widgets +main +- │$' "passing candidate joined to its task"
 assert_row "$frame_prs" '^│ unlisted +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched' "recorded PR missing from the live list"
+assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^ ]+ +ship-old ' "a candidate GitHub reports MERGED is dropped (falsify: drop prClosed from reviewRows)"
+assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^ ]+ +[^ ]+ +https://github.com/acme/widgets/pull/30' "the merged PR appears nowhere in Ready for review"
 assert_before "$frame_prs" '^│ failing +changes' '^│ passing +review' "failing sorts before passing"
 
 # Medium width: REPO and AGE drop below 100 columns (falsify: change WIDE_BREAKPOINT in lib/layout.mjs).
@@ -309,6 +325,7 @@ assert_not_contains "$frame_g" "etl-vendor" "grouped: the secondmate captain hol
 # Collapsed groups (falsify: remove etl-backfill from hyperion's endpoints (state), the decisions_open
 # entries, or the notes ledger).
 assert_contains "$frame_g" "In flight (3)" "grouped: one main worker plus two home groups"
+assert_row "$frame_g" '^│ STATE {4}HERDR ' "STATE column stays 8 wide when no longer state word is on the board"
 assert_row "$frame_g" '^│ working +working +ship-alpha +harness busy \(claude-hook\) +acme/widgets +main +5m │$' "grouped: main-home worker stays one row"
 assert_row "$frame_g" '^│ blocked +4 live +!▸ hyperion +etl-loader, etl-schema, etl-cutover-runbook, etl-backfill +acme/etl +hyperion +5m │$' "hyperion group: blocked is the worst child state, four live, flagged, newest child 5m"
 assert_row "$frame_g" '^│ working +2 live +▸ notes +brag-week-37, notes-monday +acme/brag +notes +40m │$' "notes group: working, two live, no flag"

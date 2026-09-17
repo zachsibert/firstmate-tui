@@ -3,7 +3,7 @@
 // styled segments so the neo-blessed adapter can color them and the
 // --render-once mode can print them plain. Nothing here touches a terminal.
 
-import { columns, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights, PANES } from './layout.mjs';
+import { columns, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights, PANES, TAG_WIDTH_MIN } from './layout.mjs';
 import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
 const H = '─';
@@ -101,14 +101,24 @@ export function scrollStart(rowCount, height, selected, previousStart = 0) {
   return Math.max(0, start);
 }
 
+// One STATE column width for the whole frame: the widest state word on the
+// board, at least TAG_WIDTH_MIN, so "awaiting merge" fits when present and the
+// grid stays aligned across panes.
+export function tagColumnWidth(model) {
+  let w = TAG_WIDTH_MIN;
+  for (const pane of model.panes) for (const row of pane.rows) w = Math.max(w, width(row.tag || ''));
+  return w;
+}
+
 function renderPanes(model, cols, rows, view) {
   const lines = [];
   lines.push(titleLine(model, cols, view));
   const heights = paneHeights(rows, model.panes.map((p) => paneDemand(p.rows.length)));
   const inner = cols - 4; // two border cells and one space padding each side
+  const tagWidth = tagColumnWidth(model);
   model.panes.forEach((pane, idx) => {
     const focused = view.pane === idx;
-    const spec = columns(cols, inner, pane.id);
+    const spec = columns(cols, inner, pane.id, tagWidth);
     const borderStyle = focused ? 'border-focus' : 'border';
     const topText = `┌${H} ${truncate(pane.header, cols - 6)} `;
     const top = `${topText}${H.repeat(Math.max(0, cols - 1 - width(topText)))}┐`;
@@ -161,7 +171,7 @@ function renderList(model, cols, rows, view) {
   const lines = [];
   lines.push(titleLine(model, cols, view));
   const inner = cols - 1;
-  const spec = columns(cols, inner, 'inflight');
+  const spec = columns(cols, inner, 'inflight', tagColumnWidth(model));
   lines.push(line([seg(' ', 'row'), ...headSegments(spec)], cols));
   const flat = flattenRows(model);
   const height = Math.max(rows, MIN_ROWS) - 3;

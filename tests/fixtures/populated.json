@@ -1,5 +1,5 @@
 {
-  "_comment": "Every pane populated. Synthetic homes under /fixture; now is 2026-09-16T12:00:00Z = epoch 1789560000. Ages: ship-alpha 5m, scout-beta 2h, ship-gamma 1m, child-one 3d, child-failed 1h, scout-beta report 10m, old-scout report 10d.",
+  "_comment": "Every pane populated. Synthetic homes under /fixture; now is 2026-09-16T12:00:00Z = epoch 1789560000. Ages: ship-alpha 5m, scout-beta 2h, ship-gamma 1m, ship-old 2d, child-one 3d, child-failed 1h, scout-beta report 10m, old-scout report 10d. The hyperion secondmate record relays one keyed decision (etl-window) and mentions a PR it did not raise (etl pull/12); ship-old is a done task whose backlog row is done (PR 30 merged); the --prs list carries that PR as MERGED.",
   "now": "2026-09-16T12:00:00Z",
   "cols": 160,
   "rows": 40,
@@ -65,9 +65,15 @@
         "backend": "herdr",
         "current_state": { "state": "working", "source": "pane", "detail": "supervising two children", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
         "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
-        "pr": { "url": null, "source": "absent" },
-        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
-        "paths": { "status_log": { "path": "/fixture/firstmate/state/hyperion.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
+        "pr": { "url": "https://github.com/acme/etl/pull/12", "source": "status_event" },
+        "hints": {
+          "pending_decision": true,
+          "blocked_event": false,
+          "open_decisions": [{ "key": "etl-window", "verb": "needs-decision", "summary": "Which maintenance window for the ETL cutover?" }],
+          "scout_report_present": false,
+          "last_event_text": "needs-decision [key=etl-window]: Which maintenance window for the ETL cutover?"
+        },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/hyperion.status", "present": false, "kind": "event_history", "last_event": { "state": "needs-decision", "note": "Which maintenance window for the ETL cutover?", "raw": "" } } },
         "remote": null,
         "backlog": null
       },
@@ -84,6 +90,20 @@
         "paths": { "status_log": { "path": "/fixture/firstmate/state/tmux-task.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
         "remote": null,
         "backlog": { "state": "in_flight", "title": "Migrate the legacy import", "repo": "acme/legacy" }
+      },
+      {
+        "id": "ship-old",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "PR https://github.com/acme/widgets/pull/30 merged", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1F:p1", "exists": false, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/widgets/pull/30", "source": "meta", "head": "fm/ship-old" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "done: PR https://github.com/acme/widgets/pull/30 merged" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-old.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "PR https://github.com/acme/widgets/pull/30 merged", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "done", "title": "Rename the widget table", "repo": "acme/widgets" }
       }
     ],
     "backlog": {
@@ -156,13 +176,15 @@
   "prs": {
     "candidate_prs": [
       { "num": "41", "repo": "acme/widgets", "task": "ship-alpha", "url": "https://github.com/acme/widgets/pull/41", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing" },
-      { "num": "8", "repo": "acme/api", "task": "-", "url": "https://github.com/acme/api/pull/8", "review": "CHANGES_REQUESTED", "mergeable": "CONFLICTING", "checks": "failing" }
+      { "num": "8", "repo": "acme/api", "task": "-", "url": "https://github.com/acme/api/pull/8", "review": "CHANGES_REQUESTED", "mergeable": "CONFLICTING", "checks": "failing" },
+      { "num": "30", "repo": "acme/widgets", "task": "ship-old", "url": "https://github.com/acme/widgets/pull/30", "state": "MERGED", "review": "APPROVED", "mergeable": "UNKNOWN", "checks": "passing" }
     ]
   },
   "mtimes": {
     "/fixture/firstmate/state/ship-alpha.status": 1789559700,
     "/fixture/firstmate/state/scout-beta.status": 1789552800,
     "/fixture/firstmate/state/ship-gamma.status": 1789559940,
+    "/fixture/firstmate/state/ship-old.status": 1789387200,
     "/fixture/homes/hyperion/state/child-one.status": 1789300800,
     "/fixture/homes/hyperion/state/child-failed.status": 1789556400,
     "/fixture/firstmate/data/scout-beta/report.md": 1789559400,

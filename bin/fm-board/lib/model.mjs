@@ -126,56 +126,87 @@ function childStatusAge(facts, ledger, id) {
   return ageSince(facts.now, facts.mtime(`${ledger.home}/state/${id}.status`));
 }
 
+function backlogIndex(snap) {
+  const backlog = snap.backlog && Array.isArray(snap.backlog.records) ? snap.backlog.records : [];
+  return new Map(backlog.map((r) => [r.id, r]));
+}
+
+// The backlog state of a task's row: the snapshot's backlog record first, then
+// the state the task record itself carries, else null (secondmate records
+// never have a backlog row).
+function taskBacklogState(task, backlogById) {
+  const row = backlogById.get(task.id);
+  if (row) return row.state || null;
+  return task.backlog && task.backlog.state ? task.backlog.state : null;
+}
+
+// Green-unmerged: the worker said done with a PR and its backlog row is still
+// open, so the PR awaits the captain's merge. Secondmate agents answer many
+// requests with "done" lines and mention PRs they did not raise, so that kind
+// never qualifies (their work surfaces through their own ledger). Shared by
+// the Needs you merge? row and the In flight "awaiting merge" state.
+function awaitingMerge(task, backlogById) {
+  const cs = task.current_state || {};
+  if (task.kind === 'secondmate' || cs.state !== 'done' || !(task.pr && task.pr.url)) return false;
+  return taskBacklogState(task, backlogById) !== 'done';
+}
+
+// The keyed decisions and the blocked event of one task record, as rows
+// (without the merge? row). Needs you lists them for main-home workers; a
+// secondmate record's rows go under its In flight group instead.
+function taskDecisionRows(facts, task, decisions = null) {
+  const rows = [];
+  const hints = task.hints || {};
+  const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
+  const list = decisions || (Array.isArray(hints.open_decisions) ? hints.open_decisions : []);
+  for (const d of list) {
+    rows.push(
+      makeRow({
+        tag: decisionTag(d.verb),
+        extra: d.key || '-',
+        id: task.id,
+        text: d.summary,
+        repo: taskRepo(task),
+        ageSeconds: statusLogAge(facts, task),
+        paneId: herdr.paneId,
+        focusable: Boolean(herdr.paneId),
+      }),
+    );
+  }
+  if (hints.blocked_event && !list.some((d) => d.verb === 'blocked')) {
+    rows.push(
+      makeRow({
+        tag: 'blocked',
+        extra: '-',
+        id: task.id,
+        text: hints.last_event_text || 'blocked',
+        repo: taskRepo(task),
+        ageSeconds: statusLogAge(facts, task),
+        paneId: herdr.paneId,
+        focusable: Boolean(herdr.paneId),
+      }),
+    );
+  }
+  return rows;
+}
+
 // ---------------------------------------------------------------- Needs you
 // Main home only by default: the captain reads this pane for what the main
-// firstmate needs from him. A secondmate's open decisions flag its In flight
-// group instead (and list under it when expanded); --all-homes-needs restores
-// them here.
+// firstmate needs from him. A secondmate's own decisions (its ledger's
+// decisions_open, and the keyed decisions its task record relays into the
+// main home's status log) flag its In flight group instead and list under it
+// when expanded; --all-homes-needs restores them here.
 function needsRows(facts, opts) {
   const rows = [];
   const snap = facts.snapshot || {};
   const tasks = Array.isArray(snap.tasks) ? snap.tasks : [];
   const backlog = snap.backlog && Array.isArray(snap.backlog.records) ? snap.backlog.records : [];
-  const backlogById = new Map(backlog.map((r) => [r.id, r]));
+  const backlogById = backlogIndex(snap);
 
   for (const task of tasks) {
-    const hints = task.hints || {};
-    const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
-    const decisions = Array.isArray(hints.open_decisions) ? hints.open_decisions : [];
-    for (const d of decisions) {
-      rows.push(
-        makeRow({
-          tag: decisionTag(d.verb),
-          extra: d.key || '-',
-          id: task.id,
-          text: d.summary,
-          repo: taskRepo(task),
-          ageSeconds: statusLogAge(facts, task),
-          paneId: herdr.paneId,
-          focusable: Boolean(herdr.paneId),
-        }),
-      );
-    }
-    if (hints.blocked_event && !decisions.some((d) => d.verb === 'blocked')) {
-      rows.push(
-        makeRow({
-          tag: 'blocked',
-          extra: '-',
-          id: task.id,
-          text: hints.last_event_text || 'blocked',
-          repo: taskRepo(task),
-          ageSeconds: statusLogAge(facts, task),
-          paneId: herdr.paneId,
-          focusable: Boolean(herdr.paneId),
-        }),
-      );
-    }
-    // Green-unmerged: the worker said done with a PR and the backlog row is
-    // still open. Secondmate agents answer many requests with "done" lines, so
-    // that kind is excluded here (their PRs surface through their own ledger).
-    const cs = task.current_state || {};
-    const backlogRow = backlogById.get(task.id);
-    if (task.kind !== 'secondmate' && cs.state === 'done' && task.pr && task.pr.url && (!backlogRow || backlogRow.state !== 'done')) {
+    if (task.kind !== 'secondmate' || opts.allHomesNeeds) rows.push(...taskDecisionRows(facts, task));
+    if (awaitingMerge(task, backlogById)) {
+      const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
       const pr = repoFromUrl(task.pr.url);
       rows.push(
         makeRow({
@@ -223,11 +254,18 @@ function needsRows(facts, opts) {
 }
 
 // --------------------------------------------------------- Ready for review
+// A PR is still "ready for review" while its task is unfinished. A secondmate
+// record's pr.url is the mate's own mention of a PR (its work lands through its
+// ledger), and a task whose backlog row is done is finished work; both stay out.
 function recordedPrs(facts) {
   const snap = facts.snapshot || {};
+  const backlogById = backlogIndex(snap);
   const out = new Map();
   for (const task of Array.isArray(snap.tasks) ? snap.tasks : []) {
-    if (task.pr && task.pr.url) out.set(task.pr.url, { url: task.pr.url, task: task.id, source: task.pr.source || 'meta' });
+    if (!(task.pr && task.pr.url)) continue;
+    if (task.kind === 'secondmate') continue;
+    if (taskBacklogState(task, backlogById) === 'done') continue;
+    out.set(task.pr.url, { url: task.pr.url, task: task.id, source: task.pr.source || 'meta' });
   }
   const backlog = snap.backlog && Array.isArray(snap.backlog.records) ? snap.backlog.records : [];
   for (const r of backlog) {
@@ -249,6 +287,16 @@ function reviewShort(review) {
   }
 }
 
+// GitHub says the PR is no longer open. fm-bearings-snapshot.sh lists open PRs
+// only and carries no state field today, so this reads `state` (MERGED, CLOSED)
+// or `merged` when a candidate carries one; such a PR is dropped, and a
+// recorded PR it matches is dropped too rather than shown as unlisted.
+function prClosed(c) {
+  if (c.merged === true) return true;
+  const state = String(c.state || '').toUpperCase();
+  return state === 'MERGED' || state === 'CLOSED';
+}
+
 function reviewRows(facts) {
   const rows = [];
   const recorded = recordedPrs(facts);
@@ -257,6 +305,7 @@ function reviewRows(facts) {
   if (prs.enabled && Array.isArray(prs.candidate_prs)) {
     for (const c of prs.candidate_prs) {
       seen.add(c.url);
+      if (prClosed(c)) continue;
       const rec = recorded.find((r) => r.url === c.url);
       const taskId = rec ? rec.task : c.task && c.task !== '-' ? c.task : '-';
       const parts = [c.url];
@@ -315,17 +364,18 @@ function reviewRows(facts) {
 // tied to its own item (holds/decisions_open/queued by id, used below for the
 // child's title, decision text or hold reason) but not to a coarser
 // initiative, and item-level grouping would reproduce one row per worker.
-// FALLBACK IN EFFECT: group by home. The group row shows the worst child state,
-// the live worker count, the child ids, the shared repo and the newest child
-// event; expanding it lists the mate's own agent row, every child and the
-// home's live captain decisions. When the ledger grows a per-child parent
-// field, make groupKeyFor() read it and the rest of this builder stands.
+// FALLBACK IN EFFECT: group by home. The group row shows the worst state among
+// the mate's agent row, its children and the mate's own relayed decisions, the
+// live worker count, the child ids, the shared repo and the newest child event;
+// expanding it lists the mate's own agent row, every child, the home's live
+// captain decisions and the mate's relayed decisions. When the ledger grows a
+// per-child parent field, make groupKeyFor() read it and the rest stands.
 
 // Worst-state ranking for a group row: blocked > decision > working > failed >
 // everything else (idle, unknown, done, parked). A failed child is the mate's
 // own cleanup, so it does not outrank live work; it shows on expansion.
 const STATE_RANK = { blocked: 0, failed: 3, decide: 1, 'needs-decision': 1, hold: 1, working: 2 };
-const INFLIGHT_ORDER = { working: 0, blocked: 1, decide: 1, 'needs-decision': 1, hold: 1, unknown: 2, done: 3, failed: 4 };
+const INFLIGHT_ORDER = { working: 0, blocked: 1, decide: 1, 'needs-decision': 1, hold: 1, unknown: 2, 'awaiting merge': 3, done: 3, failed: 4 };
 const FLAG_TAGS = new Set(['blocked', 'decide', 'needs-decision', 'hold']);
 const TERMINAL_TAGS = new Set(['done', 'failed']);
 
@@ -370,12 +420,12 @@ function decisionRow(ledger, d, extraFields = {}) {
   });
 }
 
-function mainTaskRow(facts, task) {
+function mainTaskRow(facts, task, backlogById = new Map()) {
   const cs = task.current_state || {};
   const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
   const doing = cs.detail || (task.hints && task.hints.last_event_text) || (task.paths && task.paths.status_log && task.paths.status_log.last_event && task.paths.status_log.last_event.note) || '';
   return makeRow({
-    tag: cs.state || 'unknown',
+    tag: awaitingMerge(task, backlogById) ? 'awaiting merge' : cs.state || 'unknown',
     extra: herdr.extra,
     id: task.id,
     text: `${kindPrefix(task.kind)}${doing}`,
@@ -460,10 +510,15 @@ function ledgerGroup(facts, ledger, mateTask, expanded) {
   const homeDecisions = decisions.filter((d) => !childIds.has(d.id));
   const workers = sortInflight(ledgerChildRows(facts, ledger, decisionByChild).map((row) => ({ row }))).map((e) => e.row);
   const mateRow = mateTask ? mainTaskRow(facts, mateTask) : null;
-  const ranked = [...(mateRow ? [mateRow] : []), ...workers];
+  // The mate's own keyed decisions and blocker, relayed through its task record
+  // in the main home (hints.open_decisions / blocked_event); one the ledger
+  // already lists under the same id or key is not repeated.
+  const relayedDecisions = (Array.isArray(mateTask && mateTask.hints && mateTask.hints.open_decisions) ? mateTask.hints.open_decisions : []).filter((d) => !decisions.some((x) => x.id === d.key || x.key === d.key));
+  const relayed = mateTask ? taskDecisionRows(facts, mateTask, relayedDecisions) : [];
+  const ranked = [...(mateRow ? [mateRow] : []), ...workers, ...relayed];
   const worst = ranked.reduce((w, r) => (w === null || stateRank(r.tag) < stateRank(w.tag) ? r : w), null);
   const live = workers.filter((r) => !TERMINAL_TAGS.has(r.tag)).length;
-  const flag = homeDecisions.length > 0 || workers.some((r) => FLAG_TAGS.has(r.tag));
+  const flag = homeDecisions.length > 0 || relayed.length > 0 || workers.some((r) => FLAG_TAGS.has(r.tag));
   const ages = workers.map((r) => r.ageSeconds).filter((a) => a !== null && a !== undefined);
   const repos = [...new Set(workers.map((r) => r.repo).filter((r) => r && r !== '-'))];
   const groupRow = makeRow({
@@ -483,7 +538,7 @@ function ledgerGroup(facts, ledger, mateTask, expanded) {
     flag,
   });
   const children = expanded
-    ? [...(mateRow ? [mateRow] : []), ...workers, ...homeDecisions.map((d) => decisionRow(ledger, d))].map((r) => childMarker({ ...r, parent: key }))
+    ? [...(mateRow ? [mateRow] : []), ...workers, ...homeDecisions.map((d) => decisionRow(ledger, d)), ...relayed].map((r) => childMarker({ ...r, parent: key }))
     : [];
   return { row: groupRow, children };
 }
@@ -497,6 +552,7 @@ function mateTaskFor(tasks, ledger) {
 function inflightRows(facts, opts) {
   const snap = facts.snapshot || {};
   const tasks = Array.isArray(snap.tasks) ? snap.tasks : [];
+  const backlogById = backlogIndex(snap);
   const expanded = opts.expanded || new Set();
   const folded = new Set();
   const entries = [];
@@ -505,7 +561,7 @@ function inflightRows(facts, opts) {
     if (mate) folded.add(mate.id);
     entries.push(ledgerGroup(facts, ledger, mate, expanded.has(groupKeyFor(ledger))));
   }
-  const mainEntries = tasks.filter((t) => !folded.has(t.id)).map((t) => ({ row: mainTaskRow(facts, t), children: [] }));
+  const mainEntries = tasks.filter((t) => !folded.has(t.id)).map((t) => ({ row: mainTaskRow(facts, t, backlogById), children: [] }));
   const ordered = sortInflight([...mainEntries, ...entries]);
   const rows = [];
   for (const e of ordered) {
