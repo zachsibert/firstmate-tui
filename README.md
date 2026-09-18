@@ -9,9 +9,8 @@ The board is read-only.
 It never writes into firstmate's files, never answers a question on your behalf and never merges anything.
 Its only actions are jumping to an agent's pane, opening a pull request in your browser and showing a report in the terminal.
 
-![The board filling a dark terminal: bordered panes stacked top to bottom, each titled with its number key and a row count, with columns such as state, id, what, repo, home and age, and the key hints on the bottom line.](docs/fm-board.png)
+![A dark terminal filled by the board. The top line names the tool, the fleet directory and 4 homes, with the word refreshing at the right edge where the seconds to the next refresh normally count down. Below it six bordered panes stack top to bottom, each titled with its number key and a count: 1 Needs you (4) lists two items waiting on a decision and two on hold, with state, key, id, what, repo, home and age columns; 2 My PRs (4, 9 hidden) lists four pull requests with their checks, status, id, title, base branch and age, one of them failing in red; 3 Teammates' PRs (3) lists three pull requests awaiting review with an author column; 4 In flight (10) groups running agents by home with their state and live pane count, the selected row highlighted and a plus 3 more note at its foot; 5 Findings (21) lists reports by kind and path with plus 14 more; 6 Landed (16, 24 hidden) lists merged work by date with plus 9 more. The bottom line lists the keys: j/k move, tab pane, enter open/focus/view, l/h expand, x hide, H hidden, 1-6 panes, r refresh, . settings, ? help, q quit.](docs/fm-board.png)
 
-The screenshot is from an earlier release with five panes and one pull request pane.
 The current board has the six panes listed under [Using the board](#using-the-board).
 
 ## Prerequisites
