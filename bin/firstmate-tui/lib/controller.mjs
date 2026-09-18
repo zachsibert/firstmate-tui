@@ -142,6 +142,46 @@ export function selectedRow(model, view) {
   return pane && !pane.hidden ? pane.rows[view.row] || null : null;
 }
 
+// The selection as the view-state file keeps it (lib/viewstate.mjs `focus`):
+// the pane id, the selected row's hide key (the one stable id a row has; null
+// on an empty pane) and its index, the fallback when the row is gone.
+export function savedFocus(model, view) {
+  const pane = model.panes[view.pane];
+  if (!pane) return null;
+  const row = pane.rows[view.row] || null;
+  return { pane: pane.id, row: row ? row.hideKey : null, index: row ? view.row : 0 };
+}
+
+// A saved selection back onto the current model: the row with that hide key
+// in that pane, else the saved index clamped to the pane's rows. null when
+// the pane is unknown, or still loading its first data (the caller waits and
+// asks again once the rows are there).
+export function focusFromSaved(model, saved) {
+  if (!saved || !saved.pane) return null;
+  const idx = model.panes.findIndex((p) => p.id === saved.pane);
+  if (idx < 0) return null;
+  const pane = model.panes[idx];
+  if (pane.loading) return null;
+  const byKey = saved.row ? pane.rows.findIndex((r) => r.hideKey === saved.row) : -1;
+  const row = byKey >= 0 ? byKey : Math.max(0, Math.min(Number.isInteger(saved.index) ? saved.index : 0, pane.rows.length - 1));
+  return { pane: idx, row };
+}
+
+// The scroll offsets as the file keeps them (by pane id) from the renderer's
+// list (by pane index), and back. Zero offsets are left out.
+export function savedScroll(scroll) {
+  const out = {};
+  PANES.forEach((p, i) => {
+    const n = Array.isArray(scroll) ? scroll[i] : null;
+    if (Number.isInteger(n) && n > 0) out[p.id] = n;
+  });
+  return out;
+}
+
+export function scrollFromSaved(saved) {
+  return PANES.map((p) => (saved && Number.isInteger(saved[p.id]) && saved[p.id] > 0 ? saved[p.id] : 0));
+}
+
 // Why a row cannot be focused right now, or null when `herdr agent focus` may
 // run. Shared so the app and the --render-once driver report the same reasons.
 // A lost pane is reported before the herdr-off check: the fixture overlay can

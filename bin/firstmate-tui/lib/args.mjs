@@ -35,11 +35,22 @@ options:
   --viewer-cmd <argv>    command that shows a Findings report in the terminal (default:
                          glow -p when glow is on PATH, else $EDITOR, else vim, else
                          less); quoted string, split on whitespace; the path is appended
-  --view-state <path>    where hidden rows, hidden panes and dragged column widths are
-                         remembered (default:
+  --view-state <path>    where hidden rows, hidden panes, dragged column widths and the
+                         selection (focused pane, selected row, expanded groups, scroll)
+                         are remembered (default:
                          $(herdr plugin config-dir firstmate.board)/view-state.json via
                          the wrapper, else $XDG_CONFIG_HOME/fm-board/view-state.json,
                          else ~/.config/fm-board/view-state.json; never inside FM_HOME)
+  --cache <path>         the state cache: the last data the board rendered, drawn at
+                         once on the next launch with every pane marked "cached Nm ago"
+                         until the launch refresh lands (default: state-cache.json
+                         beside the view-state file; never inside FM_HOME). Written
+                         after every clean refresh and on quit. With --render-once
+                         nothing is read or written without this flag
+  --cache-max-age <s>    ignore a cache whose data is older than this many seconds and
+                         cold-start with the loading spinners instead (default 3600)
+  --no-cache             never read the cache (cold start every time); it is still
+                         written, so the next launch without the flag benefits
   --curl-cmd <argv>      command the Settings page (.) fetches the GitHub releases API
                          with (default: curl); quoted string, split on whitespace. In
                          --render-once nothing is fetched without it
@@ -150,6 +161,9 @@ export function parseArgs(argv, env = {}) {
     viewerCmd: null,
     viewState: null,
     config: null,
+    cache: true, // read the state cache at launch (--no-cache turns reading off; writing stays)
+    cachePath: null, // --cache <path>; null means beside the view-state file
+    cacheMaxAge: 3600, // --cache-max-age <seconds>
     curlCmd: null,
     installRoot: null,
     tags: false,
@@ -233,6 +247,15 @@ export function parseArgs(argv, env = {}) {
         break;
       case '--config':
         opts.config = need(a);
+        break;
+      case '--cache':
+        opts.cachePath = need(a);
+        break;
+      case '--cache-max-age':
+        opts.cacheMaxAge = num(a, need(a), 0);
+        break;
+      case '--no-cache':
+        opts.cache = false;
         break;
       case '--curl-cmd':
         opts.curlCmd = need(a).split(/\s+/).filter(Boolean);

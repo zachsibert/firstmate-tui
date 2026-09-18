@@ -36,7 +36,7 @@
 #   firstmate-tui --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
 #                               [--keys <list>] [--mouse <list>] [--expand <all|ids>]
 #                               [--opener-cmd <argv>] [--viewer-cmd <argv>]
-#                               [--view-state <file>] [--tags]
+#                               [--view-state <file>] [--cache <file>] [--tags]
 #                               [--curl-cmd <argv>] [--install-root <dir>]
 #                                      print one frame to stdout and exit
 #   firstmate-tui --headless [flags]   run the refresh schedule with no terminal
@@ -46,7 +46,8 @@
 # flag is passed through to bin/firstmate-tui/index.mjs unchanged, after `open` or
 # with no subcommand alike; see `firstmate-tui --help` for the list (--home,
 # --refresh, --no-prs, --no-herdr, --no-mouse, --all-homes-needs,
-# --opener-cmd, --viewer-cmd, --view-state, --curl-cmd, --install-root,
+# --opener-cmd, --viewer-cmd, --view-state, --cache, --cache-max-age,
+# --no-cache, --curl-cmd, --install-root,
 # --herdr-cmd, --herdr-socket, --snapshot-timeout, --keys, --mouse, --expand,
 # --tags, --headless; --prs is accepted and does nothing, live PR data being
 # the default).
@@ -69,10 +70,13 @@
 # The board never writes into FM_HOME, a project or a state directory. Its
 # files are the pane record under ${XDG_STATE_HOME:-$HOME/.local/state}/fm-board/
 # (or $HERDR_PLUGIN_STATE_DIR when herdr provides one) so `focus` can find the
-# pane `open --detached` created, and the view-state file (hidden rows and panes) at
+# pane `open --detached` created, and the view-state file (hidden rows and panes,
+# the selection) at
 # $(herdr plugin config-dir firstmate.board)/view-state.json when herdr is
 # present, else $XDG_CONFIG_HOME/fm-board/view-state.json, else
-# ~/.config/fm-board/view-state.json (--view-state overrides), with the
+# ~/.config/fm-board/view-state.json (--view-state overrides), the state cache
+# (the last data rendered, drawn at once on the next launch) as
+# state-cache.json beside it (--cache overrides), with the
 # config file (the GitHub login and the To review label rules) beside it as
 # config.json, passed the same way as --config. Its actions are
 # `herdr agent focus`, opening a PR URL in the browser (`open` / `xdg-open`, or
@@ -154,7 +158,9 @@ common flags, after `open` or with no subcommand:
 
 more flags, same places: --all-homes-needs, --opener-cmd <argv>, --viewer-cmd <argv>,
   --view-state <path>, --config <path> (the GitHub login and the To review label
-  rules), --herdr-cmd <argv>, --herdr-socket <path>, --snapshot-timeout <s>;
+  rules), --cache <path>, --cache-max-age <s>, --no-cache (the state cache the
+  next launch draws first), --herdr-cmd <argv>, --herdr-socket <path>,
+  --snapshot-timeout <s>;
   test mode: --render-once, --fixture <json>, --cols N, --rows N, --keys <list>,
   --mouse <list>, --expand <all|ids>, --tags, --headless, --curl-cmd <argv>,
   --install-root <dir>. The README's Launch section explains each one.
@@ -312,7 +318,7 @@ while [ "$#" -gt 0 ]; do
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
     --config) [ "$#" -ge 2 ] || die "--config needs a value"; config_path=$2; pass+=("$1" "$2"); shift ;;
-    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root)
+    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root|--cache|--cache-max-age)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
   esac
