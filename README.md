@@ -48,22 +48,30 @@ cd firstmate-tui/bin/fm-board && npm ci
 ```sh
 export FM_HOME=/path/to/your/firstmate/home
 
-# in the current terminal
-bin/fm-board.sh
+# in the current terminal: a plain shell, or the herdr pane you typed this in
+bin/fm-board.sh open         # `bin/fm-board.sh` alone does the same
 
-# in its own herdr pane in the current workspace, without splitting the captain pane
-bin/fm-board.sh open
-bin/fm-board.sh focus        # bring that pane forward later
+# away from this terminal: a herdr plugin tab pane, or a hidden workspace
+bin/fm-board.sh open --detached
+bin/fm-board.sh focus        # bring that detached pane forward later
 ```
 
-`open` uses the herdr plugin route when the plugin is linked, and otherwise falls back to a hidden workspace (`herdr workspace create --no-focus` plus `pane run`, the same pattern firstmate's away-mode daemon uses). To link the plugin once:
+Without `FM_HOME` the launcher stops and prints two lines, each a command to copy: the `export` for a terminal launch, and the `mkdir -p` plus `echo` that writes the plugin's `fm-home` file (with the directory resolved through `herdr plugin config-dir` when herdr answers). When a firstmate home sits above the current directory, the `export` names it; the board never adopts one on its own.
+
+`open` runs the board where you typed it, so you decide where it sits. To put it beside firstmate in herdr 0.8.2 (default keys, prefix `ctrl+b`; `herdr --default-config` prints them and `[keys]` in `~/.config/herdr/config.toml` rebinds them):
+
+1. Split the pane firstmate runs in: `ctrl+b` then `v` puts the new pane to the right (`split_vertical`), `ctrl+b` then `-` puts it below (`split_horizontal`). From a shell, `herdr pane split --current --direction right` (or `--direction down`) does the same.
+2. In the new pane, run `bin/fm-board.sh open` with `FM_HOME` exported.
+3. When done, `q` quits the board, then `ctrl+b` then `x` closes the pane (`close_pane`), or `herdr pane close <pane-id>` with the id that `herdr pane current` prints.
+
+`open --detached` keeps the old placement: the herdr plugin route when the plugin is linked, otherwise a hidden workspace (`herdr workspace create --no-focus` plus `pane run`, the same pattern firstmate's away-mode daemon uses). `focus` brings that pane forward. To link the plugin once:
 
 ```sh
 herdr plugin link "$PWD/bin/fm-board"
 echo "$FM_HOME" > "$(herdr plugin config-dir firstmate.board)/fm-home"   # actions carry no FM_HOME
 ```
 
-Then `herdr plugin action invoke firstmate.board.open` opens the board and `firstmate.board.focus` brings it forward; bind a key with `[[keys.command]] key = "prefix+y" type = "plugin_action" command = "firstmate.board.focus"` in `~/.config/herdr/config.toml`.
+Then `herdr plugin action invoke firstmate.board.open` opens the board as a detached tab pane (the palette has no terminal to run it in, so the manifest passes `--detached`) and `firstmate.board.focus` brings it forward; bind a key with `[[keys.command]] key = "prefix+y" type = "plugin_action" command = "firstmate.board.focus"` in `~/.config/herdr/config.toml`.
 
 Options (also `bin/fm-board.sh --help`):
 
@@ -110,12 +118,12 @@ Below 100 columns the REPO and AGE columns are dropped; below 80 columns the fiv
 tests/fm-board.test.sh
 ```
 
-The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the `--prs` path, the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, pane toggles with one and four panes hidden, and the wrapper's error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, so the suite asserts that `r` re-runs the snapshot, and the PR fetch only with `--prs`, without touching GitHub. `o` and `f` are asserted to be no-ops. No real firstmate home, herdr server or TTY is needed.
+The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the `--prs` path, the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, pane toggles with one and four panes hidden, and the wrapper: `open` prints the same frame as `run`, `open --detached --no-herdr` refuses (against a fake `herdr` on `HERDR_BIN_PATH` and PATH that logs any call, so nothing reaches a live server), and its error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, so the suite asserts that `r` re-runs the snapshot, and the PR fetch only with `--prs`, without touching GitHub. `o` and `f` are asserted to be no-ops. No real firstmate home, herdr server or TTY is needed.
 
 ## Layout of the code
 
 ```
-bin/fm-board.sh              bash wrapper: FM_HOME, node and herdr checks, open/focus, view-state path, exec index.mjs
+bin/fm-board.sh              bash wrapper: FM_HOME, node and herdr checks, open --detached/focus, view-state path, exec index.mjs
 bin/fm-board/index.mjs       entry: argument parsing, --render-once, interactive run
 bin/fm-board/lib/args.mjs    option definitions
 bin/fm-board/lib/sources.mjs every read against firstmate homes (snapshot, ledgers, mtimes, --prs)

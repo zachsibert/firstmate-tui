@@ -1,7 +1,10 @@
 # herdr plugin manifest for fm-board. Link once with:
 #   herdr plugin link /path/to/firstmate-tui/bin/fm-board
-# then `bin/fm-board.sh open` opens the board as a tab pane in the current
-# workspace (never splitting the captain pane), or bind the action:
+# `bin/fm-board.sh` (or `open`) runs the board in the pane you type it in;
+# `bin/fm-board.sh open --detached` opens it as a tab pane in the current
+# workspace instead (never splitting the captain pane). The open action below
+# runs from herdr's command palette, which has no terminal to run in, so it
+# carries --detached. Bind an action with:
 #   [[keys.command]]
 #   key = "prefix+y"
 #   type = "plugin_action"
@@ -25,9 +28,9 @@ command = ["bash", "../fm-board.sh", "run"]
 
 [[actions]]
 id = "open"
-title = "Open the firstmate board"
+title = "Open the firstmate board in a tab pane"
 contexts = ["workspace"]
-command = ["bash", "../fm-board.sh", "open"]
+command = ["bash", "../fm-board.sh", "open", "--detached"]
 
 [[actions]]
 id = "focus"

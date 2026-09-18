@@ -19,6 +19,10 @@
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
 # that they ran and print canned JSON, so a live --render-once with --keys r
 # shows exactly which fetches a refresh triggers without GitHub or a real home.
+# The wrapper checks that touch the detached routes run with a fake `herdr` on
+# HERDR_BIN_PATH and PATH (herdr sets HERDR_BIN_PATH inside its panes, so PATH
+# alone would still reach the captain's live server); the fake logs its argv
+# and fails, and the suite asserts it was never called.
 #
 # Fixtures (tests/fixtures/):
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
@@ -624,18 +628,93 @@ frame_r=$(render populated.json --keys "r") || fail "refresh fixture: render exi
 assert_contains "$frame_r" "refresh is not available with --fixture" "r on a fixture render only reports"
 
 # ----------------------------------------------------------- wrapper checks
-# (falsify: delete the FM_HOME die() in bin/fm-board.sh, or the default case in lib/args.mjs)
-if out=$(env -u FM_HOME "$BOARD" --render-once --no-herdr 2>&1); then
+# A fake herdr for the checks below, on HERDR_BIN_PATH and PATH: it logs every call to
+# FM_BOARD_TEST_HERDR_LOG, answers `plugin config-dir` with a scratch directory and fails
+# everything else, so no wrapper path can reach the captain's live server.
+HERDR_LOG="$SCRATCH/herdr-calls.log"
+PLUGIN_DIR="$SCRATCH/plugin-config"
+# shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_HERDR_LOG at run time, not here
+printf '#!/usr/bin/env bash\necho "herdr $*" >> "$FM_BOARD_TEST_HERDR_LOG"\nif [ "${1:-} ${2:-}" = "plugin config-dir" ]; then echo "%s"; exit 0; fi\nexit 1\n' "$PLUGIN_DIR" > "$FAKE_BIN/herdr"
+chmod +x "$FAKE_BIN/herdr"
+# fake_herdr_env <command...>: run with the fake herdr reachable and the call log reset
+fake_herdr_env() {
+  rm -f "$HERDR_LOG"
+  FM_BOARD_TEST_HERDR_LOG="$HERDR_LOG" HERDR_BIN_PATH="$FAKE_BIN/herdr" PATH="$FAKE_BIN:$PATH" "$@"
+}
+# Without FM_HOME the wrapper stops with two lines, each carrying a command to copy (falsify: fold
+# die_no_home back into one die(), or drop the plugin fm-home line). From a directory with no
+# firstmate home above it and without herdr, the plugin line uses the $(herdr plugin config-dir) form.
+mkdir -p "$SCRATCH/nohome"
+if out=$(cd "$SCRATCH/nohome" && env -u FM_HOME -u HERDR_PLUGIN_CONFIG_DIR "$BOARD" --render-once --no-herdr 2>&1); then
   fail "wrapper without FM_HOME should exit non-zero"
 else
   pass
 fi
-if printf '%s\n' "$out" | grep -Fq "FM_HOME is not set"; then pass; else fail "wrapper names FM_HOME in its error: $out"; fi
+assert_contains "$out" "FM_HOME is not set" "wrapper names FM_HOME in its error"
+assert_lines "$out" 2 "the FM_HOME error is exactly two lines"
+assert_row "$out" '^fm-board: FM_HOME is not set\. In a terminal:  export FM_HOME=/path/to/firstmate   \(the directory holding bin/fm-fleet-snapshot\.sh\), then run this again\.$' "line 1 carries the export command"
+assert_row "$out" '^fm-board: for a herdr plugin action, which carries no FM_HOME:  mkdir -p "\$\(herdr plugin config-dir firstmate\.board\)" && echo /path/to/firstmate > "\$\(herdr plugin config-dir firstmate\.board\)/fm-home"$' "line 2 carries the fm-home command in its herdr-less form"
+assert_not_contains "$out" "Found a firstmate home" "no firstmate home above the scratch directory: nothing is suggested"
+# With herdr answering, the plugin line prints the resolved directory instead (falsify: drop the
+# plugin_config_dir call from die_no_home).
+if out=$(cd "$SCRATCH/nohome" && fake_herdr_env env -u FM_HOME -u HERDR_PLUGIN_CONFIG_DIR "$BOARD" --render-once 2>&1); then
+  fail "wrapper without FM_HOME (herdr reachable) should exit non-zero"
+else
+  pass
+fi
+assert_lines "$out" 2 "the FM_HOME error with herdr is still two lines"
+assert_contains "$out" "mkdir -p $PLUGIN_DIR && echo /path/to/firstmate > $PLUGIN_DIR/fm-home" "line 2 names the directory herdr plugin config-dir printed"
+assert_file_contains "$HERDR_LOG" "herdr plugin config-dir firstmate.board" "the directory came from herdr plugin config-dir"
+# A firstmate home above the current directory is suggested by absolute path and never adopted
+# (falsify: make resolve_fm_home fall back to suggest_fm_home; the render would then succeed).
+mkdir -p "$FAKE_HOME/projects/deep"
+fake_home_real=$(cd "$FAKE_HOME" && pwd -P)
+if out=$(cd "$FAKE_HOME/projects/deep" && env -u FM_HOME -u HERDR_PLUGIN_CONFIG_DIR "$BOARD" --render-once --no-herdr 2>&1); then
+  fail "no FM_HOME inside a firstmate home: must still exit non-zero, discovery only suggests"
+else
+  pass
+fi
+assert_lines "$out" 2 "the suggested-home error is two lines"
+assert_contains "$out" "Found a firstmate home above the current directory" "line 1 says a home was found"
+assert_contains "$out" "export FM_HOME=$fake_home_real   then run this again." "the export command names the found home by absolute path"
+assert_contains "$out" "echo $fake_home_real > " "the plugin line echoes the found home"
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--render-once"; then pass; else fail "wrapper --help lists --render-once"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--keys"; then pass; else fail "wrapper --help lists --keys"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--viewer-cmd"; then pass; else fail "wrapper --help lists --viewer-cmd"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--view-state"; then pass; else fail "wrapper --help lists --view-state"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "-firstmate"; then fail "wrapper --help still lists a firstmate pane subcommand"; else pass; fi
+# open runs in place: with the same flags it prints the frame run prints (falsify: drop the
+# open -> run mapping after the argument loop, or route plain open to open_detached).
+frame_run=$("$BOARD" run --render-once --fixture "$FIX/populated.json" --no-herdr) || fail "wrapper run: render exited non-zero"
+frame_open=$("$BOARD" open --render-once --fixture "$FIX/populated.json" --no-herdr) || fail "wrapper open: render exited non-zero"
+if [ -n "$frame_open" ] && [ "$frame_open" = "$frame_run" ]; then pass; else fail "open printed a different frame from run: $(diff <(printf '%s\n' "$frame_run") <(printf '%s\n' "$frame_open") | head -n 5)"; fi
+# open --detached is the only route that places a pane, and it needs herdr; with --no-herdr the
+# wrapper refuses before any herdr call, which the fake's empty log proves (falsify: drop the
+# want_herdr guard from open_detached, or the --detached case from the argument loop).
+if out=$(FM_HOME="$FAKE_HOME" fake_herdr_env "$BOARD" open --detached --no-herdr 2>&1); then
+  fail "open --detached --no-herdr should exit non-zero"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- "open --detached needs herdr"; then pass; else fail "open --detached --no-herdr says the detached route needs herdr: $out"; fi
+if [ -e "$HERDR_LOG" ]; then fail "open --detached --no-herdr called herdr: $(cat "$HERDR_LOG")"; else pass; fi
+# --detached belongs to open alone (falsify: drop the command != open check).
+if out=$("$BOARD" run --detached --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then
+  fail "run --detached should exit non-zero"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- "--detached applies to 'open' only"; then pass; else fail "run --detached names open in its error: $out"; fi
+# --help documents the in-place default and the detached flag (falsify: restore the old open
+# line in the header comment of bin/fm-board.sh).
+help=$("$BOARD" --help 2>/dev/null)
+if printf '%s\n' "$help" | grep -Fq -- "open --detached"; then pass; else fail "wrapper --help lists open --detached"; fi
+if printf '%s\n' "$help" | grep -Eq -- 'open \[flags\] +same as run'; then pass; else fail "wrapper --help says plain open is run"; fi
+if printf '%s\n' "$help" | grep -Fq -- "its own herdr pane"; then fail "wrapper --help still describes open as opening its own pane"; else pass; fi
+# The manifest's palette action has no terminal to run in, so it carries --detached; the pane
+# entry keeps running the board in place (falsify: edit either command in herdr-plugin.toml).
+if grep -Fq -- '"open", "--detached"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml open action carries --detached"; fi
+if grep -Fq -- '"../fm-board.sh", "run"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml pane entry runs the board in place"; fi
 if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --view-state 2>&1); then
   fail "--view-state without a value should exit non-zero"
 else
