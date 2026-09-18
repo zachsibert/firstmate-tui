@@ -15,12 +15,10 @@
 # FM_BOARD_TEST_VIEWER_LOG); without --viewer-cmd a one-shot render only
 # reports the viewer the PATH chain resolved to, so the suite shadows glow with
 # the fake on PATH and no real viewer ever runs. Hidden rows and panes go to
-# `--view-state <temp file>`. The firstmate pane toggle runs the wrapper's
-# split-firstmate / unsplit-firstmate / toggle-firstmate against
-# tests/fake-herdr.sh installed on PATH as `herdr` AND named by HERDR_BIN_PATH
-# (herdr sets that variable inside its panes; the real binary must never be
-# reached from a test); the fake records every argv and answers agent list and
-# pane get from the herdr-*.json fixtures.
+# `--view-state <temp file>`. The r key is checked against a stand-in firstmate
+# home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
+# that they ran and print canned JSON, so a live --render-once with --keys r
+# shows exactly which fetches a refresh triggers without GitHub or a real home.
 #
 # Fixtures (tests/fixtures/):
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
@@ -37,9 +35,6 @@
 #                   are absent from the herdr block (pane lost), a live one, a
 #                   main scout report and a secondmate landed report
 #   lost-disconnected.json  160x30, the same lost pane with herdr disconnected
-#   herdr-agents-{split,beside,title,none}.json, herdr-pane-board.json
-#                   canned `herdr agent list` / `pane get` answers for the
-#                   firstmate pane toggle
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -49,22 +44,26 @@ FAKE_OPENER="bash $ROOT/tests/fake-opener.sh"
 FAKE_VIEWER="bash $ROOT/tests/fake-viewer.sh"
 OPENER_LOG=$(mktemp "${TMPDIR:-/tmp}/fm-board-opener.XXXXXX")
 VIEWER_LOG=$(mktemp "${TMPDIR:-/tmp}/fm-board-viewer.XXXXXX")
-HERDR_LOG=$(mktemp "${TMPDIR:-/tmp}/fm-board-herdr.XXXXXX")
+FETCH_LOG=$(mktemp "${TMPDIR:-/tmp}/fm-board-fetch.XXXXXX")
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-board-test.XXXXXX")
-rm -f "$OPENER_LOG" "$VIEWER_LOG" "$HERDR_LOG"
-trap 'rm -rf "$OPENER_LOG" "$VIEWER_LOG" "$HERDR_LOG" "$SCRATCH"' EXIT
-# Fakes on PATH: `glow` (the viewer chain's first rung) and `herdr`.
+rm -f "$OPENER_LOG" "$VIEWER_LOG" "$FETCH_LOG"
+trap 'rm -rf "$OPENER_LOG" "$VIEWER_LOG" "$FETCH_LOG" "$SCRATCH"' EXIT
+# Fake on PATH: `glow` (the viewer chain's first rung).
 FAKE_BIN="$SCRATCH/bin"
 mkdir -p "$FAKE_BIN"
 cp "$ROOT/tests/fake-viewer.sh" "$FAKE_BIN/glow"
-cp "$ROOT/tests/fake-herdr.sh" "$FAKE_BIN/herdr"
-chmod +x "$FAKE_BIN/glow" "$FAKE_BIN/herdr"
-# A stand-in firstmate home for the wrapper's FM_HOME check in the pane toggle
-# runs (it only needs an executable bin/fm-fleet-snapshot.sh; nothing runs it).
+chmod +x "$FAKE_BIN/glow"
+# A stand-in firstmate home for the live-refresh checks: both snapshot scripts
+# append one line to FM_BOARD_TEST_FETCH_LOG and print canned JSON (the
+# populated fixture's snapshot; an empty PR list). Nothing reaches GitHub.
 FAKE_HOME="$SCRATCH/firstmate"
 mkdir -p "$FAKE_HOME/bin"
-printf '#!/usr/bin/env bash\necho "{}"\n' > "$FAKE_HOME/bin/fm-fleet-snapshot.sh"
-chmod +x "$FAKE_HOME/bin/fm-fleet-snapshot.sh"
+node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).snapshot))' "$FIX/populated.json" > "$FAKE_HOME/snapshot.json"
+# shellcheck disable=SC2016 # the fakes expand $FM_BOARD_TEST_FETCH_LOG at run time, not here
+printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\ncat "%s"\n' "$FAKE_HOME/snapshot.json" > "$FAKE_HOME/bin/fm-fleet-snapshot.sh"
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\necho "prs $*" >> "$FM_BOARD_TEST_FETCH_LOG"\necho "{\\"candidate_prs\\":[]}"\n' > "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
+chmod +x "$FAKE_HOME/bin/fm-fleet-snapshot.sh" "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
 
 fails=0
 checks=0
@@ -159,17 +158,13 @@ assert_file_contains() {
 assert_file_not_contains() {
   if [ -f "$1" ] && grep -Fq -- "$2" "$1"; then fail "$3: did not expect '$2' in $1"; else pass; fi
 }
-# run_move <agents fixture> <subcommand> [extra flags]: the wrapper's pane toggle against the fake herdr.
-# Output (stdout+stderr) in MOVE_OUT, exit code in MOVE_RC, every herdr argv line in HERDR_LOG.
-run_move() {
-  rm -f "$HERDR_LOG"
-  MOVE_OUT=$(FM_BOARD_TEST_HERDR_LOG="$HERDR_LOG" FM_BOARD_TEST_HERDR_PANE="$FIX/herdr-pane-board.json" FM_BOARD_TEST_HERDR_AGENTS="$FIX/$1" \
-    FM_HOME="$FAKE_HOME" HERDR_BIN_PATH="$FAKE_BIN/herdr" HERDR_SOCKET_PATH='' PATH="$FAKE_BIN:$PATH" \
-    "$BOARD" "$2" --fm-home /fixture/firstmate "${@:3}" 2>&1)
-  MOVE_RC=$?
+# render_live [flags]: a one-shot render of the stand-in home (no fixture), fetch log reset first
+render_live() {
+  rm -f "$FETCH_LOG"
+  FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" "$BOARD" --render-once --no-herdr "$@"
 }
-assert_herdr_log() { # <expected lines> <label>
-  if [ -f "$HERDR_LOG" ] && [ "$(cat "$HERDR_LOG")" = "$1" ]; then pass; else fail "$2: herdr log is '$(cat "$HERDR_LOG" 2>/dev/null || echo '<absent>')', expected '$1'"; fi
+assert_fetch_log() { # <expected lines> <label>
+  if [ -f "$FETCH_LOG" ] && [ "$(cat "$FETCH_LOG")" = "$1" ]; then pass; else fail "$2: fetch log is '$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')', expected '$1'"; fi
 }
 
 # ------------------------------------------------------------- populated
@@ -280,7 +275,7 @@ assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship
 assert_lines "$frame" 40 "populated frame is 40 lines"
 assert_widths "$frame" 160 "populated frame lines are 160 columns"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
-assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  o open PR  l/h expand  x hide  H hidden  1-5 panes  f firstmate  r refresh  \? help  q quit +$' "footer keys"
+assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  o open PR  l/h expand  x hide  H hidden  1-5 panes  r refresh  \? help  q quit +$' "footer keys"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs).
 frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l") || fail "keys l: render exited non-zero"
@@ -340,7 +335,7 @@ assert_no_row "$frame_med" ' REPO +HOME' "medium drops REPO"
 assert_no_row "$frame_med" ' HOME +AGE' "medium drops AGE"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$frame_med" '^ j/k  tab  enter  o open  l/h  x hide  H  1-5 panes  f  r  \? help  q quit +$' "medium width uses the short footer"
+assert_row "$frame_med" '^ j/k  tab  enter  o open  l/h  x hide  H  1-5 panes  r  \? help  q quit +$' "medium width uses the short footer"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -475,7 +470,10 @@ frame_v=$(render lost.json --keys "?") || fail "help: render exited non-zero"
 assert_contains "$frame_v" "Findings row: open the report in the viewer (glow, \$EDITOR, vim, less)" "help overlay documents the viewer"
 assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
 assert_contains "$frame_v" "1 - 5        show or hide a pane" "help overlay documents 1-5"
-assert_contains "$frame_v" "f            put the firstmate pane beside the board" "help overlay documents f"
+assert_contains "$frame_v" "r            refresh now: the snapshot, and the PR checks when --prs is on" "help overlay documents r"
+# The board never moves the firstmate pane; the captain splits panes himself (falsify: add an f line to HELP_LINES).
+assert_not_contains "$frame_v" "firstmate pane" "help overlay does not mention the firstmate pane"
+assert_not_contains "$frame_v" "  f  " "help overlay has no f key"
 
 # ------------------------------------------------------------- lost panes
 frame_l=$(render lost.json --expand all) || fail "lost: render exited non-zero"
@@ -591,66 +589,30 @@ assert_not_contains "$frame_p" "── Landed" "list mode: the hidden pane's sec
 assert_contains "$frame_p" "panes hidden: 5" "list mode: the title lists the hidden pane"
 assert_widths "$frame_p" 70 "list mode with a hidden pane: lines are 70 columns"
 
-# ---------------------------------------------------- firstmate pane toggle
-# Every run goes to tests/fake-herdr.sh (on PATH and HERDR_BIN_PATH); the log is the exact argv sequence.
-run_move herdr-agents-split.json toggle-firstmate --board-pane wZZ:p1
-if [ "$MOVE_RC" -eq 0 ]; then pass; else fail "toggle (away): exit $MOVE_RC: $MOVE_OUT"; fi
-assert_herdr_log "agent list
-pane get wZZ:p1
-pane move w9F:p1 --workspace w1 --target-pane wZZ:p1 --split right --ratio 0.55
-agent focus w9F:p1" "toggle with the firstmate pane in another tab: find, locate the board, move it right of the board at 0.55, focus it (falsify: change SPLIT_RATIO or the argv order in splitArgs, or compare workspaces instead of tabs in besideBoard)"
-assert_contains "$MOVE_OUT" "split: firstmate pane w9F:p1 (cwd) split right of the board" "toggle (away) reports the split and that the pane was found by cwd"
-run_move herdr-agents-beside.json toggle-firstmate --board-pane wZZ:p1
-if [ "$MOVE_RC" -eq 0 ]; then pass; else fail "toggle (beside): exit $MOVE_RC: $MOVE_OUT"; fi
-assert_herdr_log "agent list
-pane get wZZ:p1
-pane move w9F:p1 --new-workspace
-agent focus wZZ:p1" "toggle with the firstmate pane beside the board: move it to a new workspace, focus the board (falsify: drop --new-workspace from unsplitArgs)"
-assert_contains "$MOVE_OUT" "unsplit: firstmate pane w9F:p1 moved to its own workspace" "toggle (beside) reports the unsplit"
-run_move herdr-agents-beside.json split-firstmate --board-pane wZZ:p1
-assert_herdr_log "agent list
-pane get wZZ:p1" "split when already beside: no move (falsify: drop the mode check in moveFirstmatePane)"
-assert_contains "$MOVE_OUT" "none: firstmate pane w9F:p1 is already beside the board" "split when already beside says so"
-run_move herdr-agents-split.json unsplit-firstmate --board-pane wZZ:p1
-assert_herdr_log "agent list
-pane get wZZ:p1" "unsplit when not beside: no move"
-run_move herdr-agents-title.json split-firstmate --board-pane wZZ:p1
-assert_contains "$MOVE_OUT" "split: firstmate pane w9T:p1 (title)" "no agent in FM_HOME: the pane titled First mate is used (falsify: drop the title fallback in findFirstmatePane)"
-assert_herdr_log "agent list
-pane get wZZ:p1
-pane move w9T:p1 --workspace w1 --target-pane wZZ:p1 --split right --ratio 0.55
-agent focus w9T:p1" "title fallback: the same split argv for that pane"
-run_move herdr-agents-none.json toggle-firstmate --board-pane wZZ:p1
-if [ "$MOVE_RC" -eq 1 ]; then pass; else fail "toggle (none): expected exit 1, got $MOVE_RC: $MOVE_OUT"; fi
-assert_contains "$MOVE_OUT" 'no firstmate pane found: no claude agent with cwd /fixture/firstmate and no pane titled "First mate"' "no firstmate pane: the reason is named (falsify: drop the throw in moveFirstmatePane)"
-assert_herdr_log "agent list" "no firstmate pane: only agent list ran, nothing moved"
-# The wrapper supplies the board pane from the record `open` wrote (falsify: drop the record read in move_firstmate).
-record_state="$SCRATCH/state"
-mkdir -p "$record_state/fm-board"
-printf 'wZZ:p1 - plugin\n' > "$record_state/fm-board/pane-$(printf '%s' "$FAKE_HOME" | cksum | cut -d' ' -f1)"
-XDG_STATE_HOME="$record_state" run_move herdr-agents-split.json split-firstmate
-if [ "$MOVE_RC" -eq 0 ]; then pass; else fail "split via record: exit $MOVE_RC: $MOVE_OUT"; fi
-assert_herdr_log "agent list
-pane get wZZ:p1
-pane move w9F:p1 --workspace w1 --target-pane wZZ:p1 --split right --ratio 0.55
-agent focus w9F:p1" "split via the recorded board pane: the same argv"
-XDG_STATE_HOME="$SCRATCH/no-record" run_move herdr-agents-split.json toggle-firstmate
-if [ "$MOVE_RC" -eq 2 ]; then pass; else fail "toggle without a record: expected exit 2, got $MOVE_RC: $MOVE_OUT"; fi
-assert_contains "$MOVE_OUT" "no board pane recorded" "toggle without a record or --board-pane names the fix"
-if [ -e "$HERDR_LOG" ]; then fail "toggle without a board pane must not call herdr"; else pass; fi
-if out=$(FM_HOME="$FAKE_HOME" "$BOARD" toggle-firstmate --no-herdr --board-pane wZZ:p1 2>&1); then fail "toggle with --no-herdr should exit non-zero"; else pass; fi
-if printf '%s\n' "$out" | grep -Fq "needs herdr"; then pass; else fail "toggle with --no-herdr names herdr: $out"; fi
-# The board key only reports in a one-shot render (falsify: drop the 'f' case in keyAction).
+# ---------------------------------------------------------- f is a no-op
+# f used to move the firstmate pane beside the board; the captain splits panes
+# himself now, so the key does nothing (falsify: give 'f' a case in keyAction).
 frame_f=$(render populated.json --keys "f") || fail "keys f: render exited non-zero"
-assert_contains "$frame_f" "would toggle the firstmate pane beside the board; --render-once never moves panes" "f in --render-once is reported, not run"
-# Contract: no run above ever closed a pane.
-if grep -rq "pane close" "$HERDR_LOG" 2>/dev/null; then fail "a pane toggle called pane close"; else pass; fi
-if grep -Eq "'close'|\"close\"" "$ROOT/bin/fm-board/lib/split.mjs"; then fail "split.mjs must not build a pane close argv"; else pass; fi
-# Plugin manifest and keybinding doc (falsify: delete an action block from herdr-plugin.toml).
-for action in split-firstmate unsplit-firstmate toggle-firstmate; do
-  if grep -Fq "id = \"$action\"" "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml declares the $action action"; fi
-done
-if grep -Fq 'command = "firstmate.board.toggle-firstmate"' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml documents the prefix+f keybinding"; fi
+if [ "$frame_f" = "$frame" ]; then pass; else fail "f changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_f") | head -n 5)"; fi
+assert_not_contains "$frame_f" "firstmate pane" "f leaves no firstmate-pane notice"
+assert_not_contains "$frame" " f " "footer offers no f key"
+if grep -Fq -- "-firstmate" "$ROOT/bin/fm-board/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
+
+# --------------------------------------------------------------- r refresh
+# r is a full refresh: the snapshot, and with --prs an immediate PR fetch instead of waiting for the
+# 120 s PR cadence. Both scripts log to FETCH_LOG; the start-up read is the first pair of lines.
+frame_r=$(render_live --keys "r" --prs) || fail "refresh --prs: render exited non-zero"
+assert_fetch_log "snapshot
+prs --json --include-prs
+snapshot
+prs --json --include-prs" "r with --prs runs the snapshot and the PR fetch again (falsify: drop the prsNow / opts.prs branch from the refresh)"
+assert_contains "$frame_r" "refreshed: snapshot and PR checks" "r with --prs reports both fetches"
+frame_r=$(render_live --keys "r") || fail "refresh without --prs: render exited non-zero"
+assert_fetch_log "snapshot
+snapshot" "r without --prs runs only the snapshot again (falsify: call runBearingsPrs unconditionally)"
+assert_contains "$frame_r" "checks not fetched: start with --prs" "r without --prs says why the PR pane did not change (falsify: drop the notice)"
+frame_r=$(render populated.json --keys "r") || fail "refresh fixture: render exited non-zero"
+assert_contains "$frame_r" "refresh is not available with --fixture" "r on a fixture render only reports"
 
 # ----------------------------------------------------------- wrapper checks
 # (falsify: delete the FM_HOME die() in bin/fm-board.sh, or the default case in lib/args.mjs)
@@ -664,7 +626,7 @@ if "$BOARD" --help 2>/dev/null | grep -Fq -- "--render-once"; then pass; else fa
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--keys"; then pass; else fail "wrapper --help lists --keys"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--viewer-cmd"; then pass; else fail "wrapper --help lists --viewer-cmd"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--view-state"; then pass; else fail "wrapper --help lists --view-state"; fi
-if "$BOARD" --help 2>/dev/null | grep -Fq -- "toggle-firstmate"; then pass; else fail "wrapper --help lists toggle-firstmate"; fi
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "-firstmate"; then fail "wrapper --help still lists a firstmate pane subcommand"; else pass; fi
 if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --view-state 2>&1); then
   fail "--view-state without a value should exit non-zero"
 else

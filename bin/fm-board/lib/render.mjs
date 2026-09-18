@@ -26,8 +26,7 @@ export const HELP_LINES = [
   '  H            toggle showing hidden rows, greyed and marked (hidden)',
   '  1 - 5        show or hide a pane: 1 Needs you  2 Ready for review  3 In flight',
   '               4 Findings  5 Landed            0            show every pane',
-  '  f            put the firstmate pane beside the board, or move it back out',
-  '  r            refresh the snapshot now',
+  '  r            refresh now: the snapshot, and the PR checks when --prs is on',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
   'The board is read-only: it never answers, merges or dispatches. Hidden rows and',
@@ -105,8 +104,8 @@ function titleLine(model, cols, view) {
   return line([seg(padRight(text, cols), view.stale ? 'bad' : 'title')], cols);
 }
 
-const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  o open PR  l/h expand  x hide  H hidden  1-5 panes  f firstmate  r refresh  ? help  q quit';
-const FOOTER_KEYS_SHORT = ' j/k  tab  enter  o open  l/h  x hide  H  1-5 panes  f  r  ? help  q quit';
+const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  o open PR  l/h expand  x hide  H hidden  1-5 panes  r refresh  ? help  q quit';
+const FOOTER_KEYS_SHORT = ' j/k  tab  enter  o open  l/h  x hide  H  1-5 panes  r  ? help  q quit';
 const FOOTER_KEYS_MIN = ' ? help';
 
 // The key hint and the transient notice share the footer; the notice wins.

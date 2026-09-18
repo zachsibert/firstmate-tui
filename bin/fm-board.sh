@@ -8,13 +8,6 @@
 #                                      firstmate.board is linked, otherwise a
 #                                      hidden workspace); prints the pane id
 #   fm-board.sh focus [flags]          focus the pane recorded by `open`
-#   fm-board.sh split-firstmate | unsplit-firstmate | toggle-firstmate [--board-pane <id>]
-#                                      move the firstmate pane beside the board
-#                                      pane (right split, 55 %) or back out to
-#                                      its own workspace; the board's `f` key and
-#                                      the herdr plugin actions firstmate.board.*
-#                                      run these. The board pane is --board-pane,
-#                                      else the pane recorded by `open`
 #   fm-board.sh --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
 #                             [--keys <list>] [--expand <all|ids>] [--opener-cmd <argv>]
 #                             [--viewer-cmd <argv>] [--view-state <file>] [--tags]
@@ -22,8 +15,8 @@
 #
 # Flags are passed through to bin/fm-board/index.mjs unchanged; see
 # `fm-board.sh --help` for the list (--home, --refresh, --prs, --no-herdr,
-# --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state, --board-pane,
-# --herdr-cmd, --herdr-socket, --snapshot-timeout, --keys, --expand, --tags).
+# --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state, --herdr-cmd,
+# --herdr-socket, --snapshot-timeout, --keys, --expand, --tags).
 #
 # FM_HOME resolution: the FM_HOME environment variable, else the one-line file
 # "$HERDR_PLUGIN_CONFIG_DIR/fm-home" (written once by the captain when the
@@ -38,8 +31,8 @@
 # present, else $XDG_CONFIG_HOME/fm-board/view-state.json, else
 # ~/.config/fm-board/view-state.json (--view-state overrides). Its actions are
 # `herdr agent focus`, opening a PR URL in the browser (`open` / `xdg-open`, or
-# --opener-cmd), showing a report in a terminal viewer (glow, $EDITOR, vim,
-# less, or --viewer-cmd) and moving the firstmate pane with `herdr pane move`.
+# --opener-cmd) and showing a report in a terminal viewer (glow, $EDITOR, vim,
+# less, or --viewer-cmd). It never moves or closes a pane.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -59,14 +52,13 @@ usage() {
 # ---------------------------------------------------------------- arguments
 command=run
 case "${1:-}" in
-  run|open|focus|split-firstmate|unsplit-firstmate|toggle-firstmate) command=$1; shift ;;
+  run|open|focus) command=$1; shift ;;
 esac
 
 want_herdr=1
 render_once=0
 fixture=
 view_state=
-board_pane=
 herdr_cmd=${HERDR_BIN_PATH:-herdr}
 pass=()
 while [ "$#" -gt 0 ]; do
@@ -77,7 +69,6 @@ while [ "$#" -gt 0 ]; do
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
-    --board-pane) [ "$#" -ge 2 ] || die "--board-pane needs a value"; board_pane=$2; pass+=("$1" "$2"); shift ;;
     --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--expand|--opener-cmd|--viewer-cmd)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
@@ -216,27 +207,8 @@ focus_board() {
   printf 'focused %s\n' "$pane"
 }
 
-# split-firstmate / unsplit-firstmate / toggle-firstmate: the pane-finding and
-# `herdr pane move` calls live in bin/fm-board/lib/split.mjs; this only supplies
-# the board pane (--board-pane, else the pane `open` recorded) and never calls
-# pane close.
-move_firstmate() {
-  [ "$want_herdr" -eq 1 ] || die "$command needs herdr; drop --no-herdr"
-  if [ -z "$board_pane" ]; then
-    local rec pane wsid route
-    rec=$(record_path)
-    [ -r "$rec" ] || die "no board pane recorded at $rec; run 'fm-board.sh open' first or pass --board-pane <id>"
-    read -r pane wsid route < "$rec"
-    [ -n "$pane" ] || die "empty board pane record at $rec; run 'fm-board.sh open' again"
-    : "$wsid" "$route"
-    pass+=(--board-pane "$pane")
-  fi
-  exec node "$ENTRY" "$command" "${pass[@]+"${pass[@]}"}"
-}
-
 case "$command" in
   open) open_board ;;
   focus) focus_board ;;
-  split-firstmate|unsplit-firstmate|toggle-firstmate) move_firstmate ;;
   run) exec node "$ENTRY" "${pass[@]+"${pass[@]}"}" ;;
 esac
