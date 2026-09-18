@@ -1,10 +1,19 @@
-// lib/controller.mjs - key handling shared by the interactive app and the
-// --render-once --keys test driver. keyAction() is pure: it maps a key on the
-// current selection to one action. handleKey() applies that action to the view
-// and calls back into the host for anything that touches the outside world
-// (herdr focus, the browser opener, the report viewer, a refresh, saving
-// view state, quitting), so a test can drive the same
-// code with fakes and read the resulting frame.
+// lib/controller.mjs - key and mouse handling shared by the interactive app
+// and the --render-once --keys / --mouse test driver. keyAction() and
+// mouseAction() are pure: they map a key, or a mouse event on the last drawn
+// frame, to one action object. handleKey() and handleMouse() apply that action
+// to the view through one applyAction() and call back into the host for
+// anything that touches the outside world (herdr focus, the browser opener,
+// the report viewer, a refresh, saving view state, quitting), so a test can
+// drive the same code with fakes and read the resulting frame.
+//
+// Mouse (lib/tui-blessed.mjs translates the terminal's events; --mouse feeds
+// the same objects): a left click selects the row under the pointer and
+// focuses its pane, a click on a pane title or its empty space focuses the
+// pane; two left clicks on one row within DBLCLICK_MS are a double-click and
+// do what enter does there; the wheel moves the selection WHEEL_ROWS rows in
+// the focused pane. Only the left button acts: herdr keeps the right button
+// for its own pane menu, so nothing here is bound to it.
 //
 // Actions on a row:
 //   enter   group row: expand or collapse; Ready for review, Landed or Needs
@@ -22,17 +31,21 @@
 //   r       refresh (the snapshot and the PR checks, unless --no-prs)
 //   .       the Settings page (lib/settings.mjs): installed version, latest
 //           release, upgrade and betas through the launcher, read-only flags;
-//           while it is open every key goes to settingsKeyAction and . / esc /
-//           q bring the board back with its selection intact
+//           while it is open every key goes to settingsKeyAction and every
+//           mouse event to settingsMouseAction; . / esc / q bring the board
+//           back with its selection intact
 //   ?       help       q / ctrl-c  quit
 
-import { PANES } from './layout.mjs';
+import { hitTest, PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
-import { confirmText, settingsKeyAction, upgradeArgs } from './settings.mjs';
+import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
 
 const OPEN_PANES = new Set(['review', 'needs', 'landed']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
 const VIEW_PANES = new Set(['findings']);
+
+export const DBLCLICK_MS = 400;
+export const WHEEL_ROWS = 3;
 
 function paneCount(model, i) {
   const pane = model.panes[i];
@@ -195,16 +208,49 @@ export function keyAction(model, view, key) {
   }
 }
 
-// The Settings page, open: apply one key's action (lib/settings.mjs decides
-// what the key means) to view.settings and hand the effects to the host:
+// A mouse event, from the terminal adapter or the --mouse list:
+//   { type: 'down' | 'up' | 'wheel', button: 'left' | 'right' | 'middle',
+//     x, y, dir: 'up' | 'down', time }
+// x and y count cells from 0 at the top-left; time is milliseconds on any
+// one clock. view.frame is the last drawn frame's { cols, rows, zones }
+// (renderFrame) and view.lastClick the previous left click on a row
+// { pane, row, time }, which is how a double-click is recognized here rather
+// than by the terminal library. Actions: select (pane focus and cursor, also
+// for a title or empty space), activate (a double-click: the enter action for
+// that row), wheel, none. Only the left button acts.
+export function mouseAction(model, view, ev) {
+  if (!ev || ev.type === 'up' || allPanesHidden(model)) return { type: 'none' };
+  if (ev.type === 'wheel') return { type: 'wheel', dir: ev.dir === 'up' ? -1 : 1 };
+  if (ev.type !== 'down' || ev.button !== 'left') return { type: 'none' };
+  const hit = hitTest(view.frame, ev.x, ev.y);
+  if (!hit) return { type: 'none' };
+  const pane = model.panes[hit.pane];
+  if (!pane || pane.hidden) return { type: 'none' };
+  if (hit.kind !== 'row') return { type: 'select', pane: hit.pane, row: hit.pane === view.pane ? view.row : 0 };
+  const last = view.lastClick;
+  const since = last && Number.isFinite(last.time) && Number.isFinite(ev.time) ? ev.time - last.time : NaN;
+  if (last && last.pane === hit.pane && last.row === hit.row && since >= 0 && since <= DBLCLICK_MS) {
+    return { type: 'activate', pane: hit.pane, row: hit.row, action: keyAction(model, { ...view, pane: hit.pane, row: hit.row }, 'enter') };
+  }
+  return { type: 'select', pane: hit.pane, row: hit.row, click: { pane: hit.pane, row: hit.row, time: ev.time } };
+}
+
+function clampSelection(ctx) {
+  const v = moveSelection(ctx.model, ctx.view, null);
+  ctx.view.pane = v.pane;
+  ctx.view.row = v.row;
+}
+
+// The Settings page, open: one action from settingsKeyAction or
+// settingsMouseAction (lib/settings.mjs decides what a key or a click means)
+// applied to view.settings, with the effects handed to the host:
 // settingsFetch() fetches the release data, settingsUpgrade(running) starts
 // the launcher's upgrade and later calls finishUpgrade, relaunch() exits the
 // board with RELAUNCH_EXIT. Closing the page never touches the board's
 // selection, expanded groups or hidden rows.
-function handleSettingsKey(ctx, key) {
+function applySettingsAction(ctx, action) {
   const { view } = ctx;
   const s = view.settings;
-  const action = settingsKeyAction(s, key);
   switch (action.type) {
     case 'quit':
       ctx.quit();
@@ -212,6 +258,7 @@ function handleSettingsKey(ctx, key) {
     case 'close':
       s.pending = null;
       view.page = 'board';
+      view.lastClick = null;
       return;
     case 'help':
       view.help = true;
@@ -219,9 +266,16 @@ function handleSettingsKey(ctx, key) {
     case 'menu':
       s.menu = action.menu;
       s.cursor = 0;
+      view.lastClick = null;
       return;
     case 'move':
       s.cursor = action.cursor;
+      view.lastClick = action.click || null;
+      return;
+    case 'activate':
+      s.cursor = action.cursor;
+      view.lastClick = null;
+      applySettingsAction(ctx, action.action);
       return;
     case 'fetch':
       ctx.settingsFetch();
@@ -268,16 +322,49 @@ export function handleKey(ctx, key) {
     return;
   }
   if (view.page === 'settings') {
-    handleSettingsKey(ctx, key);
+    applySettingsAction(ctx, settingsKeyAction(view.settings, key));
     return;
   }
-  const clamp = () => {
-    const v = moveSelection(ctx.model, view, null);
-    view.pane = v.pane;
-    view.row = v.row;
-  };
-  const action = keyAction(ctx.model, view, key);
+  applyAction(ctx, keyAction(ctx.model, view, key));
+}
+
+export function handleMouse(ctx, ev) {
+  const { view } = ctx;
+  if (!ev || ev.type === 'up') return;
+  if (view.help) {
+    if (ev.type === 'down') view.help = false;
+    return;
+  }
+  if (view.page === 'settings') {
+    applySettingsAction(ctx, settingsMouseAction(view.settings, view, ev, { dblclickMs: DBLCLICK_MS }));
+    return;
+  }
+  applyAction(ctx, mouseAction(ctx.model, view, ev));
+}
+
+function applyAction(ctx, action) {
+  const { view } = ctx;
+  const clamp = () => clampSelection(ctx);
   switch (action.type) {
+    case 'select':
+      view.pane = action.pane;
+      view.row = action.row;
+      view.lastClick = action.click || null;
+      clamp();
+      return;
+    case 'activate':
+      view.pane = action.pane;
+      view.row = action.row;
+      view.lastClick = null;
+      clamp();
+      applyAction(ctx, action.action);
+      return;
+    case 'wheel': {
+      const count = paneCount(ctx.model, view.pane);
+      if (count > 0) view.row = Math.max(0, Math.min(count - 1, view.row + action.dir * WHEEL_ROWS));
+      view.lastClick = null;
+      return;
+    }
     case 'quit':
       ctx.quit();
       return;
@@ -292,6 +379,7 @@ export function handleKey(ctx, key) {
       view.settings.menu = 'main';
       view.settings.cursor = 0;
       view.settings.pending = null;
+      view.lastClick = null;
       ctx.settingsFetch();
       return;
     case 'refresh':
@@ -384,7 +472,7 @@ export function handleKey(ctx, key) {
       ctx.notice('all panes shown');
       return;
     case 'move': {
-      const v = moveSelection(ctx.model, view, key);
+      const v = moveSelection(ctx.model, view, action.key);
       view.pane = v.pane;
       view.row = v.row;
       return;

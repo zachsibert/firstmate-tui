@@ -1,7 +1,7 @@
 // lib/tui-blessed.mjs - the ONLY module that imports neo-blessed. It exposes a
 // tiny screen contract so the terminal library can be swapped without touching
 // the model, layout or renderer:
-//   const screen = await createScreen({ onKey, onResize })
+//   const screen = await createScreen({ onKey, onMouse, onResize, mouse })
 //   screen.size()        -> { cols, rows }
 //   screen.draw(lines)   -> paint one rendered frame (segments from render.mjs)
 //   screen.suspend()     -> leave the alternate screen and hand the terminal to
@@ -11,6 +11,15 @@
 //   screen.destroy()     -> restore the terminal
 // Keys are normalized to short names: j k h l o x X H f 0-9 up down left right
 // tab S-tab enter r ? q escape ctrl-c.
+//
+// Mouse: with `mouse` true the screen listens for the library's mouse events,
+// which is what turns the terminal's mouse reporting on (and off again on
+// destroy, and around suspend/resume for the viewer, both inside the library).
+// normalizeMouse() turns each event into the plain object
+// lib/controller.mjs reads: { type: 'down' | 'up' | 'wheel', button, x, y,
+// dir, time }, cells from 0 at the top-left. Motion and drag events are
+// dropped; nothing here decides what a click means. With `mouse` false no
+// listener is added, so the terminal keeps its own click and text selection.
 //
 // A segment style is one or more space-separated names from STYLE_TAGS
 // ("selected lost" is an inverse row whose cell is also red); toTags() opens
@@ -77,7 +86,29 @@ export function normalizeKey(ch, key) {
   return name || null;
 }
 
-export async function createScreen({ onKey, onResize, title = 'fm-board' }) {
+// One terminal mouse report in each of the encodings the library enables:
+// X10/VT200 (ESC [ M plus three cells), SGR (ESC [ < b;x;y M or m) and urxvt
+// (ESC [ b;x;y M).
+const MOUSE_SEQUENCES = /\x1b\[M[\s\S]{3}|\x1b\[<\d+;\d+;\d+[mM]|\x1b\[\d+;\d+;\d+M/g;
+
+export function normalizeMouse(data) {
+  if (!data || !Number.isInteger(data.x) || !Number.isInteger(data.y)) return null;
+  const button = data.button === 'left' || data.button === 'right' || data.button === 'middle' ? data.button : null;
+  switch (data.action) {
+    case 'mousedown':
+      return button ? { type: 'down', button, x: data.x, y: data.y } : null;
+    case 'mouseup':
+      return { type: 'up', button: button || 'left', x: data.x, y: data.y };
+    case 'wheelup':
+      return { type: 'wheel', dir: 'up', x: data.x, y: data.y };
+    case 'wheeldown':
+      return { type: 'wheel', dir: 'down', x: data.x, y: data.y };
+    default:
+      return null; // mousemove and drags are not the board's
+  }
+}
+
+export async function createScreen({ onKey, onMouse, onResize, mouse = false, title = 'fm-board' }) {
   const blessed = (await import('neo-blessed')).default;
   const screen = blessed.screen({
     smartCSR: true,
@@ -100,6 +131,30 @@ export async function createScreen({ onKey, onResize, title = 'fm-board' }) {
   screen.on('resize', () => {
     if (!suspended) onResize({ cols: screen.width, rows: screen.height });
   });
+  // Adding the listener is what enables mouse reporting (screen._listenMouse
+  // calls program.enableMouse, verified in neo-blessed 0.2.0
+  // lib/widgets/screen.js); without it the terminal never hears about it.
+  if (mouse && onMouse) {
+    // The library parses one mouse sequence per input chunk (program.js
+    // _bindMouse anchors its match at the start of the chunk, verified in
+    // neo-blessed 0.2.0), and while the board is busy drawing the frame for
+    // one press the terminal can deliver that press's release and the next
+    // press in a single read, which would lose the second click of a
+    // double-click. Hand the library one sequence at a time.
+    const program = screen.program;
+    const bindOne = program._bindMouse.bind(program);
+    program._bindMouse = (s, buf) => {
+      const parts = typeof s === 'string' ? s.match(MOUSE_SEQUENCES) : null;
+      if (!parts || parts.length < 2) return bindOne(s, buf);
+      for (const part of parts) bindOne(part, buf);
+      return undefined;
+    };
+    screen.on('mouse', (data) => {
+      if (suspended) return;
+      const ev = normalizeMouse(data);
+      if (ev) onMouse({ ...ev, time: Date.now() });
+    });
+  }
   return {
     size: () => ({ cols: screen.width, rows: screen.height }),
     draw(lines) {

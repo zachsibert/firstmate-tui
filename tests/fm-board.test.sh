@@ -14,7 +14,13 @@
 # goes to `--viewer-cmd`, here tests/fake-viewer.sh (argv to
 # FM_BOARD_TEST_VIEWER_LOG); without --viewer-cmd a one-shot render only
 # reports the viewer the PATH chain resolved to, so the suite shadows glow with
-# the fake on PATH and no real viewer ever runs. Hidden rows and panes go to
+# the fake on PATH and no real viewer ever runs. Mouse gestures go through
+# `--mouse <list>` (click:X,Y, dblclick:X,Y, wheel:up:X,Y,
+# wheel:down:X,Y and key names, in order with --keys; X the column and Y the
+# line, from 0 at the top-left cell), which feeds lib/controller.mjs
+# handleMouse the same event objects the terminal adapter would, measured
+# against the frame the app would have drawn, so no terminal library and no
+# pointer is involved. Hidden rows and panes go to
 # `--view-state <temp file>`. The r key is checked against a stand-in firstmate
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
 # that they ran and print canned JSON, with tests/fake-gh.sh first on PATH as
@@ -188,6 +194,14 @@ assert_file_contains() {
 }
 assert_file_not_contains() {
   if [ -f "$1" ] && grep -Fq -- "$2" "$1"; then fail "$3: did not expect '$2' in $1"; else pass; fi
+}
+# render_mouse <fixture> <mouse list> [extra flags...]: render with --mouse, the fake opener and the
+# fake viewer both recording (their logs reset first), so a gesture can never reach a browser or editor
+render_mouse() {
+  local fixture=$1 mouse=$2
+  shift 2
+  rm -f "${OPENER_LOG:?}" "${VIEWER_LOG:?}"
+  FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" "$BOARD" --render-once --fixture "$FIX/$fixture" --no-herdr --mouse "$mouse" --opener-cmd "$FAKE_OPENER" --viewer-cmd "$FAKE_VIEWER" "$@"
 }
 # render_live [flags]: a one-shot render of the stand-in home (no fixture), fetch log reset first, the
 # fake gh first on PATH
@@ -963,6 +977,7 @@ assert_row "$frame_s" '^   Refresh release data +GitHub releases of acme/fm-boar
 assert_row "$frame_s" '^ refresh cadence +30 s \(--refresh\) +$' "settings: refresh cadence, read-only"
 assert_row "$frame_s" '^ PR data +on: live GitHub checks on every tick +$' "settings: PR data, read-only"
 assert_row "$frame_s" '^ herdr overlay +off \(--no-herdr\) +$' "settings: the herdr line reflects --no-herdr"
+assert_row "$frame_s" '^ mouse +on: click selects, double-click acts, wheel scrolls +$' "settings: the mouse line, on by default (falsify: drop the mouse entry from settingsFlags)"
 assert_row "$frame_s" '^ j/k move  enter choose  r refetch  esc/\. back  \? help +$' "settings: the footer names the page's keys"
 assert_contains "$frame_s" "fm-board · /fixture/firstmate · 3 homes" "settings: the title line stays"
 assert_lines "$frame_s" 40 "settings: the frame is 40 lines"
@@ -978,6 +993,8 @@ assert_count "$(cat "$CURL_LOG")" "api.github.com" 4 "r inside the page fetches 
 frame_s=$(render_settings "$REL" "$INSTALL" "." --no-prs --refresh 45) || fail "settings flags: render exited non-zero"
 assert_row "$frame_s" '^ refresh cadence +45 s \(--refresh\) +$' "settings: the cadence line follows --refresh"
 assert_row "$frame_s" '^ PR data +off \(--no-prs\) +$' "settings: the PR data line follows --no-prs"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --no-mouse) || fail "settings no-mouse: render exited non-zero"
+assert_row "$frame_s" '^ mouse +off \(--no-mouse\) +$' "settings: the mouse line follows --no-mouse"
 # Without --curl-cmd a one-shot render fetches nothing, not even through a curl on PATH (falsify:
 # default curlCmd to curl in driveOnce's settingsFetch).
 rm -f "$CURL_LOG"
@@ -1144,6 +1161,46 @@ assert_contains "$frame_s" " latest stable  0.2.0 · published 2026-09-17 · upg
 assert_widths "$frame_s" 70 "narrow settings: lines are 70 columns"
 assert_lines "$frame_s" 24 "narrow settings: 24 lines"
 
+# The mouse on the page. At 160x40 with the newer release set the main menu draws Upgrade on line 7,
+# Betas on 8 and Refresh release data on 9, the flags on 11-14; the Betas menu draws its three
+# prereleases on 7-9 and Back to stable on 10. A click highlights an entry, two clicks within the
+# double-click window on one entry are enter on it, the wheel moves the highlight one entry, a click
+# while a confirmation is pending cancels it, and no click on the page reaches the board behind it
+# (falsify: drop the settings zones from renderSettings, the settings branch from handleMouse, or the
+# pending check from settingsMouseAction).
+frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "click:10,8") || fail "settings click: render exited non-zero"
+assert_row "$frame_s" '^ ▸ Betas ' "a click on the Betas line highlights it"
+assert_no_row "$frame_s" '^ ▸ Upgrade' "a click on the Betas line takes the highlight off Upgrade"
+assert_row "$frame_s" '^ Settings +$' "a single click chooses nothing: the main menu stays"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "click:10,8 click:10,8") || fail "settings two clicks: render exited non-zero"
+assert_row "$frame_s" '^ Settings +$' "two clicks a second apart on Betas only highlight it"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "dblclick:10,8") || fail "settings dblclick: render exited non-zero"
+assert_row "$frame_s" '^ Settings · Betas +$' "a double-click on Betas opens the submenu, as enter does"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "wheel:down:80,20") || fail "settings wheel: render exited non-zero"
+assert_row "$frame_s" '^ ▸ Betas ' "wheel down moves the highlight one entry, wherever the pointer is"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "wheel:up:80,20") || fail "settings wheel up: render exited non-zero"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "wheel up at the top stays on the first entry"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "click:10,12 click:30,0 click:30,39") || fail "settings chrome click: render exited non-zero"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "clicks on a flag line, the title line and the footer change nothing on the page"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "dblclick:10,7") || fail "settings dblclick upgrade: render exited non-zero"
+assert_row "$frame_s" '^ install 0\.2\.0 \(fm-board upgrade --version 0\.2\.0\)\? y to confirm, esc to cancel +$' "a double-click on Upgrade asks for confirmation like enter"
+assert_no_upgrade "a double-click runs nothing before y"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,enter" --mouse "click:10,9") || fail "settings click while pending: render exited non-zero"
+assert_contains "$frame_s" "cancelled; nothing was installed" "a click while a confirmation is pending cancels it"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "the cancelling click does not move the highlight"
+assert_no_upgrade "a click while pending runs nothing"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter" --mouse "dblclick:10,8") || fail "settings betas dblclick: render exited non-zero"
+assert_row "$frame_s" '^ install 0\.1\.0-d8b290e \(fm-board upgrade --version 0\.1\.0-d8b290e\)\? y to confirm, esc to cancel +$' "in Betas a double-click on the second prerelease asks to install exactly it"
+assert_no_upgrade "in Betas a double-click runs nothing before y"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --no-mouse --mouse "click:10,8 dblclick:10,8") || fail "settings no-mouse click: render exited non-zero"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "--no-mouse: clicks on the page change nothing"
+assert_row "$frame_s" '^ Settings +$' "--no-mouse: a double-click opens no submenu"
+# A click on the page lands on the page, never on the board row that would be under the pointer: the
+# board's selection from before the page opened is what enter acts on afterwards.
+rm -f "$OPENER_LOG"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,." --mouse "click:30,29 wheel:down:30,29" --keys "escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings click through: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "a click and a wheel on the page leave the board's selection where it was"
+
 # ------------------------------------------------------------ refresh schedule
 # The interactive schedule, run with --headless against a stand-in whose snapshot sleeps 7 s, with
 # --refresh 5 (the minimum) and the fake gh on PATH. From launch: the start refresh runs the
@@ -1172,6 +1229,154 @@ if [ "$(sed -n '1p;5p' "$FETCH_LOG" 2>/dev/null)" = "snapshot
 snapshot" ]; then pass; else fail "headless schedule: each refresh runs the snapshot before its gh calls; log is '$headless_log'"; fi
 if grep -q '^prs ' "$FETCH_LOG" 2>/dev/null; then fail "headless schedule: the firstmate PR script ran although gh is on PATH; log is '$headless_log'"; else pass; fi
 if [ -s "$SCRATCH/headless.log" ]; then fail "headless run wrote to the terminal: $(head -c 300 "$SCRATCH/headless.log")"; else pass; fi
+
+# ------------------------------------------------------------------- mouse
+# Cells are column,line from 0 at the top-left. In populated.json at 160x40 the lines are: 0 title,
+# 1 Needs you title, 3-6 its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 8 Ready for
+# review title, 10-12 its rows (api#8, ship-alpha #41, ship-gamma #7), 14 In flight title, 15 its
+# column header, 16-22 its rows (ship-alpha, tmux-task, remote-sm group, scout-beta, hyperion group,
+# ship-gamma, ship-old), 26 Findings title, 28-30 its rows (scout-beta, mobile-fix, old-scout),
+# 32 Landed title, 34-37 its rows (etl-index, ship-old, mobile-fix, old-scout), 39 footer.
+#
+# A left click selects: the pane gets the focus border and the row the inverse style, the same as
+# tab/j/k would leave them (falsify: drop the 'select' case from applyAction, or the row zones from
+# renderPanes).
+tags_m=$(render populated.json --mouse "click:30,29" --tags) || fail "mouse click: render exited non-zero"
+assert_row "$tags_m" '\{inverse\}report +\{/inverse\}.*mobile-fix' "click on the second Findings row selects it"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[4\].*Findings \(3\)' "click on a Findings row focuses the Findings pane"
+assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[1\]' "click: Needs you lost the focus border"
+assert_no_row "$tags_m" '\{inverse\}blocked' "click: the old selection is no longer inverse"
+# The selection a click leaves is what the keys then act on (falsify: set view.row without view.pane in 'select').
+frame_m=$(render populated.json --mouse "click:30,29" --keys "x") || fail "mouse click then x: render exited non-zero"
+assert_contains "$frame_m" "Findings (2, 1 hidden)" "x after a click hides the clicked row"
+assert_contains "$frame_m" "hidden mobile-fix" "x after a click names the clicked row"
+# A click on a pane title focuses the pane, cursor on its first row (falsify: drop the title zone, or return
+# 'none' for a non-row hit in mouseAction).
+tags_m=$(render populated.json --mouse "click:5,26" --tags) || fail "mouse title click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[4\].*Findings \(3\)' "click on the Findings title focuses Findings"
+assert_row "$tags_m" '\{inverse\}scout +\{/inverse\}.*scout-beta' "click on the Findings title puts the cursor on its first row"
+frame_m=$(render populated.json --mouse "click:5,26" --keys "enter") || fail "mouse title click then enter: render exited non-zero"
+assert_contains "$frame_m" "would view /fixture/firstmate/data/scout-beta/report.md" "enter after a title click acts on that pane's first row"
+# A click on a pane's empty space (its column header) focuses the pane too (falsify: drop the pane zone).
+tags_m=$(render populated.json --mouse "click:30,15" --tags) || fail "mouse empty click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[3\].*In flight \(7\)' "click on In flight's column header focuses In flight"
+# A click on the title line or the footer changes nothing (falsify: give those lines a zone).
+frame_m=$(render populated.json --mouse "click:30,0 click:30,39") || fail "mouse chrome click: render exited non-zero"
+if [ "$frame_m" = "$frame" ]; then pass; else fail "a click on the title line or footer changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
+# The narrow list has zones too (falsify: drop the zones from renderList).
+tags_m=$(render narrow.json --mouse "click:10,12" --tags) || fail "mouse narrow click: render exited non-zero"
+assert_row "$tags_m" '\{inverse\}merged +\{/inverse\}.*ship-old' "list mode: a click on the Landed row selects it"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[5\].*Landed \(1\)' "list mode: the Landed section header takes the focus style"
+tags_m=$(render narrow.json --mouse "click:10,2" --tags) || fail "mouse narrow title click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[1\].*Needs you \(1\)' "list mode: a click on a section header focuses that section"
+
+# A double-click is enter on that row: two left clicks on one row within 400 ms, recognized in
+# lib/controller.mjs, not by the terminal library (falsify: drop the lastClick check from mouseAction, or
+# stamp the two dblclick events with different times in driveOnce).
+frame_m=$(render_mouse populated.json "dblclick:30,11") || fail "mouse dblclick review: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "double-click on the second Ready for review row opens its PR, as enter does"
+assert_contains "$frame_m" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "double-click: the footer names the opened PR"
+frame_m=$(render_mouse populated.json "click:30,11 click:30,11") || fail "mouse two clicks: render exited non-zero"
+assert_not_opened "two single clicks a second apart on one row open nothing"
+frame_m=$(render_mouse populated.json "click:30,10 click:30,11 click:30,11 click:30,10") || fail "mouse clicks on different rows: render exited non-zero"
+assert_not_opened "clicks alternating between rows never make a double-click"
+frame_m=$(render_mouse populated.json "dblclick:30,20") || fail "mouse dblclick group: render exited non-zero"
+assert_row "$frame_m" '^│ decide +1 live +!▾ hyperion ' "double-click on the hyperion group row expands it"
+assert_contains "$frame_m" "In flight (12)" "double-click on a group: only that group's rows are added"
+assert_not_opened "double-click on a group row opens no PR"
+frame_m=$(render_mouse populated.json "dblclick:30,20 dblclick:30,20") || fail "mouse dblclick group twice: render exited non-zero"
+assert_row "$frame_m" '^│ decide +1 live +!▸ hyperion ' "a second double-click on the group row collapses it again"
+frame_m=$(render_mouse populated.json "dblclick:60,28") || fail "mouse dblclick findings: render exited non-zero"
+assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "double-click on a Findings row views its report through --viewer-cmd"
+frame_m=$(render_mouse populated.json "dblclick:30,16") || fail "mouse dblclick worker: render exited non-zero"
+assert_contains "$frame_m" "herdr is off (--no-herdr); cannot focus" "double-click on an In flight worker means herdr focus, refused here as enter is"
+assert_not_opened "double-click on a worker opens no PR"
+assert_not_viewed "double-click on a worker views no report"
+frame_m=$(render_mouse populated.json "dblclick:60,37") || fail "mouse dblclick landed no url: render exited non-zero"
+assert_not_opened "double-click on a Landed row without a PR opens nothing"
+assert_contains "$frame_m" "old-scout: no PR URL on this row" "double-click on a Landed row without a PR says so, as enter does"
+
+# Only the left button acts. Herdr keeps the right button for its own pane menu, so the board binds
+# nothing to it: the harness refuses an rclick token, and a right- or middle-button event reaching the
+# controller is a no-op while the same left-button event selects (falsify: give another button a branch
+# in mouseAction, or accept rclick in parseMouseToken).
+if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --mouse "rclick:30,11" 2>&1); then
+  fail "--mouse rclick should be refused"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- '--mouse: bad event "rclick:30,11"'; then pass; else fail "--mouse names rclick as an unsupported event: $out"; fi
+buttons=$(node --input-type=module -e "
+  import { mouseAction } from '$ROOT/bin/fm-board/lib/controller.mjs';
+  const zones = Array.from({ length: 40 }, (_, y) => (y === 5 ? { kind: 'row', pane: 0, row: 2 } : null));
+  const model = { panes: [{ id: 'needs', hidden: false, hiddenCount: 0, rows: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] }], meta: {} };
+  const view = { pane: 0, row: 0, frame: { cols: 160, rows: 40, zones }, lastClick: null, showHidden: false };
+  for (const button of ['right', 'middle', 'left']) console.log(button + ' ' + mouseAction(model, view, { type: 'down', button, x: 30, y: 5, time: 0 }).type);
+")
+assert_row "$buttons" '^right none$' "a right-button press on a row is a no-op in the controller"
+assert_row "$buttons" '^middle none$' "a middle-button press on a row is a no-op in the controller"
+assert_row "$buttons" '^left select$' "the same left-button press selects the row"
+
+# The wheel moves the selection three rows in the focused pane, whichever pane the pointer is over, and
+# clamps at the ends (falsify: change WHEEL_ROWS, or hit-test the wheel's pointer).
+frame_m=$(render_mouse populated.json "wheel:down:30,35" --keys "enter") || fail "mouse wheel: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/7" "wheel down over Landed moves the focused Needs you selection three rows to merge?, which enter opens"
+tags_m=$(render populated.json --mouse "wheel:down:30,35" --tags) || fail "mouse wheel --tags: render exited non-zero"
+assert_row "$tags_m" '\{inverse\}merge\? ' "wheel down: the fourth Needs you row is selected"
+assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[5\]' "wheel: the pane under the pointer is not focused"
+tags_m=$(render populated.json --mouse "wheel:up:30,35 wheel:down:30,35 wheel:down:30,35" --tags) || fail "mouse wheel clamp: render exited non-zero"
+assert_row "$tags_m" '\{inverse\}merge\? ' "wheel up at the top stays, two wheel downs clamp at the last row"
+tags_m=$(render populated.json --mouse "wheel:down:30,35 wheel:up:30,35" --tags) || fail "mouse wheel back: render exited non-zero"
+assert_row "$tags_m" '\{inverse\}blocked ' "wheel down then up is back on the first row"
+# A wheel move breaks a double-click: click, wheel, click on the same row is two singles (falsify: keep
+# lastClick across a wheel action).
+frame_m=$(render_mouse populated.json "click:30,11 wheel:down:30,11 wheel:up:30,11 click:30,11") || fail "mouse click wheel click: render exited non-zero"
+assert_not_opened "click, wheel and click on one row are two single clicks"
+
+# --no-mouse: every gesture is ignored and the frame is the plain one (falsify: drop the opts.mouse guard
+# in driveOnce, or make --no-mouse set anything but opts.mouse).
+frame_m=$(render populated.json --no-mouse --mouse "click:30,29 dblclick:30,11 wheel:down:30,35") || fail "--no-mouse: render exited non-zero"
+if [ "$frame_m" = "$frame" ]; then pass; else fail "--no-mouse changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
+frame_m=$(render_mouse populated.json "dblclick:30,11" --no-mouse) || fail "--no-mouse dblclick: render exited non-zero"
+assert_not_opened "--no-mouse: a double-click opens nothing"
+frame_m=$(render populated.json --no-mouse --mouse "click:30,29 x") || fail "--no-mouse keys in list: render exited non-zero"
+assert_contains "$frame_m" "Needs you (3, 1 hidden)" "--no-mouse: the key tokens of the list still apply (x hid the row the keyboard selection was on)"
+assert_contains "$frame_m" "hidden scout-beta" "--no-mouse: the click was ignored, so x acted on the first Needs you row, not the clicked Findings row"
+# The landing page has no mouse targets (falsify: give renderLanding zones).
+frame_l=$(render populated.json --keys "1,2,3,4,5")
+frame_m=$(render populated.json --keys "1,2,3,4,5" --mouse "click:30,20 dblclick:30,20 wheel:down:30,20") || fail "mouse on landing: render exited non-zero"
+if [ "$frame_m" = "$frame_l" ]; then pass; else fail "mouse events changed the landing page: $(diff <(printf '%s\n' "$frame_l") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
+# A click while the help is up closes it (falsify: ignore mouse events under view.help).
+frame_m=$(render populated.json --keys "?" --mouse "click:30,29") || fail "mouse click on help: render exited non-zero"
+assert_not_contains "$frame_m" "fm-board keys" "a click closes the help overlay"
+
+# The help lists the gestures and binds nothing to the right button (falsify: drop the mouse block from
+# HELP_LINES, or bring a right-click line back).
+frame_m=$(render populated.json --keys "?") || fail "mouse help: render exited non-zero"
+assert_contains "$frame_m" "mouse (off with --no-mouse" "help overlay has a mouse section naming --no-mouse"
+assert_contains "$frame_m" "click        select that row and focus its pane; a pane title focuses the pane" "help overlay documents click"
+assert_contains "$frame_m" "double-click the same as enter on that row" "help overlay documents double-click"
+assert_contains "$frame_m" "wheel        move the selection three rows in the focused pane" "help overlay documents the wheel"
+assert_not_contains "$frame_m" "right-click" "help overlay offers no right-click gesture"
+assert_not_contains "$frame" "menu" "the frame offers no menu"
+
+# --mouse parsing (falsify: loosen parseMouseToken, or drop --mouse from the wrapper's value-taking list).
+if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --mouse "click:12" 2>&1); then
+  fail "--mouse with a bad event should exit non-zero"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- '--mouse: bad event "click:12"'; then pass; else fail "--mouse names the bad event: $out"; fi
+if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --mouse 2>&1); then
+  fail "--mouse without a value should exit non-zero"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- "--mouse needs a value"; then pass; else fail "--mouse without a value is named in the error: $out"; fi
+frame_m=$(render populated.json --mouse "click:30,29,x") || fail "mouse comma list: render exited non-zero"
+assert_contains "$frame_m" "hidden mobile-fix" "a comma-separated list keeps the comma inside X,Y and reads the rest as keys"
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "--no-mouse"; then pass; else fail "wrapper --help lists --no-mouse"; fi
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "--mouse <list>"; then pass; else fail "wrapper --help lists --mouse"; fi
 
 # ----------------------------------------------------------- wrapper checks
 # A fake herdr for the checks below, on HERDR_BIN_PATH and PATH: it logs every call to

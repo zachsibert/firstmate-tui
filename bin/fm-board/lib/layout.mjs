@@ -93,3 +93,26 @@ export function paneHeights(totalRows, demands, visible = []) {
 export function paneDemand(rowCount) {
   return 1 + Math.max(1, rowCount);
 }
+
+// Mouse hit test. The renderer records, for every line it draws, what that
+// line is (frame.zones[y], one entry per line):
+//   { kind: 'title', pane }      a pane's top border (panes) or section header (list)
+//   { kind: 'row', pane, row }   one list row of pane `pane`, its index in pane.rows
+//   { kind: 'pane', pane }       the pane's other cells: column header, empty
+//                                message, blank filler, bottom border
+//   null                         the title line, the footer, the landing page
+// A row spans the whole frame width, so only y decides; x only has to be
+// inside the frame. Hidden panes draw nothing and so own no zone: a click on
+// where one used to be lands on whatever pane took its place, or on nothing.
+export function hitTest(frame, x, y) {
+  if (!frame || !Array.isArray(frame.zones)) return null;
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= frame.cols || y >= frame.rows) return null;
+  const zone = frame.zones[y];
+  if (!zone) return null;
+  if (zone.kind === 'row') return { kind: 'row', pane: zone.pane, row: zone.row };
+  if (zone.kind === 'title') return { kind: 'title', pane: zone.pane };
+  if (zone.kind === 'pane') return { kind: 'pane', pane: zone.pane };
+  // The Settings page (lib/settings.mjs): one of its selectable entries.
+  if (zone.kind === 'settings') return { kind: 'settings', entry: zone.entry };
+  return null;
+}

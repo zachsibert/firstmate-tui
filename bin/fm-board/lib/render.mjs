@@ -32,6 +32,11 @@ export const HELP_LINES = [
   '               (each install asks y first; . or esc brings the board back)',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
+  'mouse (off with --no-mouse; hold your terminal\'s text-selection modifier to select text)',
+  '  click        select that row and focus its pane; a pane title focuses the pane',
+  '  double-click the same as enter on that row',
+  '  wheel        move the selection three rows in the focused pane',
+  '',
   'The board is read-only: it never answers, merges or dispatches. Hidden rows and',
   'panes are view state in the board\'s own file, never in a firstmate home.',
   'HERDR "pane lost" (red): the worker pane is gone from herdr. "unknown" (grey):',
@@ -159,9 +164,15 @@ export function tagColumnWidth(model) {
   return w;
 }
 
+// Each renderer returns { lines, zones }: zones[y] says what line y is, in the
+// shape lib/layout.mjs hitTest() reads (a pane title, a row, the pane's other
+// cells, or null for the frame's own chrome), so a mouse click can be mapped
+// back to the row it landed on without a second copy of the geometry.
 function renderPanes(model, cols, rows, view) {
   const lines = [];
+  const zones = [];
   lines.push(titleLine(model, cols, view));
+  zones.push(null);
   const heights = paneHeights(
     rows,
     model.panes.map((p) => paneDemand(p.rows.length)),
@@ -181,37 +192,56 @@ function renderPanes(model, cols, rows, view) {
     const topText = ` ${truncate(pane.header, cols - width(lead) - width(badge) - 4)} `;
     const top = `${topText}${H.repeat(Math.max(0, cols - 1 - width(lead) - width(badge) - width(topText)))}┐`;
     lines.push(line([seg(lead, borderStyle), seg(badge, 'badge'), seg(top, borderStyle)], cols));
+    zones.push({ kind: 'title', pane: idx });
     const height = heights[idx];
     const body = [];
-    if (height >= 2) body.push(headSegments(spec));
+    const bodyZones = [];
+    const paneZone = { kind: 'pane', pane: idx };
+    if (height >= 2) {
+      body.push(headSegments(spec));
+      bodyZones.push(paneZone);
+    }
     const roomForRows = height - body.length;
     let hiddenBelow = 0;
     let hiddenAbove = 0;
     if (pane.rows.length === 0) {
       body.push([seg(fit(pane.empty, inner), 'empty')]);
+      bodyZones.push(paneZone);
     } else {
       const start = scrollStart(pane.rows.length, roomForRows, focused ? view.row : 0, view.scroll[idx] || 0);
       view.scrollOut[idx] = start;
       const visible = pane.rows.slice(start, start + roomForRows);
-      visible.forEach((r, i) => body.push(rowSegments(r, spec, focused && start + i === view.row, pane.id)));
+      visible.forEach((r, i) => {
+        body.push(rowSegments(r, spec, focused && start + i === view.row, pane.id));
+        bodyZones.push({ kind: 'row', pane: idx, row: start + i });
+      });
       hiddenAbove = start;
       hiddenBelow = pane.rows.length - (start + visible.length);
     }
-    while (body.length < height) body.push([seg(' '.repeat(inner), 'row')]);
-    for (const b of body.slice(0, height)) {
+    while (body.length < height) {
+      body.push([seg(' '.repeat(inner), 'row')]);
+      bodyZones.push(paneZone);
+    }
+    body.slice(0, height).forEach((b, i) => {
       const padStyle = b.length && b[0].style.startsWith('selected') ? 'selected' : 'row';
       lines.push(line([seg(`${V} `, borderStyle), ...fitSegments(b, inner, padStyle), seg(` ${V}`, borderStyle)], cols));
-    }
+      zones.push(bodyZones[i]);
+    });
     const markers = [];
     if (hiddenAbove > 0) markers.push(`${hiddenAbove} above`);
     if (hiddenBelow > 0) markers.push(`+${hiddenBelow} more`);
     const marker = markers.length ? ` ${markers.join(', ')} ${H}${H}` : '';
     const bottom = `└${H.repeat(Math.max(0, cols - 2 - width(marker)))}${marker}┘`;
     lines.push(line([seg(bottom, borderStyle)], cols));
+    zones.push(paneZone);
   });
-  while (lines.length < rows - 1) lines.push(line([], cols));
+  while (lines.length < rows - 1) {
+    lines.push(line([], cols));
+    zones.push(null);
+  }
   lines.push(footerLine(model, cols, view));
-  return lines.slice(0, rows);
+  zones.push(null);
+  return { lines: lines.slice(0, rows), zones: zones.slice(0, rows) };
 }
 
 // Flattened list for narrow terminals: one section header per pane, one
@@ -229,10 +259,13 @@ export function flattenRows(model) {
 
 function renderList(model, cols, rows, view) {
   const lines = [];
+  const zones = [];
   lines.push(titleLine(model, cols, view));
+  zones.push(null);
   const inner = cols - 1;
   const spec = columns(cols, inner, 'inflight', tagColumnWidth(model));
   lines.push(line([seg(' ', 'row'), ...headSegments(spec)], cols));
+  zones.push(null);
   const flat = flattenRows(model);
   const height = Math.max(rows, MIN_ROWS) - 3;
   const selectedIdx = flat.findIndex((e) => e.kind === 'row' && e.paneIdx === view.pane && e.rowIdx === view.row);
@@ -246,15 +279,22 @@ function renderList(model, cols, rows, view) {
       const lead = `${H}${H} `;
       const text = ` ${truncate(entry.text, cols - width(lead) - width(entry.badge) - 2)} `;
       lines.push(line([seg(lead, style), seg(entry.badge, 'badge'), seg(`${text}${H.repeat(Math.max(0, cols - width(lead) - width(entry.badge) - width(text)))}`, style)], cols));
+      zones.push({ kind: 'title', pane: entry.paneIdx });
     } else if (entry.kind === 'empty') {
       lines.push(line([seg(' ', 'row'), seg(fit(entry.text, inner), 'empty')], cols));
+      zones.push({ kind: 'pane', pane: entry.paneIdx });
     } else {
       lines.push(line([seg(' ', 'row'), ...rowSegments(entry.row, spec, entry.paneIdx === view.pane && entry.rowIdx === view.row, null)], cols));
+      zones.push({ kind: 'row', pane: entry.paneIdx, row: entry.rowIdx });
     }
   }
-  while (lines.length < height + 2) lines.push(line([], cols));
+  while (lines.length < height + 2) {
+    lines.push(line([], cols));
+    zones.push(null);
+  }
   lines.push(footerLine(model, cols, view));
-  return lines;
+  zones.push(null);
+  return { lines, zones };
 }
 
 // Every pane hidden: instead of an empty grid, a centered key page between the
@@ -290,12 +330,15 @@ function renderLanding(model, cols, rows, view) {
     else lines.push(line([pad, seg(truncate(entry.text, cols - left), entry.style || 'row')], cols));
   }
   lines.push(footerLine(model, cols, view));
-  return lines;
+  // Nothing on the landing page is a row or a pane: the mouse has no target.
+  return { lines, zones: lines.map(() => null) };
 }
 
 // ------------------------------------------------------------ settings page
 // The `.` page replaces the grid between the title line and the footer. Pure
-// like the rest: view.settings (lib/settings.mjs) in, lines out. The identity
+// like the rest: view.settings (lib/settings.mjs) in, lines and zones out
+// (each selectable entry's line is a { kind: 'settings', entry } zone, so a
+// click can land on it). The identity
 // block, the latest-release line and the menu are laid out from the top and
 // the read-only flags follow; the confirmation line, the upgrade output and
 // the result take what is left, newest lines kept, so the installer's last
@@ -391,10 +434,12 @@ function renderSettings(model, cols, rows, view) {
     below = entries.length - (start + shown.length);
   }
   const labelW = Math.min(40, Math.max(1, ...entries.map((e) => width(e.label))));
+  const entryAt = new Map(); // head line index -> selectable entry index, the page's mouse zones
   if (above > 0) head.push(text(`  ↑ ${above} more`, 'grey'));
   for (const e of shown) {
     const label = fitRaw(e.label, labelW);
     const detail = e.detail ? `  ${e.detail}` : '';
+    if (e.selectable) entryAt.set(head.length, selectable.indexOf(e));
     if (e === current) head.push(L([seg(' ▸ ', 'help'), seg(label, 'selected'), seg(detail, 'grey')]));
     else if (e.selectable) head.push(L([seg('   ', 'row'), seg(label, 'row'), seg(detail, 'grey')]));
     else head.push(L([seg('   ', 'row'), seg(e.label, e.bad ? 'bad' : 'grey'), seg(detail, 'grey')]));
@@ -410,7 +455,8 @@ function renderSettings(model, cols, rows, view) {
   const left = height - body.length;
   if (left > 0 && tail.length) body.push(...tail.slice(Math.max(0, tail.length - left)));
   while (body.length < height) body.push(L([]));
-  return [titleLine(model, cols, view), ...body.slice(0, height), footerLine(model, cols, view, settingsFooterHints(s))];
+  const zones = [null, ...body.slice(0, height).map((_, i) => (entryAt.has(i) ? { kind: 'settings', entry: entryAt.get(i) } : null)), null];
+  return { lines: [titleLine(model, cols, view), ...body.slice(0, height), footerLine(model, cols, view, settingsFooterHints(s))], zones };
 }
 
 function overlayHelp(lines, cols) {
@@ -437,8 +483,9 @@ function overlayHelp(lines, cols) {
 // (the app's view also carries `expanded`, `hidden`, `hiddenPanes` and
 // `showHidden`, which only buildModel reads). page is 'board' or 'settings';
 // with 'settings' the frame is the Settings page over view.settings.
-// Returns { lines, cols, rows, mode, scroll } where scroll holds the start
-// offsets actually used so the app can keep them for the next frame. mode is
+// Returns { lines, cols, rows, mode, scroll, zones } where scroll holds the
+// start offsets actually used so the app can keep them for the next frame and
+// zones maps each line to what it shows (lib/layout.mjs hitTest). mode is
 // 'panes', 'list' (narrow), 'landing' (every pane hidden: the key page) or
 // 'settings'.
 export function renderFrame(model, size, view = {}) {
@@ -457,13 +504,14 @@ export function renderFrame(model, size, view = {}) {
     settings: view.settings || null,
   };
   const mode = v.page === 'settings' ? 'settings' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
-  let lines;
-  if (mode === 'settings') lines = renderSettings(model, cols, rows, v);
-  else if (mode === 'landing') lines = renderLanding(model, cols, rows, v);
-  else if (mode === 'list') lines = renderList(model, cols, rows, v);
-  else lines = renderPanes(model, cols, rows, v);
+  let drawn;
+  if (mode === 'settings') drawn = renderSettings(model, cols, rows, v);
+  else if (mode === 'landing') drawn = renderLanding(model, cols, rows, v);
+  else if (mode === 'list') drawn = renderList(model, cols, rows, v);
+  else drawn = renderPanes(model, cols, rows, v);
+  let { lines } = drawn;
   if (v.help) lines = overlayHelp(lines, cols);
-  return { lines, cols, rows, mode, scroll: v.scrollOut };
+  return { lines, cols, rows, mode, scroll: v.scrollOut, zones: drawn.zones };
 }
 
 export function toPlain(lines) {

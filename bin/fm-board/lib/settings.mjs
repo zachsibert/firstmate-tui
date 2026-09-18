@@ -25,6 +25,14 @@
 //   running   { channel, version, args } while the upgrade child runs, or null
 //   output    the child's stdout and stderr lines, in arrival order
 //   result    null | { ok: true, version } | { ok: false, code, signal, error }
+//
+// The mouse works on the page through settingsMouseAction: the renderer marks
+// each selectable entry's line with a { kind: 'settings', entry } zone, a
+// click on one moves the cursor there, a second click within the double-click
+// window is enter on it, the wheel moves the cursor, and a click while a
+// confirmation is pending cancels it. Only `y` on the keyboard confirms.
+
+import { hitTest } from './layout.mjs';
 
 export const DEFAULT_REPO = 'zachsibert/firstmate-tui';
 
@@ -87,6 +95,7 @@ export function settingsFlags(opts) {
     { label: 'refresh cadence', value: `${opts.refresh} s (--refresh)` },
     { label: 'PR data', value: opts.prs ? 'on: live GitHub checks on every tick' : 'off (--no-prs)' },
     { label: 'herdr overlay', value: opts.herdr ? 'on' : 'off (--no-herdr)' },
+    { label: 'mouse', value: opts.mouse === false ? 'off (--no-mouse)' : 'on: click selects, double-click acts, wheel scrolls' },
   ];
 }
 
@@ -311,4 +320,30 @@ export function settingsKeyAction(s, key) {
     default:
       return { type: 'none' };
   }
+}
+
+// The meaning of a mouse event while the page is open (the event shape is the
+// one lib/controller.mjs mouseAction documents; view.frame.zones come from
+// the last drawn frame and view.lastClick is the previous click on the page,
+// { settings: <entry>, time }). Pure on (settings, view, ev).
+//   running          nothing               pending   a left press cancels
+//   left press on an entry line   move the cursor there; a second press on
+//                                 the same entry within dblclickMs is enter
+//   wheel            move the cursor one entry        anything else  nothing
+export function settingsMouseAction(s, view, ev, { dblclickMs = 400 } = {}) {
+  if (!ev || ev.type === 'up' || s.running) return { type: 'none' };
+  if (s.pending) return ev.type === 'down' ? { type: 'cancel' } : { type: 'none' };
+  const sel = selectableEntries(s);
+  const last = Math.max(0, sel.length - 1);
+  const cursor = clampCursor(s);
+  if (ev.type === 'wheel') return { type: 'move', cursor: Math.max(0, Math.min(last, cursor + (ev.dir === 'up' ? -1 : 1))) };
+  if (ev.type !== 'down' || ev.button !== 'left') return { type: 'none' };
+  const hit = hitTest(view.frame, ev.x, ev.y);
+  if (!hit || hit.kind !== 'settings') return { type: 'none' };
+  const entry = sel[hit.entry];
+  if (!entry) return { type: 'none' };
+  const prev = view.lastClick;
+  const since = prev && Number.isFinite(prev.time) && Number.isFinite(ev.time) ? ev.time - prev.time : NaN;
+  if (prev && prev.settings === hit.entry && since >= 0 && since <= dblclickMs) return { type: 'activate', cursor: hit.entry, action: entry.action };
+  return { type: 'move', cursor: hit.entry, click: { settings: hit.entry, time: ev.time } };
 }

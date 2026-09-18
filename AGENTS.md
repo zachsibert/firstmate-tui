@@ -60,7 +60,14 @@ the findings watermark belong to later milestones.
   `upgrade.mjs` (the install record and the upgrade child).
 - `lib/tui-blessed.mjs` is the only importer of `neo-blessed`. Anything the
   terminal library must do goes through the screen contract at the top of
-  that file.
+  that file. That includes the mouse: adding the screen's mouse listener is
+  what switches terminal mouse reporting on, and the adapter only translates
+  events. What a click means is decided in `lib/controller.mjs`
+  (`mouseAction`, `handleMouse`; on the Settings page `settingsMouseAction`
+  in `lib/settings.mjs`, over that page's own `kind: 'settings'` zones)
+  against the `zones` the renderer returns with every frame, so gestures are
+  tested through `--render-once --mouse <list>` (event tokens and key names
+  in order) and never a real pointer.
 - Run `tests/fm-board.test.sh` after any change; it needs Node and nothing
   else. Add a fixture under `tests/fixtures/` when a new data shape appears,
   and name in the test comment what would make the check fail. Key behavior

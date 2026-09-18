@@ -27,8 +27,9 @@
 #                                      runs the bin/install.sh that shipped with
 #                                      this copy against the install record
 #   fm-board.sh --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
-#                             [--keys <list>] [--expand <all|ids>] [--opener-cmd <argv>]
-#                             [--viewer-cmd <argv>] [--view-state <file>] [--tags]
+#                             [--keys <list>] [--mouse <list>] [--expand <all|ids>]
+#                             [--opener-cmd <argv>] [--viewer-cmd <argv>]
+#                             [--view-state <file>] [--tags]
 #                             [--curl-cmd <argv>] [--install-root <dir>]
 #                                      print one frame to stdout and exit
 #   fm-board.sh --headless [flags]     run the refresh schedule with no terminal
@@ -37,10 +38,10 @@
 # --detached is the wrapper's own flag and applies to `open` only. Every other
 # flag is passed through to bin/fm-board/index.mjs unchanged; see
 # `fm-board.sh --help` for the list (--home, --refresh, --no-prs, --no-herdr,
-# --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state, --curl-cmd,
-# --install-root, --herdr-cmd, --herdr-socket, --snapshot-timeout, --keys,
-# --expand, --tags, --headless; --prs is accepted and does nothing, live PR
-# data being the default).
+# --no-mouse, --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state,
+# --curl-cmd, --install-root, --herdr-cmd, --herdr-socket, --snapshot-timeout,
+# --keys, --mouse, --expand, --tags, --headless; --prs is accepted and does
+# nothing, live PR data being the default).
 #
 # FM_HOME resolution: the FM_HOME environment variable, else the one-line file
 # "$HERDR_PLUGIN_CONFIG_DIR/fm-home" (written once by the captain when the
@@ -201,7 +202,7 @@ while [ "$#" -gt 0 ]; do
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
-    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root)
+    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
   esac
