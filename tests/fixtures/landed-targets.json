@@ -1,0 +1,159 @@
+{
+  "_comment": "Landed rows with every target shape, for the enter fallback (PR, else report, else worker pane, else nothing). now is 2026-09-16T12:00:00Z = epoch 1789560000. Main home done rows: ship-old has a PR and a lost pane (w1G:p1 absent from herdr), old-scout a report only, ship-done a live pane only (its done task's pane w1F:p1 is in the herdr block), plain-done nothing. hyperion (local secondmate) landed: etl-index a PR, etl-report a report, etl-pane a live pane only (its ledger endpoint w2C:p2 is in the herdr block), etl-none nothing. remote-sm (remote) landed: mobile-fix a report only, unreachable from here. Completion dates are one day apart so the Landed order is fixed: etl-index 1d, ship-done 2d, etl-pane 3d, ship-old 4d, etl-report 5d, plain-done 6d, mobile-fix 7d, etl-none 8d, old-scout 10d. The other panes hold one or a few rows each so tab reaches Landed in four presses: Needs you ship-alpha's decision, Ready for review PR 41, In flight ship-alpha, ship-done, ship-old and the hyperion group, Findings etl-report (5d), mobile-fix (7d) and old-scout (10d).",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 44,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "ship-alpha",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/widgets/pull/41", "source": "meta", "head": "fm/ship-alpha" },
+        "hints": {
+          "pending_decision": true,
+          "blocked_event": false,
+          "open_decisions": [{ "key": "db-choice", "verb": "needs-decision", "summary": "Postgres or SQLite for the cache?" }],
+          "scout_report_present": false,
+          "last_event_text": "needs-decision [key=db-choice]: Postgres or SQLite for the cache?"
+        },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-alpha.status", "present": true, "kind": "event_history", "last_event": { "state": "needs-decision", "note": "Postgres or SQLite for the cache?", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets" }
+      },
+      {
+        "id": "ship-done",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "migration applied; nothing to merge", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1F:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "done: migration applied; nothing to merge" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-done.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "migration applied; nothing to merge", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "done", "title": "Apply the widget migration", "repo": "acme/widgets" }
+      },
+      {
+        "id": "ship-old",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "PR https://github.com/acme/widgets/pull/30 merged", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1G:p1", "exists": false, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/widgets/pull/30", "source": "meta", "head": "fm/ship-old" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "done: PR https://github.com/acme/widgets/pull/30 merged" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-old.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "PR https://github.com/acme/widgets/pull/30 merged", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "done", "title": "Rename the widget table", "repo": "acme/widgets" }
+      },
+      {
+        "id": "hyperion",
+        "kind": "secondmate",
+        "project": "/fixture/homes/hyperion",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "supervising one child", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/hyperion.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "ship-alpha", "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-15", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "ship-old", "state": "done", "title": "Rename the widget table", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-10", "pr_url": "https://github.com/acme/widgets/pull/30", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-12" } },
+        { "id": "old-scout", "state": "done", "title": "Scout: legacy import path", "repo": "acme/legacy", "kind": "scout", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-05", "pr_url": null, "report_path": "data/old-scout/report.md", "completion": { "verb": "reported", "date": "2026-09-06" } },
+        { "id": "ship-done", "state": "done", "title": "Apply the widget migration", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-13", "pr_url": null, "report_path": null, "completion": { "verb": "done", "date": "2026-09-14" } },
+        { "id": "plain-done", "state": "done", "title": "Rotate the API keys", "repo": "acme/api", "kind": "task", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-09", "pr_url": null, "report_path": null, "completion": { "verb": "done", "date": "2026-09-10" } }
+      ]
+    },
+    "scout_reports": [
+      { "id": "old-scout", "path": "/fixture/firstmate/data/old-scout/report.md", "kind": "scout" }
+    ],
+    "secondmate_current": {
+      "records": [
+        {
+          "id": "hyperion",
+          "home": "/fixture/homes/hyperion",
+          "host": null,
+          "remote": false,
+          "registered": true,
+          "provenance": { "selected": "structured-home", "summary_source": "local-ledger", "summary_valid": true, "trust": "complete" },
+          "freshness": { "status": "fresh", "observed_at": "2026-09-16T11:58:00Z", "age_seconds": 120 },
+          "active_children": [{ "id": "child-one", "kind": "ship", "state": "working", "repo": "acme/etl", "name": "Child one", "source": "pane", "doing": "writing the loader" }],
+          "endpoints": [
+            { "id": "child-one", "state": "working", "source": "pane", "endpoint": { "target": "default:w2A:p2", "exists": true } },
+            { "id": "etl-pane", "state": "done", "source": "run-step", "endpoint": { "target": "default:w2C:p2", "exists": true } }
+          ],
+          "decisions_open": [],
+          "landed": [
+            { "id": "etl-index", "title": "Add the ETL index", "pr_url": "https://github.com/acme/etl/pull/12", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-15" } },
+            { "id": "etl-pane", "title": "Backfill the ETL audit table", "pr_url": null, "report_path": null, "local_note": null, "completion": { "verb": "done", "date": "2026-09-13" } },
+            { "id": "etl-report", "title": "Scout: warehouse index options", "pr_url": null, "report_path": "data/etl-report/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-11" } },
+            { "id": "etl-none", "title": "Rotate the warehouse credentials", "pr_url": null, "report_path": null, "local_note": null, "completion": { "verb": "done", "date": "2026-09-08" } }
+          ],
+          "queued": []
+        },
+        {
+          "id": "remote-sm",
+          "home": "/fixture/homes/remote-sm",
+          "host": "laptop2",
+          "remote": true,
+          "registered": true,
+          "provenance": { "selected": "structured-home", "summary_source": "remote-ledger-cache", "summary_valid": true, "trust": "complete" },
+          "freshness": { "status": "cached", "observed_at": "2026-09-16T11:00:00Z", "age_seconds": 3600 },
+          "active_children": [],
+          "endpoints": [],
+          "decisions_open": [],
+          "landed": [{ "id": "mobile-fix", "title": "Fix the crash on launch", "pr_url": null, "report_path": "data/mobile-fix/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-09" } }],
+          "queued": []
+        }
+      ]
+    },
+    "secondmate_landed": {
+      "records": [
+        { "id": "etl-index", "title": "Add the ETL index", "pr_url": "https://github.com/acme/etl/pull/12", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-15" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" },
+        { "id": "etl-pane", "title": "Backfill the ETL audit table", "pr_url": null, "report_path": null, "local_note": null, "completion": { "verb": "done", "date": "2026-09-13" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" },
+        { "id": "etl-report", "title": "Scout: warehouse index options", "pr_url": null, "report_path": "data/etl-report/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-11" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" },
+        { "id": "etl-none", "title": "Rotate the warehouse credentials", "pr_url": null, "report_path": null, "local_note": null, "completion": { "verb": "done", "date": "2026-09-08" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" },
+        { "id": "mobile-fix", "title": "Fix the crash on launch", "pr_url": null, "report_path": "data/mobile-fix/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-09" }, "home": "/fixture/homes/remote-sm", "home_id": "remote-sm" }
+      ]
+    }
+  },
+  "herdr": {
+    "agents": [
+      { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-alpha" },
+      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "hyperion" },
+      { "pane_id": "w1F:p1", "agent_status": "done", "terminal_title_stripped": "ship-done" },
+      { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "child-one" },
+      { "pane_id": "w2C:p2", "agent_status": "done", "terminal_title_stripped": "etl-pane" }
+    ]
+  },
+  "prs": {
+    "candidate_prs": [
+      { "num": "41", "repo": "acme/widgets", "task": "ship-alpha", "url": "https://github.com/acme/widgets/pull/41", "title": "Add the widget cache", "base": "main", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-16T09:00:00Z" }
+    ]
+  },
+  "mtimes": {
+    "/fixture/firstmate/state/ship-alpha.status": 1789559700,
+    "/fixture/firstmate/state/ship-done.status": 1789387200,
+    "/fixture/firstmate/state/ship-old.status": 1789214400,
+    "/fixture/homes/hyperion/state/child-one.status": 1789300800,
+    "/fixture/firstmate/data/old-scout/report.md": 1788696000,
+    "/fixture/homes/hyperion/data/etl-report/report.md": 1789128000
+  }
+}

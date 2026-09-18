@@ -32,9 +32,12 @@
 // mid-drag ends the drag first.
 //
 // Actions on a row:
-//   enter   group row: expand or collapse; My PRs, To review, Landed or Needs
-//           you row with a PR URL: open it; In flight worker or Needs you
-//           worker: herdr focus; Findings row: open its report in the viewer
+//   enter   group row: expand or collapse; My PRs, To review or Needs you
+//           row with a PR URL: open it; In flight worker or Needs you
+//           worker: herdr focus; Findings row: open its report in the viewer;
+//           Landed row: the first target it has (landedTarget): its PR, else
+//           its report on this host, else its worker pane while herdr lists
+//           it, else a footer notice
 //   l/right expand the selected group      h/left collapse it (from the group
 //           row or from one of its children; the selection lands on the group)
 //   x       hide the row (view state); on a hidden row shown by H: unhide it
@@ -57,9 +60,10 @@ import { boundaryAt, hitTest, PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
 import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
 
-const OPEN_PANES = new Set(['mine', 'toreview', 'needs', 'landed']);
+const OPEN_PANES = new Set(['mine', 'toreview', 'needs']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
 const VIEW_PANES = new Set(['findings']);
+const LANDED_PANE = 'landed';
 
 export const DBLCLICK_MS = 400;
 export const WHEEL_ROWS = 3;
@@ -145,7 +149,7 @@ export function selectedRow(model, view) {
 // more useful answer.
 export function focusProblem(pane, row, herdrOn) {
   if (!row) return 'nothing selected';
-  if (!FOCUS_PANES.has(pane.id)) return 'enter focuses a worker: pick a row in In flight';
+  if (!FOCUS_PANES.has(pane.id) && !(pane.id === LANDED_PANE && row.paneId)) return 'enter focuses a worker: pick a row in In flight';
   if (row.lost) return `${row.name}: pane ${row.paneId} is gone from herdr (pane lost); nothing to focus`;
   if (!herdrOn) return 'herdr is off (--no-herdr); cannot focus';
   if (!row.paneId) return `${row.name}: no herdr pane to focus${row.extra === 'tmux' ? ' (tmux-backed task)' : ''}`;
@@ -153,12 +157,29 @@ export function focusProblem(pane, row, herdrOn) {
   return null;
 }
 
-// Why a Findings row cannot be viewed, or null.
+// Why a Findings row (or a Landed row that records a report) cannot be
+// viewed, or null.
 export function viewProblem(pane, row) {
   if (!row) return 'nothing selected';
-  if (!VIEW_PANES.has(pane.id)) return 'enter views a report: pick a row in Findings';
+  if (!VIEW_PANES.has(pane.id) && !(pane.id === LANDED_PANE && (row.reportPath || row.reportRemote))) return 'enter views a report: pick a row in Findings';
   if (row.reportRemote) return `${row.name}: report lives on another host (${row.home}); not reachable from here`;
   if (!row.reportPath) return `${row.name}: no report path on this row`;
+  return null;
+}
+
+// What enter does on a Landed row: the first target the row has that this
+// board can reach, as an action type, or null when there is none. A PR URL
+// opens; else a report on this host is viewed (a remote home's report is
+// skipped, not refused: nothing here can show it); else the task's worker pane
+// is focused while herdr still lists it (a lost pane is skipped the same way,
+// and so is every pane under --no-herdr, when herdrOn is false). Pure, so the
+// double-click path (mouseAction -> keyAction) follows it without a case of
+// its own.
+export function landedTarget(row, herdrOn) {
+  if (!row) return null;
+  if (row.url) return 'open';
+  if (row.reportPath && !row.reportRemote) return 'view';
+  if (herdrOn && row.paneId && !row.lost && row.focusable) return 'focus';
   return null;
 }
 
@@ -218,10 +239,16 @@ export function keyAction(model, view, key) {
     case 'enter':
       if (!row) return { type: 'none' };
       if (row.group) return row.expanded ? { type: 'collapse', key: row.group } : { type: 'expand', key: row.group };
+      if (pane.id === LANDED_PANE) {
+        const target = landedTarget(row, Boolean(model.herdrOn));
+        if (target) return { type: target, row };
+        // Nothing this board can reach: an ordinary notice, not an error.
+        return { type: 'notice', text: `${row.name}: nothing to open (no PR, report or pane)`, bad: false };
+      }
       if (OPEN_PANES.has(pane.id) && row.url) return { type: 'open', row };
       if (FOCUS_PANES.has(pane.id)) return { type: 'focus', row };
       if (VIEW_PANES.has(pane.id)) return { type: 'view', row };
-      // A PR pane or Landed without a PR URL (every pane is covered above).
+      // A PR pane without a PR URL (every other pane is covered above).
       return { type: 'notice', text: `${row.name}: no PR URL on this row`, bad: true };
     default:
       return { type: 'move', key };

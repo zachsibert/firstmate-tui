@@ -106,6 +106,11 @@
 #                   are absent from the herdr block (pane lost), a live one, a
 #                   main scout report and a secondmate landed report
 #   lost-disconnected.json  160x30, the same lost pane with herdr disconnected
+#   landed-targets.json  160x44, one Landed row per target shape for the enter
+#                   fallback: main-home done rows with a PR (and a lost pane),
+#                   a report only, a live pane only and nothing; a local
+#                   secondmate's landed entries with a PR, a live pane, a report
+#                   and nothing; a remote home's report-only entry
 #   cold-start.json 120x40, the first refresh in flight with nothing landed:
 #                   no snapshot, no prs block, no herdr block, so every pane
 #                   shows its loading spinner (the two PR panes each naming
@@ -135,6 +140,19 @@ chmod +x "$FAKE_BIN/glow"
 # that no fetch reaches GitHub.
 cp "$ROOT/tests/fake-gh.sh" "$FAKE_BIN/gh"
 chmod +x "$FAKE_BIN/gh"
+# Fake on HERDR_BIN_PATH and PATH: `herdr`, for the wrapper checks and the Landed focus checks: it logs every call to
+# FM_BOARD_TEST_HERDR_LOG, answers `plugin config-dir` with a scratch directory and fails
+# everything else, so no wrapper path can reach the captain's live server.
+HERDR_LOG="$SCRATCH/herdr-calls.log"
+PLUGIN_DIR="$SCRATCH/plugin-config"
+# shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_HERDR_LOG at run time, not here
+printf '#!/usr/bin/env bash\necho "herdr $*" >> "$FM_BOARD_TEST_HERDR_LOG"\nif [ "${1:-} ${2:-}" = "plugin config-dir" ]; then echo "%s"; exit 0; fi\nexit 1\n' "$PLUGIN_DIR" > "$FAKE_BIN/herdr"
+chmod +x "$FAKE_BIN/herdr"
+# fake_herdr_env <command...>: run with the fake herdr reachable and the call log reset
+fake_herdr_env() {
+  rm -f "$HERDR_LOG"
+  FM_BOARD_TEST_HERDR_LOG="$HERDR_LOG" HERDR_BIN_PATH="$FAKE_BIN/herdr" PATH="$FAKE_BIN:$PATH" "$@"
+}
 # A stand-in firstmate home for the live-refresh checks: both snapshot scripts
 # append one line to FM_BOARD_TEST_FETCH_LOG and print canned JSON (the
 # populated fixture's snapshot; an empty PR list). Nothing reaches GitHub.
@@ -401,7 +419,7 @@ assert_before "$frame" 'data/mobile-fix/report.md' 'data/old-scout/report.md' "f
 assert_row "$frame" '^│ merged +09-14 +ship-old +Rename the widget table · https://github.com/acme/widgets/pu' "landed merged row with PR (text truncated to the flex column at 160 cols)"
 assert_row "$frame" '^│ merged +09-14 +ship-old .* acme/widgets +main +2d │$' "landed merged row keeps repo, home and age"
 assert_row "$frame" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +hyperion +1d │$' "secondmate landed row"
-assert_row "$frame" '^│ reported +09-06 +old-scout +Scout: legacy import path +acme/legacy +main +10d │$' "reported row in landed"
+assert_row "$frame" '^│ reported +09-06 +old-scout +Scout: legacy import path · data/old-scout/report.md +acme/legacy +main +10d │$' "reported row in landed names its report, the target enter falls back to (falsify: drop the report rung from landedWhat)"
 assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship-old' "landed newest first"
 
 # Frame geometry (falsify: change the fixture cols/rows, or break padding in render.mjs).
@@ -439,7 +457,7 @@ assert_contains "$frame_k" "0            show every pane (with all six hidden th
 
 # Opening a PR: enter in My PRs, on a Needs-you PR row and on a Landed row with a PR,
 # through the injected opener only (falsify: drop the url field from reviewRows, the merge? row or
-# landedRows, drop 'landed' from OPEN_PANES, or drop the 'open' case in keyAction). The opener
+# landedRows, drop the PR rung from landedTarget, or drop the 'open' case in keyAction). The opener
 # receives the exact URL as its only argument.
 frame_o=$(render_open populated.json "tab,enter") || fail "open review: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "enter on the first My PRs row (the newest IN REVIEW PR, joined to its task) opens its PR"
@@ -454,7 +472,7 @@ assert_opened "https://github.com/acme/etl/pull/12" "enter on the first Landed r
 assert_contains "$frame_o" "opened https://github.com/acme/etl/pull/12 (etl-index)" "footer notice names the Landed URL"
 frame_o=$(render_open populated.json "tab,tab,tab,tab,j,j,j,enter") || fail "open landed no url: render exited non-zero"
 assert_not_opened "enter on a Landed row without a PR URL calls no opener"
-assert_contains "$frame_o" "old-scout: no PR URL on this row" "enter on a Landed row without a URL says so"
+assert_not_contains "$frame_o" "no PR URL on this row" "a Landed row without a PR is no longer an error: enter falls back to its report (the landed targets section below)"
 frame_o=$(render_open populated.json "tab,tab,enter") || fail "enter inflight: render exited non-zero"
 assert_not_opened "enter on an In flight worker calls no opener"
 rm -f "$OPENER_LOG"
@@ -674,6 +692,144 @@ assert_row "$tags_d" '\{grey-fg\}unknown *\{/grey-fg\}' "disconnected: the unkno
 assert_count "$tags_d" "{red-fg}" 1 "disconnected: the title warning is the only red text; no row is red"
 assert_contains "$tags_d" "{red-fg}herdr disconnected (ECONNREFUSED){/red-fg}" "disconnected: the warning carries the red tag the lost cell uses (falsify: give the warning the title style only)"
 assert_widths "$frame_l" 160 "lost frame lines are 160 columns"
+
+# ---------------------------------------------------------- landed targets
+# Enter on a Landed row takes the first target the row has that this board can reach: its PR, else
+# its report on this host, else its worker pane while herdr lists it, else an ordinary footer notice
+# (landedTarget in lib/controller.mjs). landed-targets.json at 160x44 (the sixth pane's three lines go
+# below Landed, so the Landed lines are those of the five-pane board at 40): Landed's rows are lines 29-37
+# (etl-index, ship-done, etl-pane, ship-old, etl-report, plain-done, mobile-fix, etl-none, old-scout)
+# and tab reaches the pane in four presses. The WHAT text names the first target that exists
+# (falsify: drop a rung from landedWhat in lib/model.mjs, the task or endpoint lookup that gives a
+# done row its pane, or the report_path resolution).
+frame_t=$(render landed-targets.json) || fail "landed targets: render exited non-zero"
+assert_contains "$frame_t" "┌─ [5] Landed (9) ─" "landed targets: nine rows, one per target shape"
+assert_row "$frame_t" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +hyperion +1d │$' "secondmate row with a PR names the PR"
+assert_row "$frame_t" '^│ done +09-14 +ship-done +Apply the widget migration · pane w1F:p1 +acme/widgets +main +2d │$' "main row whose done task still has its pane names the pane"
+assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table · pane w2C:p2 +- +hyperion +3d │$' "secondmate row whose ledger endpoint herdr lists names the pane"
+assert_row "$frame_t" '^│ merged +09-12 +ship-old +Rename the widget table · https://github.com/acme/widgets/pull/30 +acme/widgets +main +4d │$' "main row with a PR and a lost pane names the PR"
+assert_row "$frame_t" '^│ reported +09-11 +etl-report +Scout: warehouse index options · data/etl-report/report.md +- +hyperion +5d │$' "secondmate row with a report names it relative to its home"
+assert_row "$frame_t" '^│ done +09-10 +plain-done +Rotate the API keys +acme/api +main +6d │$' "main row with no PR, report or pane is the bare title"
+assert_row "$frame_t" '^│ reported +09-09 +mobile-fix +Fix the crash on launch · data/mobile-fix/report.md +- +remote-sm \(remote\) +7d │$' "remote home's report-only row still names the report"
+assert_row "$frame_t" '^│ done +09-08 +etl-none +Rotate the warehouse credentials +- +hyperion +8d │$' "secondmate row with nothing is the bare title"
+assert_row "$frame_t" '^│ reported +09-06 +old-scout +Scout: legacy import path · data/old-scout/report.md +acme/legacy +main +10d │$' "main row with a report names it relative to the main home"
+assert_widths "$frame_t" 160 "landed targets frame lines are 160 columns"
+# The pane text needs a pane herdr lists: the same fixture with the herdr block's agents emptied
+# proves every listed pane gone, and both pane-only rows fall to the bare title (falsify: show
+# `pane <id>` for a lost pane in landedWhat).
+frame_t=$(render "$(variant landed-targets.json landed-nopanes '{"herdr": {"agents": []}}')") || fail "landed targets no panes: render exited non-zero"
+assert_row "$frame_t" '^│ done +09-14 +ship-done +Apply the widget migration +acme/widgets +main +2d │$' "with the pane lost the main pane-only row is the bare title"
+assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table +- +hyperion +3d │$' "with the pane lost the secondmate pane-only row is the bare title"
+assert_not_contains "$frame_t" "pane w" "no Landed row names a pane once every pane is lost"
+
+# render_targets <keys> [flags]: enter on a Landed row of landed-targets.json with the fake opener
+# and the fake viewer recording (logs reset first) and --no-herdr unless the flags say otherwise
+render_targets() {
+  local keys=$1
+  shift
+  rm -f "${OPENER_LOG:?}" "${VIEWER_LOG:?}"
+  FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" "$BOARD" --render-once --fixture "$FIX/landed-targets.json" --keys "$keys" --opener-cmd "$FAKE_OPENER" --viewer-cmd "$FAKE_VIEWER" "$@"
+}
+# Rung 1, a PR: the opener gets the URL, the viewer nothing (falsify: drop the PR rung from
+# landedTarget, or order the report rung first).
+frame_t=$(render_targets "tab,tab,tab,tab,enter" --no-herdr) || fail "landed enter PR: render exited non-zero"
+assert_opened "https://github.com/acme/etl/pull/12" "enter on a secondmate Landed row with a PR opens it"
+assert_not_viewed "a Landed row with a PR never reaches the viewer"
+assert_contains "$frame_t" "opened https://github.com/acme/etl/pull/12 (etl-index)" "footer names the opened PR"
+frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,enter" --no-herdr) || fail "landed enter PR lost pane: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/30" "enter on a main Landed row with a PR and a lost pane opens the PR"
+assert_not_contains "$frame_t" "nothing to focus" "the lost pane is not reported when the PR opens"
+# Rung 2, a report on this host: the viewer gets the absolute path resolved against the owning home,
+# the opener nothing (falsify: drop reportPath from landedRows, or the report rung from landedTarget).
+frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,enter" --no-herdr) || fail "landed enter secondmate report: render exited non-zero"
+assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "enter on a secondmate Landed row with a report views it against its own home"
+assert_not_opened "a Landed row with a report and no PR calls no opener"
+assert_contains "$frame_t" "viewed /fixture/homes/hyperion/data/etl-report/report.md (viewer-cmd)" "footer names the viewed report"
+frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter main report: render exited non-zero"
+assert_viewed "/fixture/firstmate/data/old-scout/report.md" "enter on a main Landed row with a report views it against the main home"
+assert_not_contains "$frame_t" "no PR URL" "a report-only Landed row is no longer an error"
+# A remote home's report is skipped, not refused: nothing here can show it, so with no pane either
+# the row ends at the notice (falsify: let the report rung ignore reportRemote, or make the notice
+# bad).
+frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter remote report: render exited non-zero"
+assert_not_viewed "a remote home's Landed report is never opened"
+assert_not_opened "a remote home's Landed report calls no opener"
+assert_contains "$frame_t" "mobile-fix: nothing to open (no PR, report or pane)" "remote report-only row: the plain notice, not the Findings refusal"
+assert_not_contains "$frame_t" "lives on another host" "the remote report is skipped silently, no red notice"
+# Rung 3, a live pane: without --no-herdr a fixture render reports the focus it would run (a fixture
+# render makes no herdr call of its own; the fake herdr on HERDR_BIN_PATH and PATH proves it) and the
+# opener and viewer stay idle (falsify: drop the pane rung from landedTarget, or the task lookup in
+# landedRows).
+frame_t=$(fake_herdr_env render_targets "tab,tab,tab,tab,j,enter") || fail "landed enter main pane: render exited non-zero"
+assert_contains "$frame_t" "would focus w1F:p1 (ship-done); --render-once never runs herdr agent focus" "enter on a main Landed row whose done task still has its pane focuses it"
+assert_not_opened "a pane-only Landed row calls no opener"
+assert_not_viewed "a pane-only Landed row runs no viewer"
+if [ -e "$HERDR_LOG" ]; then fail "a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
+frame_t=$(fake_herdr_env render_targets "tab,tab,tab,tab,j,j,enter") || fail "landed enter secondmate pane: render exited non-zero"
+assert_contains "$frame_t" "would focus w2C:p2 (etl-pane); --render-once never runs herdr agent focus" "enter on a secondmate Landed row whose endpoint herdr lists focuses it"
+if [ -e "$HERDR_LOG" ]; then fail "a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
+# Under --no-herdr the pane rung is skipped, so a pane-only row ends at the notice rather than the
+# focus refusal (falsify: pass true for herdrOn under --no-herdr, or drop the herdrOn check from
+# landedTarget).
+frame_t=$(render_targets "tab,tab,tab,tab,j,enter" --no-herdr) || fail "landed enter pane no-herdr: render exited non-zero"
+assert_contains "$frame_t" "ship-done: nothing to open (no PR, report or pane)" "with --no-herdr a pane-only Landed row reads nothing to open"
+assert_not_contains "$frame_t" "cannot focus" "with --no-herdr the pane rung is skipped, not refused"
+# A lost pane is skipped the same way: ship-old's pane is lost but its PR wins; with the herdr block's
+# agents emptied ship-done's pane is lost too and the row ends at the notice (falsify: drop the lost
+# check from landedTarget).
+frame_t=$(fake_herdr_env "$BOARD" --render-once --fixture "$(variant landed-targets.json landed-nopanes '{"herdr": {"agents": []}}')" --keys "tab,tab,tab,tab,j,enter") || fail "landed enter lost pane: render exited non-zero"
+assert_contains "$frame_t" "ship-done: nothing to open (no PR, report or pane)" "a pane-only Landed row whose pane is lost reads nothing to open"
+assert_not_contains "$frame_t" "would focus" "a lost pane is never focused"
+# Rung 4, nothing: an ordinary notice, not red (falsify: set bad: true on the notice, or fall through
+# to the Ready for review text).
+frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,enter" --no-herdr) || fail "landed enter none main: render exited non-zero"
+assert_contains "$frame_t" "plain-done: nothing to open (no PR, report or pane)" "enter on a main Landed row with nothing reads nothing to open"
+assert_not_opened "a Landed row with nothing calls no opener"
+assert_not_viewed "a Landed row with nothing runs no viewer"
+tags_t=$(render landed-targets.json --keys "tab,tab,tab,tab,j,j,j,j,j,enter" --tags) || fail "landed enter none --tags: render exited non-zero"
+assert_not_contains "$tags_t" "{red-fg}plain-done: nothing to open" "the nothing-to-open notice is not red"
+frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter none secondmate: render exited non-zero"
+assert_contains "$frame_t" "etl-none: nothing to open (no PR, report or pane)" "enter on a secondmate Landed row with nothing reads nothing to open"
+# A double-click follows the same rungs, because mouseAction reuses keyAction enter (falsify: give
+# 'activate' a PR-only action of its own). Line 33 is etl-report, the report-only secondmate row.
+frame_t=$(render_mouse landed-targets.json "dblclick:60,33") || fail "landed dblclick report: render exited non-zero"
+assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "double-click on a report-only Landed row views the report"
+assert_not_opened "double-click on a report-only Landed row calls no opener"
+assert_contains "$frame_t" "viewed /fixture/homes/hyperion/data/etl-report/report.md (viewer-cmd)" "double-click: the footer names the viewed report"
+# The other panes keep their enter (falsify: route every pane through landedTarget, or widen
+# viewProblem / focusProblem beyond Landed): a Findings row views, an In flight worker asks herdr.
+frame_t=$(render_targets "tab,tab,tab,enter" --no-herdr) || fail "landed fixture findings enter: render exited non-zero"
+assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "enter on a Findings row still views the report"
+frame_t=$(render_targets "tab,tab,enter" --no-herdr) || fail "landed fixture inflight enter: render exited non-zero"
+assert_contains "$frame_t" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus, refused under --no-herdr"
+assert_not_opened "enter on an In flight worker calls no opener"
+assert_not_viewed "enter on an In flight worker runs no viewer"
+# The pane checks in viewProblem and focusProblem still refuse the panes they always refused
+# (falsify: drop the pane check from either helper).
+problems=$(node --input-type=module -e "
+  import { focusProblem, viewProblem, landedTarget } from '$ROOT/bin/firstmate-tui/lib/controller.mjs';
+  const row = { name: 'r', paneId: 'w1:p1', focusable: true, reportPath: '/x/report.md', url: null };
+  console.log(focusProblem({ id: 'review' }, row, true));
+  console.log(viewProblem({ id: 'review' }, row));
+  console.log(focusProblem({ id: 'landed' }, row, true));
+  console.log(viewProblem({ id: 'landed' }, row));
+  console.log(focusProblem({ id: 'landed' }, { name: 'r', paneId: null }, true));
+  console.log(viewProblem({ id: 'landed' }, { name: 'r', reportPath: null }));
+  console.log(landedTarget({ url: 'https://x/pr/1', reportPath: '/x', paneId: 'w1:p1', focusable: true }, true));
+  console.log(landedTarget({ url: null, reportPath: '/x', reportRemote: false, paneId: 'w1:p1', focusable: true }, true));
+  console.log(landedTarget({ url: null, reportPath: null, reportRemote: true, paneId: 'w1:p1', focusable: true }, true));
+  console.log(landedTarget({ url: null, reportPath: null, paneId: 'w1:p1', focusable: true }, false));
+  console.log(landedTarget({ url: null, reportPath: null, paneId: 'w1:p1', lost: true, focusable: true }, true));
+  console.log(landedTarget({ url: null, reportPath: null, paneId: 'w1:p1', focusable: false }, true));
+  console.log(landedTarget({ url: null, reportPath: null, paneId: null }, true));
+")
+assert_row "$problems" '^enter focuses a worker: pick a row in In flight$' "focusProblem still refuses Ready for review"
+assert_row "$problems" '^enter views a report: pick a row in Findings$' "viewProblem still refuses Ready for review"
+if [ "$(printf '%s\n' "$problems" | sed -n 3p)" = "null" ]; then pass; else fail "focusProblem allows a Landed row with a pane: got '$(printf '%s\n' "$problems" | sed -n 3p)'"; fi
+if [ "$(printf '%s\n' "$problems" | sed -n 4p)" = "null" ]; then pass; else fail "viewProblem allows a Landed row with a report: got '$(printf '%s\n' "$problems" | sed -n 4p)'"; fi
+if [ "$(printf '%s\n' "$problems" | sed -n 5p)" = "enter focuses a worker: pick a row in In flight" ]; then pass; else fail "focusProblem refuses a Landed row without a pane"; fi
+if [ "$(printf '%s\n' "$problems" | sed -n 6p)" = "enter views a report: pick a row in Findings" ]; then pass; else fail "viewProblem refuses a Landed row without a report"; fi
+if [ "$(printf '%s\n' "$problems" | sed -n '7,13p' | tr '\n' ' ')" = "open view focus null null null null " ]; then pass; else fail "landedTarget rung order (PR, local report, live focusable pane with herdr on, a remote report skipped over to the pane, else null): got '$(printf '%s\n' "$problems" | sed -n '7,13p' | tr '\n' ' ')'"; fi
 
 # -------------------------------------------------------------------- hide
 vs="$SCRATCH/view-state.json"
@@ -2182,7 +2338,7 @@ assert_not_opened "double-click on a worker opens no PR"
 assert_not_viewed "double-click on a worker views no report"
 frame_m=$(render_mouse populated.json "dblclick:60,37") || fail "mouse dblclick landed no url: render exited non-zero"
 assert_not_opened "double-click on a Landed row without a PR opens nothing"
-assert_contains "$frame_m" "old-scout: no PR URL on this row" "double-click on a Landed row without a PR says so, as enter does"
+assert_viewed "/fixture/firstmate/data/old-scout/report.md" "double-click on a Landed row without a PR views its report, as enter does (falsify: give the double-click its own action instead of keyAction enter)"
 
 # One gesture, one open. The second press of a double-click acts, and every further press on that row
 # inside the same 400 ms window only selects, so a triple-click, or a release or drag report a host
@@ -2491,19 +2647,8 @@ assert_row "$frame_d" '^│ STATE +KEY +ID {23}WHAT ' "a comma-separated list ke
 assert_contains "$frame_d" "hidden scout-beta" "and reads the rest as keys"
 
 # ----------------------------------------------------------- wrapper checks
-# A fake herdr for the checks below, on HERDR_BIN_PATH and PATH: it logs every call to
-# FM_BOARD_TEST_HERDR_LOG, answers `plugin config-dir` with a scratch directory and fails
-# everything else, so no wrapper path can reach the captain's live server.
-HERDR_LOG="$SCRATCH/herdr-calls.log"
-PLUGIN_DIR="$SCRATCH/plugin-config"
-# shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_HERDR_LOG at run time, not here
-printf '#!/usr/bin/env bash\necho "herdr $*" >> "$FM_BOARD_TEST_HERDR_LOG"\nif [ "${1:-} ${2:-}" = "plugin config-dir" ]; then echo "%s"; exit 0; fi\nexit 1\n' "$PLUGIN_DIR" > "$FAKE_BIN/herdr"
-chmod +x "$FAKE_BIN/herdr"
-# fake_herdr_env <command...>: run with the fake herdr reachable and the call log reset
-fake_herdr_env() {
-  rm -f "$HERDR_LOG"
-  FM_BOARD_TEST_HERDR_LOG="$HERDR_LOG" HERDR_BIN_PATH="$FAKE_BIN/herdr" PATH="$FAKE_BIN:$PATH" "$@"
-}
+# The fake herdr on HERDR_BIN_PATH and PATH (fake_herdr_env, defined with the other fakes at the
+# top) guards the checks below.
 # Without FM_HOME the wrapper stops with two lines, each carrying a command to copy (falsify: fold
 # die_no_home back into one die(), or drop the plugin fm-home line). From a directory with no
 # firstmate home above it and without herdr, the plugin line uses the $(herdr plugin config-dir) form.

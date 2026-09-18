@@ -14,7 +14,8 @@
 //                  focus is reported, never run; r against a live home re-runs
 //                  the snapshot and then the PR fetch (unless --no-prs) and
 //                  against a fixture only reports that it cannot; enter on a
-//                  Findings row runs --viewer-cmd when given and otherwise only
+//                  Findings row, or a Landed row whose report is its first
+//                  reachable target, runs --viewer-cmd when given and otherwise only
 //                  reports the viewer the chain resolved to, naming the binary
 //                  found on PATH, so a test can shadow glow with a fake without
 //                  ever launching a real viewer); --expand <all|ids>
