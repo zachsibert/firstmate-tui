@@ -42,13 +42,20 @@
 //                                   state?, merged_at?, closed_at? } ], "error"? } | null,
 //     "snapshot_error": text (optional; marks the four snapshot panes stale),
 //     "refresh": { "next_in": seconds, "refreshing": bool, "failed_ago": seconds,
-//                  "failed": text } (optional; every field optional),
+//                  "failed": text, "loading_frame": N } (optional; every field optional),
 //     "mtimes": { "<absolute path>": epoch seconds } }
 // The refresh block stands in for the app's schedule, which a one-shot render
 // has none of: {"next_in": 18} draws `next refresh in 18s` on the title line,
 // {"refreshing": true} draws `refreshing…`, and {"failed_ago": 40, "next_in":
 // 20, "failed": "PR fetch: exit 1"} draws `refresh failed 40s ago, retrying in
 // 20s` in red; without the block the title line carries no refresh label.
+// With {"refreshing": true} a fixture that omits "snapshot" (or sets it null)
+// puts Needs you, In flight, Findings and Landed into the loading state, and
+// one that omits "prs" (or sets it null) puts Ready for review there: each
+// such pane draws the spinner line, `⠋ loading fleet snapshot…` or `⠋ loading
+// GitHub checks…`, in place of its rows. "loading_frame" (a whole number,
+// default 0) picks the spinner glyph, the app's frame counter standing still,
+// so the frame is the same on every render.
 // With --no-herdr the fixture's herdr block is still applied as an offline
 // overlay (state "fixture", which the title line treats as connected: no
 // herdr text) so the join is testable without a live server; a "state" in
@@ -135,11 +142,14 @@ function refreshFromFixture(block, now) {
   const nextIn = seconds('next_in');
   const failedAgo = seconds('failed_ago');
   const failed = typeof block.failed === 'string' && block.failed ? block.failed : null;
+  const loadingFrame = seconds('loading_frame') ?? 0;
+  if (!Number.isInteger(loadingFrame) || loadingFrame < 0) fail(`fixture refresh.loading_frame is not a whole number: ${block.loading_frame}`, 2);
   return {
     nextAt: nextIn === null ? null : now + nextIn,
     refreshing: Boolean(block.refreshing),
     failedAt: failedAgo !== null ? now - failedAgo : failed ? now : null,
     failed,
+    loadingFrame,
   };
 }
 

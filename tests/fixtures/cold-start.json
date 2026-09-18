@@ -1,0 +1,11 @@
+{
+  "_comment": "A cold start (120x40): the first refresh is in flight and nothing has landed yet, so there is no snapshot, no prs block and no herdr block. Every pane shows its spinner line: loading fleet snapshot… in the four snapshot panes, loading GitHub checks… in Ready for review. The snapshot-landed, failed-first-fetch, frame and narrow variants are derived from it at run time.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 120,
+  "rows": 40,
+  "fm_home": "/fixture/firstmate",
+  "refresh": { "refreshing": true },
+  "herdr": null,
+  "prs": null,
+  "mtimes": {}
+}
