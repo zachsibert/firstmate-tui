@@ -28,7 +28,8 @@ options:
   --viewer-cmd <argv>    command that shows a Findings report in the terminal (default:
                          glow -p when glow is on PATH, else $EDITOR, else vim, else
                          less); quoted string, split on whitespace; the path is appended
-  --view-state <path>    where hidden rows and hidden panes are remembered (default:
+  --view-state <path>    where hidden rows, hidden panes and dragged column widths are
+                         remembered (default:
                          $(herdr plugin config-dir firstmate.board)/view-state.json via
                          the wrapper, else $XDG_CONFIG_HOME/fm-board/view-state.json,
                          else ~/.config/fm-board/view-state.json; never inside FM_HOME)
@@ -47,13 +48,15 @@ options:
                          when given and is only reported in the footer otherwise
   --no-mouse             ignore the mouse and leave the terminal's own text selection
                          alone (default: click selects, double-click is enter, the
-                         wheel scrolls)
+                         wheel scrolls, dragging a column boundary in a pane's header
+                         resizes the column)
   --mouse <list>         with --render-once: mouse events, applied in order with --keys
                          (comma or space separated): click:X,Y  dblclick:X,Y
-                         tripleclick:X,Y  wheel:up:X,Y  wheel:down:X,Y, X and Y the
-                         cell from 0 at the top-left; any other token is a key, so
-                         "click:12,5 x" selects
-                         a row and hides it
+                         tripleclick:X,Y  wheel:up:X,Y  wheel:down:X,Y  drag:X1,Y->X2 (a
+                         left press at X1,Y, motion to X2 in steps, release)  move:X,Y
+                         (one motion report with the left button held)  release:X,Y,
+                         X and Y the cell from 0 at the top-left; any other token is a
+                         key, so "click:12,5 x" selects a row and hides it
   --expand <all|ids>     with --render-once: expand these In flight groups (secondmate
                          ids, or all) before rendering
   --tags                 with --render-once: print the frame with its color tags
@@ -73,13 +76,31 @@ export const COMMANDS = ['run', 'open', 'focus'];
 // dblclick is two left clicks on the cell, which is what the pure double-click
 // detection needs to see, and tripleclick three (a press landing inside the
 // window a double-click already used); the driver stamps a token's events
-// with one time.
+// with one time. drag is the whole gesture the terminal reports for a drag: a
+// left press at X1,Y, then motion reports with the button held (DRAG_STEPS of
+// them, the last at X2), then the release at X2,Y; move and release are its
+// parts, so a frame can be rendered mid-drag.
+export const DRAG_STEPS = 3;
+const MOUSE_WORDS = 'click:X,Y, dblclick:X,Y, tripleclick:X,Y, wheel:up:X,Y, wheel:down:X,Y, drag:X1,Y->X2, move:X,Y or release:X,Y';
+
 export function parseMouseToken(token) {
-  const m = /^(click|dblclick|tripleclick|wheel:(?:up|down)):(\d+),(\d+)$/.exec(token);
+  const d = /^drag:(\d+),(\d+)->(\d+)$/.exec(token);
+  if (d) {
+    const x1 = Number(d[1]);
+    const y = Number(d[2]);
+    const x2 = Number(d[3]);
+    const events = [{ type: 'down', button: 'left', x: x1, y }];
+    if (x2 !== x1) {
+      for (let i = 1; i <= DRAG_STEPS; i += 1) events.push({ type: 'drag', button: 'left', x: x1 + Math.round(((x2 - x1) * i) / DRAG_STEPS), y });
+    }
+    events.push({ type: 'up', button: 'left', x: x2, y });
+    return events;
+  }
+  const m = /^(click|dblclick|tripleclick|move|release|wheel:(?:up|down)):(\d+),(\d+)$/.exec(token);
   if (!m) {
     // Something shaped like an event but not one of ours (rclick included: the
     // board binds nothing to the right button) is an error, not a key name.
-    if (/^(click|dblclick|tripleclick|rclick|mclick|wheel)(:|$)/.test(token)) throw new Error(`--mouse: bad event "${token}" (want click:X,Y, dblclick:X,Y, tripleclick:X,Y, wheel:up:X,Y or wheel:down:X,Y)`);
+    if (/^(click|dblclick|tripleclick|rclick|mclick|wheel|drag|move|release)(:|$)/.test(token)) throw new Error(`--mouse: bad event "${token}" (want ${MOUSE_WORDS})`);
     return null;
   }
   const x = Number(m[2]);
@@ -92,6 +113,10 @@ export function parseMouseToken(token) {
       return [down(), down()];
     case 'tripleclick':
       return [down(), down(), down()];
+    case 'move':
+      return [{ type: 'drag', button: 'left', x, y }];
+    case 'release':
+      return [{ type: 'up', button: 'left', x, y }];
     default:
       return [{ type: 'wheel', dir: m[1].slice(6), x, y }];
   }
@@ -219,9 +244,10 @@ export function parseArgs(argv, env = {}) {
       case '--mouse':
         // Tokens split on commas and spaces, except the comma inside an
         // event's X,Y: "click:12,5,1,tab" is a click, then the keys 1 and tab.
-        // Anything shaped like an event keeps its X,Y so parseMouseToken can
-        // name an unsupported one whole ("rclick:12,5", not "rclick:12").
-        for (const token of need(a).match(/[a-z]+(?::[a-z]+)*:\d+,\d+|[^\s,]+/g) || []) {
+        // Anything shaped like an event keeps its X,Y (and a drag's ->X2) so
+        // parseMouseToken can name an unsupported one whole ("rclick:12,5",
+        // not "rclick:12").
+        for (const token of need(a).match(/[a-z]+(?::[a-z]+)*:\d+,\d+(?:->\d+)?|[^\s,]+/g) || []) {
           const events = parseMouseToken(token);
           if (events) opts.inputs.push({ kind: 'mouse', events });
           else {

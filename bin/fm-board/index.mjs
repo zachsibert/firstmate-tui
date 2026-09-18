@@ -7,8 +7,8 @@
 //                  frame comes from that facts file and no firstmate home or
 //                  herdr is touched, which is how tests/fm-board.test.sh works.
 //                  --keys <list> presses keys, and --mouse <list> clicks,
-//                  double-clicks and wheels (see lib/args.mjs),
-//                  through lib/controller.mjs before
+//                  double-clicks, wheels and drags column boundaries (see
+//                  lib/args.mjs), through lib/controller.mjs before
 //                  the frame is rendered (a PR open runs --opener-cmd when
 //                  given, and is only reported in the footer otherwise; a herdr
 //                  focus is reported, never run; r against a live home re-runs
@@ -19,9 +19,10 @@
 //                  found on PATH, so a test can shadow glow with a fake without
 //                  ever launching a real viewer); --expand <all|ids>
 //                  expands In flight groups; --tags prints the color tags;
-//                  --view-state <file> loads hidden rows and panes from that
-//                  file and saves x/X/1-5/0 changes back to it (without the
-//                  flag a fixture render loads nothing and saves nothing).
+//                  --view-state <file> loads hidden rows, hidden panes and
+//                  dragged column widths from that file and saves x/X/1-5/0
+//                  changes and drags back to it (without the flag a fixture
+//                  render loads nothing and saves nothing).
 //                  `.` opens the Settings page: its install identity comes
 //                  from --install-root (default: the directory above bin/),
 //                  its release data from --curl-cmd (without the flag a
@@ -194,10 +195,12 @@ function viewStateFor(opts, fmHome) {
 // reported rather than run; a viewed report runs the resolved viewer
 // (awaited); r re-reads a live home. Before each mouse event the frame is
 // rendered at the final size, as the app redraws after every key, so the
-// pointer is measured against what would be on screen; the events of one
-// token share a time stamp and tokens are a second apart, so dblclick is a
-// double-click and two click tokens on one row are two single clicks. With
-// --no-mouse the mouse tokens are skipped, as the app would ignore the events.
+// pointer is measured against what would be on screen (a drag's motion
+// reports each see the frame the previous one produced, as in the app); the
+// events of one token share a time stamp and tokens are a second apart, so
+// dblclick is a double-click and two click tokens on one row are two single
+// clicks. With --no-mouse the mouse tokens are skipped, as the app would
+// ignore the events.
 // On the Settings page the release fetch and the upgrade child are awaited
 // before the next input, so a list reads in order: `.` fetches, `enter`
 // asks, `y` runs the launcher to its end, `R` reports the relaunch.
@@ -209,7 +212,7 @@ async function driveOnce(facts, opts, size) {
     flags: settingsFlags(opts),
     idleReason: opts.curlCmd ? null : 'not fetched (no --curl-cmd in --render-once)',
   });
-  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, page: 'board', settings };
+  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, page: 'board', settings };
   const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
   let model = build();
   if (opts.expand.length) {
@@ -279,7 +282,7 @@ async function driveOnce(facts, opts, size) {
     },
     persist: () => {
       if (!vs.path) return;
-      const err = saveViewState(vs.path, { hidden: view.hidden, hiddenPanes: view.hiddenPanes });
+      const err = saveViewState(vs.path, { hidden: view.hidden, hiddenPanes: view.hiddenPanes, columns: view.columns });
       if (err) ctx.notice(`view state not saved: ${err}`, true);
     },
     // Settings page effects. Without --curl-cmd nothing is fetched, so a test

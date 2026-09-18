@@ -8,6 +8,7 @@
 # from $FAKE_CURL_ROOT:
 #
 #   https://api.github.com/repos/<repo>/releases/latest        api/latest.json
+#   https://api.github.com/repos/<repo>/releases/tags/<tag>    api/tags/<tag>.json
 #   https://api.github.com/repos/<repo>/releases?per_page=1    api/newest.json
 #   https://api.github.com/repos/<repo>/releases[?per_page=N]  api/releases.json
 #   https://github.com/<repo>/releases/download/<tag>/<asset>  download/<tag>/<asset>
@@ -16,6 +17,15 @@
 # other flag (-fsSL, --retry N, --retry-delay N, -H <header>) is accepted and
 # ignored. A URL with no file behind it exits 22, curl's own status for an
 # HTTP error under -f. Each URL is appended to $FAKE_CURL_LOG when that is set.
+#
+# FAKE_CURL_FAIL, when set, holds one `<substring> <status> <message>` rule
+# per line: a URL containing <substring> is answered with <message> on stderr
+# and exit <status> instead of being served, the way curl reports no
+# connection (7) or the 404 GitHub sends through its redirect to the download
+# host (56, "The requested URL returned error: 404"). The fake speaks no HTTP,
+# so a redirect that ends in a 404 can only be expressed as the exit status
+# curl hands the caller, which is all the installer ever sees of it. The URL
+# is logged before the rule applies.
 set -u
 
 out=''
@@ -33,8 +43,18 @@ done
 [ -n "${FAKE_CURL_ROOT:-}" ] || { echo "fake-curl: FAKE_CURL_ROOT is not set" >&2; exit 2; }
 [ -z "${FAKE_CURL_LOG:-}" ] || printf '%s\n' "$url" >> "$FAKE_CURL_LOG"
 
+if [ -n "${FAKE_CURL_FAIL:-}" ]; then
+  while read -r sub status msg; do
+    [ -n "$sub" ] || continue
+    case "$url" in
+      *"$sub"*) printf '%s\n' "$msg" >&2; exit "$status" ;;
+    esac
+  done <<< "$FAKE_CURL_FAIL"
+fi
+
 case "$url" in
   https://api.github.com/repos/*/releases/latest) file="$FAKE_CURL_ROOT/api/latest.json" ;;
+  https://api.github.com/repos/*/releases/tags/*) file="$FAKE_CURL_ROOT/api/tags/${url##*/}.json" ;;
   https://api.github.com/repos/*/releases\?per_page=1) file="$FAKE_CURL_ROOT/api/newest.json" ;;
   https://api.github.com/repos/*/releases|https://api.github.com/repos/*/releases\?*) file="$FAKE_CURL_ROOT/api/releases.json" ;;
   https://github.com/*/releases/download/*/*)

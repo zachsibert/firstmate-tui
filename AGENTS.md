@@ -16,12 +16,18 @@ install upgrades by running the `bin/install.sh` that shipped in its own
 tarball, and every installer before step 1 below downloads and checks
 exactly those; the launcher then writes `firstmate-tui` beside `fm-board`
 (`ensure_new_command`). The rename is two steps. Step 1, in `bin/install.sh`:
-it asks for `firstmate-tui-<tag>.tar.gz` before `fm-board-<tag>.tar.gz`,
-accepts either layout inside the tarball (`bin/firstmate-tui.sh` with
-`bin/firstmate-tui/`, or the old pair, never a mix), points both commands at
-whichever launcher the tree has, and writes `layout=` into the install
-record; `tests/install.test.sh` checks it against a stand-in 0.3.0 tarball
-it builds. Step 2, not before every install has upgraded to a release that
+it reads the release's asset list (`/releases/tags/<tag>`) and downloads
+`firstmate-tui-<tag>.tar.gz` when the release has it, else
+`fm-board-<tag>.tar.gz`; when that read fails it tries the two names in that
+order and moves on from the first on any curl failure, never on one exit
+status (GitHub's redirected 404 reached the 0.2.5 installer as exit 56, not
+the 22 it waited for, and every 0.2.5 upgrade failed). It accepts either
+layout inside the tarball (`bin/firstmate-tui.sh` with `bin/firstmate-tui/`,
+or the old pair, never a mix), points both commands at whichever launcher
+the tree has, and writes `layout=` into the install record;
+`tests/install.test.sh` checks it against a stand-in 0.3.0 tarball it builds
+and walks a 0.2.5 install through the exit-56 shape (`tests/fake-curl.sh`,
+`FAKE_CURL_FAIL`). Step 2, not before every install has upgraded to a release that
 carries that installer (an install upgrading with an older installer still
 asks for the old asset name): flip the asset name in `scripts/package.sh`,
 the paths in the tarball and the launcher (`BOARD_DIR`, the relaunch and
@@ -100,16 +106,37 @@ the findings watermark belong to later milestones.
   in `lib/settings.mjs`, over that page's own `kind: 'settings'` zones)
   against the `zones` the renderer returns with every frame, so gestures are
   tested through `--render-once --mouse <list>` (event tokens and key names
-  in order) and never a real pointer. That harness never loads neo-blessed,
+  in order) and never a real pointer. The column drag takes the same path:
+  the column-header line's zone carries the drawn columns (`header`),
+  `boundaryAt` in `lib/layout.mjs` reads it, the controller's
+  `drag-start` / `drag-move` / `drag-end` and `reset-column` actions apply
+  it, and the harness drives it with `drag:X1,Y->X2`, `move:X,Y` and
+  `release:X,Y`. The adapter turns a motion report with a button held into
+  a `drag` event (the library labels it a press); mode 1002 is already among
+  the modes `enableMouse` switches on. That harness never loads neo-blessed,
   so a change to the adapter is also checked by running the interactive
   board on a pseudo-terminal (`tests/pty-keys.py`, Python `pty.fork`; macOS
   `script` refuses piped stdio; the suite's last section drives it for the
   Enter key) with `--opener-cmd bash tests/fake-opener.sh` and the raw
   reports a terminal sends (X10 `ESC [ M`, button+32, col+33, line+33:
   press 32, release 35, drag 64; SGR `ESC [ < b;col+1;line+1 M` or `m`),
-  counting opener lines. neo-blessed 0.2.0 parses one report per chunk,
+  counting opener lines. Inside herdr the same check runs in a lab session
+  (firstmate's `bin/fm-herdr-lab.sh`: provision, `viewer start` for a
+  120x40 client, `workspace create`, `pane run` the board with `--no-herdr
+  --no-prs --view-state <scratch file>` so it makes no herdr call of its own,
+  `pane send-text` with the raw report bytes, `pane read`, teardown); it
+  proves the parse and the adapter inside a herdr pane, not herdr's routing
+  of a real pointer. neo-blessed 0.2.0 parses one report per chunk,
   labels a drag as `mousedown left` and emits two keypress events for one
   carriage return; the adapter's comments say how each is handled.
+- Column widths are computed, never fixed: `columns()` in `lib/layout.mjs`
+  sizes each fixed column to the widest value it shows in that pane (between
+  its label and a cap), applies the captain's dragged widths from view state,
+  and gives the one flexible column the rest, with a two-cell gutter. The
+  tests pin a header as `LABEL {W}NEXT` where W is the column's width (its
+  padding plus the gutter), so a fixture change that widens a value, or a key
+  that hides the widest row, moves those regexes on purpose; write new ones
+  with `+` unless the width is the point of the check.
 - Run `tests/fm-board.test.sh` after any change; it needs Node, plus
   python3 and the board's `node_modules` for its last section, which runs
   the interactive board on a pseudo-terminal (`tests/pty-keys.py`) and is

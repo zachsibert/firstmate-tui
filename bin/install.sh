@@ -25,9 +25,11 @@
 # copy of this script that shipped in its own tarball, so a release can only
 # be reached by installs whose installer downloads and checks what that
 # release carries. The rename therefore takes two releases:
-#   1. this installer asks for firstmate-tui-<tag>.tar.gz first and falls
-#      back to fm-board-<tag>.tar.gz when the release has no asset under the
-#      new name; it accepts either layout inside the tarball
+#   1. this installer reads the release's asset list from the GitHub API and
+#      downloads firstmate-tui-<tag>.tar.gz when the release has it, else
+#      fm-board-<tag>.tar.gz; when that list cannot be read it tries the two
+#      names in that order and moves on from the first on any curl failure
+#      (see fetch). It accepts either layout inside the tarball
 #      (bin/firstmate-tui.sh with bin/firstmate-tui/, or bin/fm-board.sh with
 #      bin/fm-board/), writes the commands to run whichever launcher the
 #      tree has, and notes the layout in the install record (layout=);
@@ -104,25 +106,36 @@ sha256_of() {
   fi
 }
 
-# fetch <url> <destination file>: status 0 when downloaded. Status 22, curl's
-# own status for an HTTP error under -f, means the URL is not there (GitHub
-# answers 404 for an asset a release does not have), so the caller may try
-# another name; curl does not retry a 404. Any other failure (no connection,
-# a broken transfer) is an error here and now.
+# fetch <url> <destination file>: status 0 when downloaded, else curl's own
+# status, with the partial file removed and curl's message in $curl_error.
+# Never fatal by itself, and no status means anything on its own: the caller
+# decides whether another name is worth trying. The 0.2.5 installer took
+# exit 22 alone as "not there" and stopped on anything else, and GitHub,
+# which serves a release download through a redirect to another host,
+# answered a missing asset with exit 56 ("curl: (56) The requested URL
+# returned error: 404"), so its fallback to the old asset name never ran and
+# no 0.2.5 install could upgrade to a release that carried only that name.
+curl_error=''
 fetch() {
   local status=0
-  curl -fsSL --retry 3 --retry-delay 1 -o "$2" "$1" || status=$?
-  case "$status" in
-    0) return 0 ;;
-    22) rm -f -- "${2:?}"; return 22 ;;
-    *) die "download failed: $1 (curl exit $status)" ;;
-  esac
+  curl_error=$(curl -fsSL --retry 3 --retry-delay 1 -o "$2" "$1" 2>&1) || status=$?
+  [ "$status" -eq 0 ] || rm -f -- "${2:?}"
+  return "$status"
 }
 
 # The GitHub releases API is JSON; the installer needs less than the board
 # does, so the tag is read with grep and sed rather than jq or node.
 first_tag_name() {
   grep -o '"tag_name": *"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/'
+}
+
+# release_asset_names: stdin is a release as GET /releases/tags/<tag> returns
+# it, stdout the file names of its assets, one per line (nothing for a
+# release without assets). Each asset's browser_download_url ends in its
+# name; the asset's own "name" field is not used because the release carries
+# a "name" of its own that a grep could not tell apart.
+release_asset_names() {
+  grep -o '"browser_download_url": *"[^"]*"' | sed 's#.*/##; s#"$##' || true
 }
 
 # resolve_tag <repo> <version> <pre>: print the tag to install. --version
@@ -269,22 +282,45 @@ main() {
   else
     tag=$(resolve_tag "$repo" "$version" "$pre")
     local base="https://github.com/$repo/releases/download/$tag"
-    local new_asset="$NAME-$tag.tar.gz" old_asset="$OLD_NAME-$tag.tar.gz" asset
+    local new_asset="$NAME-$tag.tar.gz" old_asset="$OLD_NAME-$tag.tar.gz" asset='' release assets first_error
     installed_from="release $tag"
-    # The asset's new name first, its former name when the release has no
-    # asset under the new one (see the header). fetch stops the install
-    # itself on any failure that is not a missing asset.
-    log "downloading $new_asset from $repo release $tag"
-    if fetch "$base/$new_asset" "$tmp/$new_asset"; then
-      asset=$new_asset
-    elif fetch "$base/$old_asset" "$tmp/$old_asset"; then
-      asset=$old_asset
-      log "release $tag has no $new_asset; downloaded $old_asset, the asset's former name, instead"
+    # Which of the two names the release carries is read from the release
+    # itself, the new name first (see the header), so only an asset that is
+    # there is asked for. When that read fails (no connection, a rate limit,
+    # no release under the tag; $release then holds curl's message), both
+    # names are tried in the same order and any failure on the first sends
+    # the installer to the second (see fetch); only both failing stops the
+    # install.
+    if release=$(curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/$repo/releases/tags/$tag" 2>&1); then
+      assets=$(printf '%s' "$release" | release_asset_names)
+      if printf '%s\n' "$assets" | grep -Fxq -- "$new_asset"; then
+        asset=$new_asset
+        log "downloading $new_asset from $repo release $tag"
+      elif printf '%s\n' "$assets" | grep -Fxq -- "$old_asset"; then
+        asset=$old_asset
+        log "release $tag has no $new_asset; downloading $old_asset, the asset's former name, from $repo instead"
+      else
+        die "release $tag of $repo has neither $new_asset nor $old_asset; its assets: $(printf '%s' "${assets:-none}" | tr '\n' ' ')"
+      fi
+      fetch "$base/$asset" "$tmp/$asset" || die "download failed: $base/$asset ($curl_error)"
     else
-      die "download failed: release $tag of $repo has neither $new_asset nor $old_asset (looked under $base)"
+      log "could not read the asset list of release $tag from the GitHub API ($release); trying both asset names"
+      log "downloading $new_asset from $repo release $tag"
+      if fetch "$base/$new_asset" "$tmp/$new_asset"; then
+        asset=$new_asset
+      else
+        first_error=$curl_error
+        log "no $new_asset ($first_error); downloading $old_asset, the asset's former name, instead"
+        if fetch "$base/$old_asset" "$tmp/$old_asset"; then
+          asset=$old_asset
+        else
+          die "download failed: release $tag of $repo has neither $new_asset nor $old_asset (looked under $base; $new_asset: $first_error; $old_asset: $curl_error)"
+        fi
+      fi
     fi
     fetch "$base/$asset.sha256" "$tmp/$asset.sha256" \
-      || die "download failed: $base/$asset.sha256 (the release has $asset but not its checksum)"
+      || die "download failed: $base/$asset.sha256 (the release has $asset but not its checksum; $curl_error)"
     tarball="$tmp/$asset"
     checksum="$tmp/$asset.sha256"
   fi
