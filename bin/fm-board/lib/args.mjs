@@ -50,8 +50,9 @@ options:
                          wheel scrolls)
   --mouse <list>         with --render-once: mouse events, applied in order with --keys
                          (comma or space separated): click:X,Y  dblclick:X,Y
-                         wheel:up:X,Y  wheel:down:X,Y, X and Y the cell from 0 at the
-                         top-left; any other token is a key, so "click:12,5 x" selects
+                         tripleclick:X,Y  wheel:up:X,Y  wheel:down:X,Y, X and Y the
+                         cell from 0 at the top-left; any other token is a key, so
+                         "click:12,5 x" selects
                          a row and hides it
   --expand <all|ids>     with --render-once: expand these In flight groups (secondmate
                          ids, or all) before rendering
@@ -70,22 +71,27 @@ export const COMMANDS = ['run', 'open', 'focus'];
 // One --mouse token -> the mouse events it stands for (lib/controller.mjs
 // mouseAction shape, without `time`), or null when the token is a key name.
 // dblclick is two left clicks on the cell, which is what the pure double-click
-// detection needs to see; the driver stamps both with the same time.
+// detection needs to see, and tripleclick three (a press landing inside the
+// window a double-click already used); the driver stamps a token's events
+// with one time.
 export function parseMouseToken(token) {
-  const m = /^(click|dblclick|wheel:(?:up|down)):(\d+),(\d+)$/.exec(token);
+  const m = /^(click|dblclick|tripleclick|wheel:(?:up|down)):(\d+),(\d+)$/.exec(token);
   if (!m) {
     // Something shaped like an event but not one of ours (rclick included: the
     // board binds nothing to the right button) is an error, not a key name.
-    if (/^(click|dblclick|rclick|mclick|wheel)(:|$)/.test(token)) throw new Error(`--mouse: bad event "${token}" (want click:X,Y, dblclick:X,Y, wheel:up:X,Y or wheel:down:X,Y)`);
+    if (/^(click|dblclick|tripleclick|rclick|mclick|wheel)(:|$)/.test(token)) throw new Error(`--mouse: bad event "${token}" (want click:X,Y, dblclick:X,Y, tripleclick:X,Y, wheel:up:X,Y or wheel:down:X,Y)`);
     return null;
   }
   const x = Number(m[2]);
   const y = Number(m[3]);
+  const down = () => ({ type: 'down', button: 'left', x, y });
   switch (m[1]) {
     case 'click':
-      return [{ type: 'down', button: 'left', x, y }];
+      return [down()];
     case 'dblclick':
-      return [{ type: 'down', button: 'left', x, y }, { type: 'down', button: 'left', x, y }];
+      return [down(), down()];
+    case 'tripleclick':
+      return [down(), down(), down()];
     default:
       return [{ type: 'wheel', dir: m[1].slice(6), x, y }];
   }
