@@ -1529,7 +1529,7 @@ assert_line() {
 # buildModel, the loading branch from renderPanes, or name one source for every pane).
 frame_ld=$(render cold-start.json) || fail "cold start: render exited non-zero"
 tags_ld=$(render cold-start.json --tags) || fail "cold start --tags: render exited non-zero"
-assert_row "$frame_ld" '^ fm-board · /fixture/firstmate · 1 home +refreshing… · herdr disconnected \(--no-herdr\) $' "cold start: the title line reads refreshing… (the block that puts the panes into the loading state)"
+assert_row "$frame_ld" '^ firstmate-tui · /fixture/firstmate · 1 home +refreshing… · herdr disconnected \(--no-herdr\) $' "cold start: the title line reads refreshing… (the block that puts the panes into the loading state)"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start: Needs you, In flight, Findings and Landed each spin and name the fleet snapshot"
 assert_count "$frame_ld" "⠋ loading GitHub checks…" 1 "cold start: Ready for review alone names the GitHub checks"
 assert_line "$frame_ld" 4 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Needs you's first body line is the spinner"
@@ -1570,7 +1570,7 @@ assert_line "$frame_ld" 8 '^│ no recorded pull requests +│$' "cold start --n
 # nothing either.
 frame_ld=$(render "$(variant populated.json data-refreshing '{"refresh": {"refreshing": true}}')") || fail "data refreshing: render exited non-zero"
 assert_count "$frame_ld" "loading" 0 "data refreshing: no spinner over existing rows"
-assert_row "$frame_ld" '^ fm-board · /fixture/firstmate · 3 homes +refreshing… $' "data refreshing: the title line still says refreshing…"
+assert_row "$frame_ld" '^ firstmate-tui · /fixture/firstmate · 3 homes +refreshing… $' "data refreshing: the title line still says refreshing…"
 assert_count "$frame" "loading" 0 "populated: no spinner when no refresh runs"
 # The frame counter picks the glyph: loading_frame 3 is the fourth braille frame, 10 wraps to the
 # first, the default is the first, and a fraction is refused (falsify: drop the modulo from
