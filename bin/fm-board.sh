@@ -2,7 +2,11 @@
 # bin/fm-board.sh - launcher for fm-board, the read-only herdr-hosted board over
 # the firstmate fleet.
 #
-#   fm-board.sh [run] [flags]          run the board in the current terminal
+#   fm-board.sh [run] [flags]          run the board in the current terminal;
+#                                      when the board exits 75 (the relaunch key
+#                                      on its Settings page after an upgrade)
+#                                      this script starts the copy at this path
+#                                      again, which is then the new one
 #   fm-board.sh open [flags]           same as run: the board starts in the pane
 #                                      this command was typed in, so split your
 #                                      herdr pane first to put it beside firstmate
@@ -25,6 +29,7 @@
 #   fm-board.sh --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
 #                             [--keys <list>] [--expand <all|ids>] [--opener-cmd <argv>]
 #                             [--viewer-cmd <argv>] [--view-state <file>] [--tags]
+#                             [--curl-cmd <argv>] [--install-root <dir>]
 #                                      print one frame to stdout and exit
 #   fm-board.sh --headless [flags]     run the refresh schedule with no terminal
 #                                      (test mode; stop it with a signal)
@@ -32,9 +37,10 @@
 # --detached is the wrapper's own flag and applies to `open` only. Every other
 # flag is passed through to bin/fm-board/index.mjs unchanged; see
 # `fm-board.sh --help` for the list (--home, --refresh, --no-prs, --no-herdr,
-# --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state, --herdr-cmd,
-# --herdr-socket, --snapshot-timeout, --keys, --expand, --tags, --headless;
-# --prs is accepted and does nothing, live PR data being the default).
+# --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state, --curl-cmd,
+# --install-root, --herdr-cmd, --herdr-socket, --snapshot-timeout, --keys,
+# --expand, --tags, --headless; --prs is accepted and does nothing, live PR
+# data being the default).
 #
 # FM_HOME resolution: the FM_HOME environment variable, else the one-line file
 # "$HERDR_PLUGIN_CONFIG_DIR/fm-home" (written once by the captain when the
@@ -60,6 +66,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 BOARD_DIR="$ROOT/fm-board"
 ENTRY="$BOARD_DIR/index.mjs"
 PLUGIN_ID="firstmate.board"
+# The board exits with this status on the relaunch key of its Settings page
+# (RELAUNCH_EXIT in bin/fm-board/lib/settings.mjs); `run` answers it below.
+RELAUNCH_STATUS=75
 
 die() {
   printf 'fm-board: %s\n' "$*" >&2
@@ -171,6 +180,8 @@ case "$command" in
   version) show_version "$@"; exit 0 ;;
   upgrade) run_upgrade "$@" ;; # execs install.sh or dies
 esac
+# The flags as typed, for the relaunch below: the new copy resolves them itself.
+ORIG_ARGS=("$@")
 
 want_herdr=1
 render_once=0
@@ -190,7 +201,7 @@ while [ "$#" -gt 0 ]; do
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
-    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--expand|--opener-cmd|--viewer-cmd)
+    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
   esac
@@ -387,8 +398,23 @@ focus_board() {
   printf 'focused %s\n' "$pane"
 }
 
+# run: node is a child rather than an exec so the board's exit status can be
+# read. RELAUNCH_STATUS means the captain pressed the relaunch key on the
+# Settings page after an in-board upgrade: this script starts the copy at its
+# own path again with the flags as typed, and since an install keeps its
+# prefix that copy is the newly installed one (a checkout simply restarts).
+# Every other status passes through unchanged.
+run_board() {
+  node "$ENTRY" "${pass[@]+"${pass[@]}"}"
+  local status=$?
+  if [ "$status" -eq "$RELAUNCH_STATUS" ]; then
+    exec bash "$ROOT/fm-board.sh" run "${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}"
+  fi
+  exit "$status"
+}
+
 case "$command" in
   open) open_detached ;; # plain open became run above; only --detached lands here
   focus) focus_board ;;
-  run) exec node "$ENTRY" "${pass[@]+"${pass[@]}"}" ;;
+  run) run_board ;;
 esac

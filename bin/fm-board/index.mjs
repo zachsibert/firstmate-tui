@@ -20,6 +20,13 @@
 //                  --view-state <file> loads hidden rows and panes from that
 //                  file and saves x/X/1-5/0 changes back to it (without the
 //                  flag a fixture render loads nothing and saves nothing).
+//                  `.` opens the Settings page: its install identity comes
+//                  from --install-root (default: the directory above bin/),
+//                  its release data from --curl-cmd (without the flag a
+//                  one-shot render fetches nothing and says so), an upgrade it
+//                  confirms runs `bash <root>/bin/fm-board.sh upgrade ...` and
+//                  is awaited before the next key, and the relaunch key only
+//                  reports the exit status the launcher would act on.
 //
 // Fixture file shape (see tests/fixtures/*.json):
 //   { "now": ISO time, "cols": N, "rows": N, "fm_home": path,
@@ -43,11 +50,13 @@ import { buildModel } from './lib/model.mjs';
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, mtime, runSnapshot } from './lib/sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, runSnapshot } from './lib/sources.mjs';
 import { focusProblem, handleKey, viewProblem } from './lib/controller.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer } from './lib/viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
+import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsFlags } from './lib/settings.mjs';
+import { defaultInstallRoot, readInstall, runUpgrade } from './lib/upgrade.mjs';
 
 function fail(msg, code = 1) {
   process.stderr.write(`fm-board: ${msg}\n`);
@@ -137,10 +146,18 @@ function viewStateFor(opts, fmHome) {
 // process exits) or, without one, only leaves a footer notice; a focus is
 // checked the same way the app checks it, then reported rather than run; a
 // viewed report runs the resolved viewer (awaited); r re-reads a live home.
+// On the Settings page the release fetch and the upgrade child are awaited
+// before the next key is pressed, so a key list reads in order: `.` fetches,
+// `enter` asks, `y` runs the launcher to its end, `R` reports the relaunch.
 async function driveOnce(facts, opts) {
   const vs = viewStateFor(opts, facts.fmHome);
   const loaded = loadViewState(vs.path);
-  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, showHidden: false, help: false, notice: '', noticeBad: false };
+  const settings = initialSettings({
+    install: readInstall(opts.installRoot || defaultInstallRoot()),
+    flags: settingsFlags(opts),
+    idleReason: opts.curlCmd ? null : 'not fetched (no --curl-cmd in --render-once)',
+  });
+  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, showHidden: false, help: false, notice: '', noticeBad: false, page: 'board', settings };
   const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
   let model = build();
   if (opts.expand.length) {
@@ -213,11 +230,42 @@ async function driveOnce(facts, opts) {
       const err = saveViewState(vs.path, { hidden: view.hidden, hiddenPanes: view.hiddenPanes });
       if (err) ctx.notice(`view state not saved: ${err}`, true);
     },
+    // Settings page effects. Without --curl-cmd nothing is fetched, so a test
+    // never reaches GitHub by accident; the page says so on its latest line.
+    settingsFetch: () => {
+      const s = view.settings;
+      if (!opts.curlCmd) {
+        ctx.notice('release data not fetched: no --curl-cmd in --render-once');
+        return;
+      }
+      if (s.releases.state === 'fetching') return;
+      s.releases = { ...s.releases, state: 'fetching' };
+      pending.push(
+        fetchReleases({ repo: s.install.repo, curlCmd: opts.curlCmd, timeoutMs: opts.snapshotTimeout * 1000 }).then((r) => {
+          s.releases = r;
+        }),
+      );
+    },
+    settingsUpgrade: (running) => {
+      const s = view.settings;
+      pending.push(
+        runUpgrade({ launcher: s.install.launcher, args: running.args, onLine: (text) => s.output.push(text) }).then((r) => {
+          const result = finishUpgrade(s, r);
+          ctx.notice(resultNotice(result), !result.ok);
+        }),
+      );
+    },
+    relaunch: () => {
+      ctx.notice(`would relaunch: exit ${RELAUNCH_EXIT} makes bin/fm-board.sh run start the installed copy again; --render-once never exits ${RELAUNCH_EXIT}`);
+    },
     quit: () => {},
   };
   if (loaded.error) ctx.notice(`view state: ${loaded.error}`, true);
   if (vs.problem) ctx.notice(vs.problem, true);
-  for (const key of opts.keys) handleKey(ctx, key);
+  for (const key of opts.keys) {
+    if (view.page === 'settings' && pending.length) await Promise.all(pending.splice(0));
+    handleKey(ctx, key);
+  }
   await Promise.all(pending);
   return { model, view };
 }

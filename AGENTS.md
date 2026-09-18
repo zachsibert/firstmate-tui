@@ -24,16 +24,21 @@ the findings watermark belong to later milestones.
 - The board owns no authority. Its actions are `herdr agent focus`, opening a
   PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
   `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
-  report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended)
-  and refreshing its own data (`r`: the snapshot, then the live PR fetch
+  report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended),
+  refreshing its own data (`r`: the snapshot, then the live PR fetch
   unless `--no-prs`; that fetch is the board's own read-only `gh pr list` per
   candidate repository in `lib/sources.mjs`, copying `fm-bearings-snapshot.sh`'s
   candidate and checks rules, with that script as the fallback when gh is not
-  on PATH). It never moves or closes a herdr pane; the captain splits
-  panes himself, so do not bring back an `f` toggle or a `pane move` action.
-  `enter` is the one key that opens a PR; do not bring back the separate `o`
-  key the scout report's M2 row still lists. Answers, merges and dispatch stay
-  with firstmate's own owners.
+  on PATH), and upgrading itself from the Settings page (`.`): only after a
+  `y` confirmation, only by running the installed launcher's own
+  `fm-board upgrade --version <v>` / `--stable` (`lib/upgrade.mjs`, argv
+  spawn), so the record checks and the swap stay in `bin/fm-board.sh` and
+  `bin/install.sh`; the relaunch is exit 75, which `run` in the launcher
+  answers by starting the same path again. It never moves or closes a herdr
+  pane; the captain splits panes himself, so do not bring back an `f` toggle
+  or a `pane move` action. `enter` is the one key that opens a PR; do not
+  bring back the separate `o` key the scout report's M2 row still lists.
+  Answers, merges and dispatch stay with firstmate's own owners.
 - In flight groups secondmate work by home, not by delegated item, because
   the ledger carries no per-child parent field (the comment above
   `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it
@@ -48,9 +53,11 @@ the findings watermark belong to later milestones.
 
 ## Working on the code
 
-- Pure modules (`text`, `layout`, `model`, `render`) take data and return
-  data; keep them that way so `--render-once --fixture` stays the test
-  surface. I/O lives in `sources.mjs` (firstmate) and `herdr.mjs` (herdr).
+- Pure modules (`text`, `layout`, `model`, `render`, `settings`) take data
+  and return data; keep them that way so `--render-once --fixture` stays the
+  test surface. I/O lives in `sources.mjs` (firstmate, and the GitHub
+  releases fetch through `--curl-cmd`), `herdr.mjs` (herdr) and
+  `upgrade.mjs` (the install record and the upgrade child).
 - `lib/tui-blessed.mjs` is the only importer of `neo-blessed`. Anything the
   terminal library must do goes through the screen contract at the top of
   that file.
@@ -69,13 +76,17 @@ the findings watermark belong to later milestones.
   The refresh schedule (the snapshot, then the gh calls, per tick; a tick
   that lands mid-refresh skipped) is tested by running the app with
   `--headless` against a stand-in whose snapshot sleeps and stopping it with
-  a signal, so `--headless` must never load `neo-blessed`. Nothing in the
-  suite may call a real herdr or a real gh: if a test ever needs herdr, fake
-  it and point `HERDR_BIN_PATH` at the fake as well as PATH, because herdr
-  sets `HERDR_BIN_PATH` inside its panes and PATH alone still reaches the
-  captain's live server.
+  a signal, so `--headless` must never load `neo-blessed`. The Settings page
+  is tested with `--install-root` at a fake prefix whose `bin/fm-board.sh` is
+  `tests/fake-upgrade.sh` and with `--curl-cmd bash tests/fake-curl.sh` over
+  `tests/fixtures/releases/api`; a one-shot render without `--curl-cmd`
+  fetches nothing by design, and the launcher's relaunch loop runs against
+  `tests/fake-node.sh` on PATH. Nothing in the suite may call a real herdr or
+  a real gh: if a test ever needs herdr, fake it and point `HERDR_BIN_PATH`
+  at the fake as well as PATH, because herdr sets `HERDR_BIN_PATH` inside its
+  panes and PATH alone still reaches the captain's live server.
 - Bash (`bin/*.sh`, `scripts/*.sh`, `tests/*.sh`) must pass ShellCheck
-  0.11.0, the same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh bin/install.sh scripts/package.sh tests/fm-board.test.sh tests/install.test.sh tests/fake-curl.sh`
+  0.11.0, the same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/*.sh scripts/*.sh tests/*.sh`
   when no local binary is installed). Every `rm` on a variable path takes
   the `${VAR:?}` guard so an empty variable fails instead of widening.
 - Distribution is GitHub Releases (README "Install" and "Releasing"). The

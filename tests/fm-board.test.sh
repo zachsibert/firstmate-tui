@@ -32,6 +32,14 @@
 # HERDR_BIN_PATH and PATH (herdr sets HERDR_BIN_PATH inside its panes, so PATH
 # alone would still reach the captain's live server); the fake logs its argv
 # and fails, and the suite asserts it was never called.
+# The Settings page (`.`) is checked with --install-root pointing at a fake
+# install prefix (a package.json version, an install-record and
+# tests/fake-upgrade.sh as its bin/fm-board.sh, which logs its argv and prints
+# installer-like lines) or at a directory with no record for the checkout
+# case, and with `--curl-cmd bash tests/fake-curl.sh` serving the releases API
+# from tests/fixtures/releases/api, so no upgrade, download or GitHub call is
+# ever real. The launcher's relaunch loop (exit 75 starts the board again) runs
+# against tests/fake-node.sh on PATH, which logs its calls and runs nothing.
 #
 # Fixtures (tests/fixtures/):
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
@@ -320,7 +328,7 @@ assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship
 assert_lines "$frame" 40 "populated frame is 40 lines"
 assert_widths "$frame" 160 "populated frame lines are 160 columns"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
-assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  \? help  q quit +$' "footer keys"
+assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  \. settings  \? help  q quit +$' "footer keys (falsify: drop . settings from FOOTER_KEYS)"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs).
 frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l") || fail "keys l: render exited non-zero"
@@ -391,7 +399,7 @@ assert_no_row "$frame_med" ' REPO +HOME' "medium drops REPO"
 assert_no_row "$frame_med" ' HOME +AGE' "medium drops AGE"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$frame_med" '^ j/k  tab  enter  l/h  x hide  H  1-5 panes  r  \? help  q quit +$' "medium width uses the short footer"
+assert_row "$frame_med" '^ j/k  tab  enter  l/h  x hide  H  1-5 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -892,6 +900,250 @@ rm -f "$FETCH_LOG"
 FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" render populated.json --keys "r" >/dev/null || fail "fixture with FM_HOME: render exited non-zero"
 if [ -f "$FETCH_LOG" ]; then fail "a fixture render ran a snapshot script: $(cat "$FETCH_LOG")"; else pass; fi
 
+# ------------------------------------------------------------- settings page
+# The `.` page. Install identity comes from --install-root: INSTALL is a fake prefix (package.json
+# version 0.1.0, an install-record naming acme/fm-board-test, tests/fake-upgrade.sh as its
+# bin/fm-board.sh), CHECKOUT the same tree with a .git file and no record. Release data comes from
+# `--curl-cmd bash tests/fake-curl.sh` over REL (tests/fixtures/releases/api: 0.2.0 is the latest
+# stable release, three prereleases out of publish order in the list), REL_CURRENT (the same list
+# with 0.1.0 as the latest) or REL_NONE (nothing behind the API). The fake upgrade logs its argv to
+# UPGRADE_LOG and exits FM_BOARD_TEST_UPGRADE_EXIT; a real `fm-board upgrade`, install.sh or
+# GitHub is never reached.
+REL="$FIX/releases"
+REL_CURRENT="$SCRATCH/releases-current"
+REL_NONE="$SCRATCH/releases-none"
+mkdir -p "$REL_CURRENT/api" "$REL_NONE/api"
+cp "$REL/api/releases.json" "$REL_CURRENT/api/releases.json"
+sed 's/v0\.2\.0/v0.1.0/g; s/2026-09-17T14:02:11Z/2026-09-15T12:01:30Z/' "$REL/api/latest.json" > "$REL_CURRENT/api/latest.json"
+INSTALL="$SCRATCH/install"
+CHECKOUT="$SCRATCH/checkout"
+UPGRADE_LOG="$SCRATCH/upgrade.log"
+CURL_LOG="$SCRATCH/curl.log"
+mkdir -p "$INSTALL/bin/fm-board" "$CHECKOUT/bin/fm-board"
+printf '{\n  "name": "fm-board",\n  "version": "0.1.0"\n}\n' > "$INSTALL/bin/fm-board/package.json"
+cp "$INSTALL/bin/fm-board/package.json" "$CHECKOUT/bin/fm-board/package.json"
+printf 'gitdir: /nowhere\n' > "$CHECKOUT/.git"
+printf '# written by fm-board install.sh and read by fm-board upgrade; do not edit\nprefix=%s\nbin_dir=%s/bin-dir\nrepo=acme/fm-board-test\nversion=0.1.0\ninstalled_from=release v0.1.0\n' "$INSTALL" "$SCRATCH" > "$INSTALL/install-record"
+cp "$ROOT/tests/fake-upgrade.sh" "$INSTALL/bin/fm-board.sh"
+cp "$ROOT/tests/fake-upgrade.sh" "$CHECKOUT/bin/fm-board.sh"
+chmod +x "$INSTALL/bin/fm-board.sh" "$CHECKOUT/bin/fm-board.sh"
+# A fake curl on PATH that logs and fails, for the check that a render without --curl-cmd never
+# reaches for the real one.
+# shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_CURL_LOG at run time, not here
+printf '#!/usr/bin/env bash\necho "curl $*" >> "$FM_BOARD_TEST_CURL_LOG"\nexit 7\n' > "$FAKE_BIN/curl"
+chmod +x "$FAKE_BIN/curl"
+# render_settings <api root> <install root> <keys> [flags]: a render of $SETTINGS_FIXTURE (default
+# populated.json) with the fakes wired and both logs reset first
+render_settings() {
+  local api=$1 root=$2 keys=$3
+  shift 3
+  rm -f "$UPGRADE_LOG" "$CURL_LOG"
+  FAKE_CURL_ROOT="$api" FAKE_CURL_LOG="$CURL_LOG" FM_BOARD_TEST_UPGRADE_LOG="$UPGRADE_LOG" \
+    "$BOARD" --render-once --fixture "$FIX/${SETTINGS_FIXTURE:-populated.json}" --no-herdr --install-root "$root" --curl-cmd "bash $ROOT/tests/fake-curl.sh" --keys "$keys" "$@"
+}
+assert_upgrade_log() { # <expected content> <label>: the fake launcher ran exactly once, with these arguments
+  if [ -f "$UPGRADE_LOG" ] && [ "$(cat "$UPGRADE_LOG")" = "$1" ]; then pass; else fail "$2: upgrade log is '$(cat "$UPGRADE_LOG" 2>/dev/null || echo '<absent>')', expected '$1'"; fi
+}
+assert_no_upgrade() { # <label>
+  if [ -e "$UPGRADE_LOG" ]; then fail "$1: the upgrade command ran with '$(cat "$UPGRADE_LOG")'"; else pass; fi
+}
+
+# . replaces the grid with the page: identity from the fake prefix, the latest release with its
+# date and verdict, the actions, the read-only flags, the page's own footer (falsify: drop the
+# settings case from keyAction, the record parse in readInstall, or renderSettings from renderFrame).
+frame_s=$(render_settings "$REL" "$INSTALL" ".") || fail "settings: render exited non-zero"
+assert_row "$frame_s" '^ Settings +$' "settings: heading"
+assert_count "$frame_s" "┌─" 0 "settings: no pane is drawn behind the page"
+assert_row "$frame_s" '^ fm-board 0\.1\.0 \(stable release\) +$' "settings: the running version, in the words fm-board version prints"
+assert_contains "$frame_s" " installed at $INSTALL (from release v0.1.0) · repository acme/fm-board-test" "settings: prefix, origin and repository come from the install record"
+assert_row "$frame_s" '^ latest stable  0\.2\.0 · published 2026-09-17 · upgrade available +$' "settings: the latest stable release, its date and the verdict (falsify: compare suffixes in compareBase)"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 +fm-board upgrade --version 0\.2\.0 +$' "settings: the upgrade action leads, highlighted, naming the exact command"
+assert_row "$frame_s" '^   Betas +3 prereleases +$' "settings: the Betas entry counts the prereleases and not the stable releases"
+assert_row "$frame_s" '^   Refresh release data +GitHub releases of acme/fm-board-test +$' "settings: the refetch entry"
+assert_row "$frame_s" '^ refresh cadence +30 s \(--refresh\) +$' "settings: refresh cadence, read-only"
+assert_row "$frame_s" '^ PR data +on: live GitHub checks on every tick +$' "settings: PR data, read-only"
+assert_row "$frame_s" '^ herdr overlay +off \(--no-herdr\) +$' "settings: the herdr line reflects --no-herdr"
+assert_row "$frame_s" '^ j/k move  enter choose  r refetch  esc/\. back  \? help +$' "settings: the footer names the page's keys"
+assert_contains "$frame_s" "fm-board · /fixture/firstmate · 3 homes" "settings: the title line stays"
+assert_lines "$frame_s" 40 "settings: the frame is 40 lines"
+assert_widths "$frame_s" 160 "settings: lines are 160 columns"
+# Opening the page fetches once: the latest release and the list, for the record's repository
+# (falsify: drop settingsFetch from the settings case in handleKey, or fetch on the refresh tick).
+assert_file_contains "$CURL_LOG" "https://api.github.com/repos/acme/fm-board-test/releases/latest" "opening the page asks for the latest release of the record's repository"
+assert_file_contains "$CURL_LOG" "https://api.github.com/repos/acme/fm-board-test/releases?per_page=30" "opening the page asks for the release list"
+assert_count "$(cat "$CURL_LOG")" "api.github.com" 2 "opening the page makes exactly two API calls"
+assert_no_upgrade "opening the page runs no upgrade"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,r") || fail "settings r: render exited non-zero"
+assert_count "$(cat "$CURL_LOG")" "api.github.com" 4 "r inside the page fetches again (falsify: drop the fetch case from settingsKeyAction)"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --no-prs --refresh 45) || fail "settings flags: render exited non-zero"
+assert_row "$frame_s" '^ refresh cadence +45 s \(--refresh\) +$' "settings: the cadence line follows --refresh"
+assert_row "$frame_s" '^ PR data +off \(--no-prs\) +$' "settings: the PR data line follows --no-prs"
+# Without --curl-cmd a one-shot render fetches nothing, not even through a curl on PATH (falsify:
+# default curlCmd to curl in driveOnce's settingsFetch).
+rm -f "$CURL_LOG"
+frame_s=$(PATH="$FAKE_BIN:$PATH" FM_BOARD_TEST_CURL_LOG="$CURL_LOG" render populated.json --install-root "$INSTALL" --keys ".") || fail "settings no curl: render exited non-zero"
+assert_row "$frame_s" '^ latest stable  not fetched \(no --curl-cmd in --render-once\) +$' "without --curl-cmd the latest line says nothing was fetched"
+assert_contains "$frame_s" "release data not fetched: no --curl-cmd in --render-once" "without --curl-cmd the footer says why"
+if [ -e "$CURL_LOG" ]; then fail "a render without --curl-cmd called curl on PATH: $(cat "$CURL_LOG")"; else pass; fi
+
+# Up to date: the same list with 0.1.0 as the latest stable release offers no upgrade and the cursor
+# lands on Betas (falsify: offer the latest version whatever the comparison says).
+frame_s=$(render_settings "$REL_CURRENT" "$INSTALL" ".") || fail "settings current: render exited non-zero"
+assert_row "$frame_s" '^ latest stable  0\.1\.0 · published 2026-09-15 · up to date +$' "up to date: the latest line says so"
+assert_not_contains "$frame_s" "Upgrade to" "up to date: no upgrade action"
+assert_row "$frame_s" '^ ▸ Betas ' "up to date: the cursor starts on Betas"
+
+# The API unreachable: the failure text is shown verbatim on the latest line and the Betas entry,
+# and nothing is offered (falsify: swallow runJson's error in fetchReleases).
+frame_s=$(render_settings "$REL_NONE" "$INSTALL" ".") || fail "settings api down: render exited non-zero"
+assert_contains "$frame_s" " latest stable  no stable release found: exit 22: fake-curl: 404 https://api.github.com/repos/acme/fm-board-test/releases/latest" "api down: the latest line carries curl's failure text"
+assert_row "$frame_s" '^ ▸ Betas +list unavailable: exit 22: fake-curl: 404 https://api.github.com/repos/acme/fm-board-test/releases\?per_page=30' "api down: the Betas entry carries the list's failure text"
+assert_not_contains "$frame_s" "Upgrade to" "api down: no upgrade action"
+
+# The Betas submenu: prereleases newest first by publish time (the fixture lists d8b290e after
+# a1b2c3d although it was published later), each with its commit and date, the stable releases left
+# out, Back to stable last (falsify: drop the sort or the prerelease filter in parseReleases).
+frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter") || fail "betas: render exited non-zero"
+assert_row "$frame_s" '^ Settings · Betas +$' "betas: heading"
+assert_row "$frame_s" '^ prereleases of acme/fm-board-test, newest first +$' "betas: the list names its source"
+assert_row "$frame_s" '^ ▸ 0\.2\.0-9f8e7d6 +commit 9f8e7d6   2026-09-17 +$' "betas: the newest prerelease leads, highlighted, with commit and date"
+assert_row "$frame_s" '^   0\.1\.0-d8b290e +commit d8b290e   2026-09-16 +$' "betas: second prerelease"
+assert_row "$frame_s" '^   0\.1\.0-a1b2c3d +commit a1b2c3d   2026-09-16 +$' "betas: oldest prerelease"
+assert_before "$frame_s" '0\.2\.0-9f8e7d6' '0\.1\.0-d8b290e' "betas: newest first (1)"
+assert_before "$frame_s" '0\.1\.0-d8b290e' '0\.1\.0-a1b2c3d' "betas: sorted by publish time, not by the API's order"
+assert_no_row "$frame_s" '^ [▸ ] 0\.2\.0 ' "betas: the stable 0.2.0 is not listed as a beta"
+assert_no_row "$frame_s" '^ [▸ ] 0\.1\.0 ' "betas: the stable 0.1.0 is not listed as a beta"
+assert_row "$frame_s" '^   Back to stable +0\.2\.0   2026-09-17 +$' "betas: Back to stable names the latest stable release"
+assert_before "$frame_s" '0\.1\.0-a1b2c3d' 'Back to stable' "betas: Back to stable comes after the prereleases"
+assert_row "$frame_s" '^ j/k move  enter choose  esc back  \. close  r refetch  \? help +$' "betas: the footer says esc goes back and . closes"
+assert_no_upgrade "opening the Betas menu runs nothing"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,escape") || fail "betas esc: render exited non-zero"
+assert_row "$frame_s" '^ Settings +$' "esc in Betas returns to the main menu"
+assert_not_contains "$frame_s" "Settings · Betas" "esc in Betas leaves the submenu"
+
+# Confirm gating: choosing an install shows one line with the exact version and command, and only y
+# starts it; any other key cancels and does nothing else (falsify: run the upgrade from the confirm
+# case, or let j move while a confirmation is pending).
+frame_s=$(render_settings "$REL" "$INSTALL" ".,enter") || fail "confirm: render exited non-zero"
+assert_row "$frame_s" '^ install 0\.2\.0 \(fm-board upgrade --version 0\.2\.0\)\? y to confirm, esc to cancel +$' "confirm: the line names the version and the command"
+assert_row "$frame_s" '^ y confirm  esc cancel' "confirm: the footer shows the two keys"
+assert_no_upgrade "choosing the upgrade runs nothing before y"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,j") || fail "confirm j: render exited non-zero"
+assert_contains "$frame_s" "cancelled; nothing was installed" "j while pending cancels"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "the cancelling key does nothing else: the cursor has not moved"
+assert_not_contains "$frame_s" "y to confirm" "the confirm line is gone after the cancel"
+assert_no_upgrade "j while pending runs nothing"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,escape") || fail "confirm esc: render exited non-zero"
+assert_contains "$frame_s" "cancelled; nothing was installed" "esc while pending cancels"
+assert_row "$frame_s" '^ Settings +$' "esc while pending stays on the page"
+assert_no_upgrade "esc while pending runs nothing"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,Y") || fail "confirm Y: render exited non-zero"
+assert_no_upgrade "only a lower-case y confirms"
+
+# y runs the launcher's own upgrade with the exact version, streams its lines into the page and ends
+# with the restart line and the relaunch entry (falsify: pass --stable for the upgrade entry, spawn
+# install.sh directly, or drop finishUpgrade).
+frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,y") || fail "upgrade y: render exited non-zero"
+assert_upgrade_log "upgrade --version 0.2.0" "y runs bash <prefix>/bin/fm-board.sh upgrade --version 0.2.0, once"
+assert_row "$frame_s" '^ install: downloading fm-board-v0\.2\.0\.tar\.gz from acme/fm-board-test release v0\.2\.0 +$' "upgrade: the download line is on the page"
+assert_row "$frame_s" '^ install: checksum verified +$' "upgrade: the verify line is on the page"
+assert_row "$frame_s" '^ install: fm-board 0\.2\.0 installed \(replaced 0\.1\.0\) +$' "upgrade: the swap line is on the page"
+assert_before "$frame_s" 'install: downloading' 'install: checksum verified' "upgrade: lines keep their order (1)"
+assert_before "$frame_s" 'install: checksum verified' 'install: fm-board 0\.2\.0 installed' "upgrade: lines keep their order (2)"
+assert_row "$frame_s" '^ restart to use 0\.2\.0 · R quits and relaunches the board +$' "upgrade: success names the installed version and the relaunch key"
+assert_row "$frame_s" '^ ▸ Relaunch now +quit and start 0\.2\.0 \(R\) +$' "upgrade: the relaunch entry leads the menu after a success"
+assert_not_contains "$frame_s" "Upgrade to 0.2.0" "upgrade: the upgrade entry gives way to the relaunch entry"
+assert_contains "$frame_s" "installed 0.2.0; R relaunches the board" "upgrade: the footer notice sums it up"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,y,R") || fail "upgrade R: render exited non-zero"
+assert_contains "$frame_s" "would relaunch: exit 75 makes bin/fm-board.sh run start the installed copy again; --render-once never exits 75" "R after a success asks for the relaunch, which a one-shot render only reports"
+assert_upgrade_log "upgrade --version 0.2.0" "R runs no second upgrade"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,R") || fail "R early: render exited non-zero"
+assert_not_contains "$frame_s" "would relaunch" "R before any success does nothing (falsify: drop the result check from the R case)"
+
+# A failing upgrade: the launcher's stderr is on the page verbatim with the exit status, nothing says
+# restart, and the page stays usable with the upgrade still offered (falsify: drop stderr from
+# runUpgrade, or lock the page after a failure).
+frame_s=$(FM_BOARD_TEST_UPGRADE_EXIT=2 render_settings "$REL" "$INSTALL" ".,enter,y") || fail "upgrade fail: render exited non-zero"
+assert_upgrade_log "upgrade --version 0.2.0" "the failing upgrade ran once"
+assert_row "$frame_s" "^ install: error: checksum mismatch for fm-board-v0\.2\.0\.tar\.gz: expected 'abc', got 'def' +\$" "failure: the installer's error line is shown verbatim"
+assert_contains "$frame_s" " upgrade failed (exit 2); the output above says why." "failure: the exit status is named"
+assert_not_contains "$frame_s" "restart to use" "failure: nothing says restart"
+assert_not_contains "$frame_s" "Relaunch now" "failure: no relaunch entry"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "failure: the upgrade is still offered"
+assert_contains "$frame_s" "upgrade failed; the page shows the installer output" "failure: the footer notice says so"
+frame_s=$(FM_BOARD_TEST_UPGRADE_EXIT=2 render_settings "$REL" "$INSTALL" ".,enter,y,j,enter") || fail "upgrade fail then move: render exited non-zero"
+assert_row "$frame_s" '^ Settings · Betas +$' "failure: keys work again afterwards (j, enter opens Betas)"
+
+# A beta and Back to stable go through the same confirm and the same launcher (falsify: give the
+# beta entries a different channel, or drop the stable channel from upgradeArgs).
+frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,enter") || fail "beta confirm: render exited non-zero"
+assert_row "$frame_s" '^ install 0\.1\.0-d8b290e \(fm-board upgrade --version 0\.1\.0-d8b290e\)\? y to confirm, esc to cancel +$' "beta: the confirm line names the exact beta"
+assert_no_upgrade "beta: nothing runs before y"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,enter,y") || fail "beta y: render exited non-zero"
+assert_upgrade_log "upgrade --version 0.1.0-d8b290e" "beta: y runs the launcher with --version and the exact beta"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,j,j,enter") || fail "stable confirm: render exited non-zero"
+assert_row "$frame_s" '^ back to stable 0\.2\.0 \(fm-board upgrade --stable\)\? y to confirm, esc to cancel +$' "Back to stable: the confirm line names the release and the --stable command"
+assert_no_upgrade "Back to stable: nothing runs before y"
+frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,j,j,enter,y") || fail "stable y: render exited non-zero"
+assert_upgrade_log "upgrade --stable" "Back to stable: y runs the launcher's --stable path"
+assert_row "$frame_s" '^ Settings +$' "a success from the Betas menu returns to the main menu"
+assert_row "$frame_s" '^ ▸ Relaunch now ' "a success from the Betas menu offers the relaunch"
+
+# A checkout (no install record): the page says so with the git command the launcher prints, offers
+# no upgrade and no Back to stable, lists the betas read-only and asks the default repository
+# (falsify: drop the checkout guard from settingsEntries, or make readInstall default to a record).
+frame_s=$(render_settings "$REL" "$CHECKOUT" ".") || fail "checkout: render exited non-zero"
+assert_row "$frame_s" '^ fm-board 0\.1\.0 \(stable release\) +$' "checkout: the running version"
+assert_contains "$frame_s" " running from a checkout at $CHECKOUT (no install record); update it with git:" "checkout: the page says it is a checkout"
+assert_contains "$frame_s" "   git -C $CHECKOUT pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)" "checkout: the git command the launcher prints"
+assert_not_contains "$frame_s" "installed at" "checkout: no install line"
+assert_row "$frame_s" '^ latest stable  0\.2\.0 · published 2026-09-17 · newer than this checkout; git pull updates it +$' "checkout: the latest line points at git instead of an upgrade"
+assert_not_contains "$frame_s" "Upgrade to" "checkout: no upgrade action"
+assert_row "$frame_s" '^ ▸ Betas +3 prereleases \(read-only from a checkout\) +$' "checkout: Betas is read-only and first"
+assert_file_contains "$CURL_LOG" "https://api.github.com/repos/zachsibert/firstmate-tui/releases/latest" "checkout: without a record the default repository is asked"
+frame_s=$(render_settings "$REL" "$CHECKOUT" ".,enter") || fail "checkout betas: render exited non-zero"
+assert_row "$frame_s" '^ prereleases of zachsibert/firstmate-tui, newest first \(read-only from a checkout\) +$' "checkout betas: the list says it is read-only"
+assert_row "$frame_s" '^   0\.2\.0-9f8e7d6 +commit 9f8e7d6   2026-09-17 +$' "checkout betas: prereleases are listed"
+assert_not_contains "$frame_s" "▸" "checkout betas: nothing takes the cursor"
+assert_not_contains "$frame_s" "Back to stable" "checkout betas: no Back to stable"
+frame_s=$(render_settings "$REL" "$CHECKOUT" ".,enter,enter,y") || fail "checkout enter: render exited non-zero"
+assert_no_upgrade "checkout: enter and y in the read-only list run nothing"
+assert_contains "$frame_s" "no upgrade from a checkout; update it with git -C $CHECKOUT pull" "checkout: enter in the list says why"
+frame_s=$(render_settings "$REL" "$CHECKOUT" ".,y,y") || fail "checkout y: render exited non-zero"
+assert_no_upgrade "checkout: y with nothing pending runs nothing"
+
+# Closing: esc, . and q bring the board back with its selection and expanded groups intact (falsify:
+# reset view.pane or view.row when the page closes, or drop the close case).
+rm -f "$OPENER_LOG"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings esc: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "esc closes the page and enter acts on the row selected before it opened"
+assert_count "$frame_o" "┌─" 5 "esc: the grid is back"
+rm -f "$OPENER_LOG"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,.,enter" --opener-cmd "$FAKE_OPENER") || fail "settings dot: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" ". closes the page with the selection intact"
+rm -f "$OPENER_LOG"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,q,enter" --opener-cmd "$FAKE_OPENER") || fail "settings q: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "q closes the page like the help overlay, and the board is not quit"
+frame_k=$(render populated.json --install-root "$INSTALL" --keys "tab,tab,j,j,j,j,l,.,escape") || fail "settings expanded: render exited non-zero"
+assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "a group expanded before the page opened is still expanded after it closes"
+# . works from the landing page too and esc returns there (falsify: drop . from LANDING_KEYS).
+frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,.") || fail "settings landing: render exited non-zero"
+assert_row "$frame_s" '^ Settings +$' ". opens the page from the landing page"
+frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,.,escape") || fail "settings landing esc: render exited non-zero"
+assert_row "$frame_s" '^ +all panes hidden +$' "esc returns to the landing page"
+# Help: the overlay documents . and opens over the page (falsify: drop the . line from HELP_LINES).
+frame_k=$(render populated.json --keys "?") || fail "help settings: render exited non-zero"
+assert_contains "$frame_k" ".            settings page: installed version, latest release, upgrade or a beta" "help overlay documents ."
+assert_contains "$frame_k" "(each install asks y first; . or esc brings the board back)" "help overlay documents the confirm step"
+frame_s=$(render populated.json --install-root "$INSTALL" --keys ".,?") || fail "help over settings: render exited non-zero"
+assert_contains "$frame_s" "fm-board keys" "? opens the help over the settings page"
+# Narrow: the page fits the list-mode frame (falsify: pick the layout mode before the page check).
+frame_s=$(SETTINGS_FIXTURE=narrow.json render_settings "$REL" "$INSTALL" ".") || fail "settings narrow: render exited non-zero"
+assert_row "$frame_s" '^ Settings +$' "narrow: the page renders"
+assert_contains "$frame_s" " latest stable  0.2.0 · published 2026-09-17 · upgrade available" "narrow: the latest line fits"
+assert_widths "$frame_s" 70 "narrow settings: lines are 70 columns"
+assert_lines "$frame_s" 24 "narrow settings: 24 lines"
+
 # ------------------------------------------------------------ refresh schedule
 # The interactive schedule, run with --headless against a stand-in whose snapshot sleeps 7 s, with
 # --refresh 5 (the minimum) and the fake gh on PATH. From launch: the start refresh runs the
@@ -1027,6 +1279,28 @@ else
   pass
 fi
 if printf '%s\n' "$out" | grep -Fq "unknown option --bogus"; then pass; else fail "unknown flag is named in the error: $out"; fi
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "--curl-cmd"; then pass; else fail "wrapper --help lists --curl-cmd"; fi
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "--install-root"; then pass; else fail "wrapper --help lists --install-root"; fi
+# run answers the board's exit 75 (the relaunch key on the Settings page) by starting itself again
+# with the flags as typed, once; every other status passes through and runs the board once (falsify:
+# exec node in run_board, or re-run on every status). tests/fake-node.sh on PATH answers the version
+# probe, logs each board start and exits 75 (or FM_BOARD_TEST_NODE_FIRST_EXIT) the first time, 0 after.
+FAKE_NODE="$SCRATCH/fake-node"
+mkdir -p "$FAKE_NODE"
+cp "$ROOT/tests/fake-node.sh" "$FAKE_NODE/node"
+chmod +x "$FAKE_NODE/node"
+NODE_LOG="$SCRATCH/node.log"
+rm -f "$NODE_LOG"
+PATH="$FAKE_NODE:$PATH" FM_BOARD_TEST_NODE_LOG="$NODE_LOG" "$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --keys "tab,j" >/dev/null 2>&1
+status=$?
+if [ "$status" -eq 0 ]; then pass; else fail "relaunch: the wrapper should exit 0 after the relaunched board exits 0, got $status"; fi
+assert_count "$(cat "$NODE_LOG" 2>/dev/null)" "index.mjs --render-once --fixture $FIX/empty.json --no-herdr --keys tab,j" 2 "exit 75 starts the board a second time with the same arguments"
+assert_lines "$(cat "$NODE_LOG" 2>/dev/null)" 2 "exit 75 relaunches exactly once"
+rm -f "$NODE_LOG"
+PATH="$FAKE_NODE:$PATH" FM_BOARD_TEST_NODE_LOG="$NODE_LOG" FM_BOARD_TEST_NODE_FIRST_EXIT=3 "$BOARD" open --render-once --fixture "$FIX/empty.json" --no-herdr >/dev/null 2>&1
+status=$?
+if [ "$status" -eq 3 ]; then pass; else fail "relaunch: exit 3 should pass through, got $status"; fi
+assert_lines "$(cat "$NODE_LOG" 2>/dev/null)" 1 "exit 3 runs the board once and relaunches nothing"
 
 printf '%s checks, %s failed\n' "$checks" "$fails"
 [ "$fails" -eq 0 ]

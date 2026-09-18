@@ -20,10 +20,15 @@
 //           Any pane may go, the last one too: with all five hidden the frame
 //           is the landing page (lib/render.mjs) and only 0-5, r, ? and q act
 //   r       refresh (the snapshot and the PR checks, unless --no-prs)
+//   .       the Settings page (lib/settings.mjs): installed version, latest
+//           release, upgrade and betas through the launcher, read-only flags;
+//           while it is open every key goes to settingsKeyAction and . / esc /
+//           q bring the board back with its selection intact
 //   ?       help       q / ctrl-c  quit
 
 import { PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
+import { confirmText, settingsKeyAction, upgradeArgs } from './settings.mjs';
 
 const OPEN_PANES = new Set(['review', 'needs', 'landed']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
@@ -136,7 +141,7 @@ export function paneForKey(key) {
 // key that would otherwise move the selection or act on a row nobody can see
 // only reminds the captain how to bring a pane back; a key the board does not
 // bind stays the silent no-op it is everywhere else.
-const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', 'r', '?', 'q', 'ctrl-c']);
+const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', 'r', '.', '?', 'q', 'ctrl-c']);
 const ROW_KEYS = new Set(['enter', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
 
 export function keyAction(model, view, key) {
@@ -149,6 +154,8 @@ export function keyAction(model, view, key) {
       return { type: 'quit' };
     case '?':
       return { type: 'help' };
+    case '.':
+      return { type: 'settings' };
     case 'r':
       return { type: 'refresh' };
     case 'H':
@@ -188,8 +195,68 @@ export function keyAction(model, view, key) {
   }
 }
 
+// The Settings page, open: apply one key's action (lib/settings.mjs decides
+// what the key means) to view.settings and hand the effects to the host:
+// settingsFetch() fetches the release data, settingsUpgrade(running) starts
+// the launcher's upgrade and later calls finishUpgrade, relaunch() exits the
+// board with RELAUNCH_EXIT. Closing the page never touches the board's
+// selection, expanded groups or hidden rows.
+function handleSettingsKey(ctx, key) {
+  const { view } = ctx;
+  const s = view.settings;
+  const action = settingsKeyAction(s, key);
+  switch (action.type) {
+    case 'quit':
+      ctx.quit();
+      return;
+    case 'close':
+      s.pending = null;
+      view.page = 'board';
+      return;
+    case 'help':
+      view.help = true;
+      return;
+    case 'menu':
+      s.menu = action.menu;
+      s.cursor = 0;
+      return;
+    case 'move':
+      s.cursor = action.cursor;
+      return;
+    case 'fetch':
+      ctx.settingsFetch();
+      return;
+    case 'confirm':
+      s.pending = { channel: action.channel, version: action.version };
+      ctx.notice(confirmText(s.pending));
+      return;
+    case 'cancel':
+      s.pending = null;
+      ctx.notice('cancelled; nothing was installed');
+      return;
+    case 'upgrade': {
+      s.pending = null;
+      s.running = { channel: action.channel, version: action.version, args: upgradeArgs(action) };
+      s.output = [];
+      s.result = null;
+      ctx.notice(`running fm-board upgrade ${s.running.args.join(' ')} …`);
+      ctx.settingsUpgrade(s.running);
+      return;
+    }
+    case 'relaunch':
+      ctx.relaunch();
+      return;
+    case 'notice':
+      ctx.notice(action.text, action.bad);
+      return;
+    default:
+      break;
+  }
+}
+
 // ctx: { view, model, rebuild(), notice(text, bad), open(row), focus(row),
-//        viewReport(row), refresh(), persist(), quit() }.
+//        viewReport(row), refresh(), persist(), settingsFetch(),
+//        settingsUpgrade(running), relaunch(), quit() }.
 // rebuild() must replace ctx.model from the current view (the expanded set,
 // the hidden set and the hidden panes change which rows and panes exist);
 // persist() saves view.hidden and view.hiddenPanes.
@@ -198,6 +265,10 @@ export function handleKey(ctx, key) {
   if (view.help) {
     if (key === '?' || key === 'escape' || key === 'q' || key === 'enter') view.help = false;
     if (key === 'ctrl-c') ctx.quit();
+    return;
+  }
+  if (view.page === 'settings') {
+    handleSettingsKey(ctx, key);
     return;
   }
   const clamp = () => {
@@ -212,6 +283,16 @@ export function handleKey(ctx, key) {
       return;
     case 'help':
       view.help = true;
+      return;
+    case 'settings':
+      // Open on the main menu with the cursor at the top; the release data is
+      // fetched on every open (never on the refresh tick), and a result from
+      // an earlier visit stays on the page.
+      view.page = 'settings';
+      view.settings.menu = 'main';
+      view.settings.cursor = 0;
+      view.settings.pending = null;
+      ctx.settingsFetch();
       return;
     case 'refresh':
       ctx.refresh();

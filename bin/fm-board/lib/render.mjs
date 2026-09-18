@@ -4,6 +4,7 @@
 // --render-once mode can print them plain. Nothing here touches a terminal.
 
 import { columns, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights, PANES, TAG_WIDTH_MIN } from './layout.mjs';
+import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, upgradeOffer } from './settings.mjs';
 import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
 const H = '─';
@@ -27,6 +28,8 @@ export const HELP_LINES = [
   '               [2] Ready for review  [3] In flight  [4] Findings  [5] Landed',
   '  0            show every pane (with all five hidden the board lists these keys)',
   '  r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)',
+  '  .            settings page: installed version, latest release, upgrade or a beta',
+  '               (each install asks y first; . or esc brings the board back)',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
   'The board is read-only: it never answers, merges or dispatches. Hidden rows and',
@@ -110,21 +113,27 @@ function titleLine(model, cols, view) {
   return line([seg(padRight(text, cols), view.stale ? 'bad' : 'title')], cols);
 }
 
-const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  ? help  q quit';
-const FOOTER_KEYS_SHORT = ' j/k  tab  enter  l/h  x hide  H  1-5 panes  r  ? help  q quit';
+const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  . settings  ? help  q quit';
+const FOOTER_KEYS_SHORT = ' j/k  tab  enter  l/h  x hide  H  1-5 panes  r  . settings  ? help  q quit';
 const FOOTER_KEYS_MIN = ' ? help';
+const BOARD_FOOTER_HINTS = [FOOTER_KEYS, FOOTER_KEYS_SHORT, FOOTER_KEYS_MIN];
 
 // The key hint and the transient notice share the footer; the notice wins.
-// The full hint needs its own width plus 24 spare columns, the short hint
-// whatever is left beside the notice, and a notice too long for even the
-// minimal hint is truncated after it.
-function footerLine(model, cols, view) {
+// `hints` runs from the full hint to the minimal one: the full hint needs its
+// own width plus 24 spare columns, the next ones whatever is left beside the
+// notice, and a notice too long for even the minimal hint is truncated after
+// it. The Settings page passes its own hints.
+function footerLine(model, cols, view, hints = BOARD_FOOTER_HINTS) {
   const notice = view.notice ? ` ${view.notice} ` : '';
   const fits = (k) => width(k) + width(notice) + (notice ? 2 : 0) <= cols;
-  let keys;
-  if (cols >= width(FOOTER_KEYS) + 24 && fits(FOOTER_KEYS)) keys = FOOTER_KEYS;
-  else if (fits(FOOTER_KEYS_SHORT)) keys = FOOTER_KEYS_SHORT;
-  else keys = FOOTER_KEYS_MIN;
+  let keys = hints[hints.length - 1];
+  for (let i = 0; i < hints.length; i += 1) {
+    const spare = i === 0 ? 24 : 0;
+    if (cols >= width(hints[i]) + spare && fits(hints[i])) {
+      keys = hints[i];
+      break;
+    }
+  }
   const room = Math.max(0, cols - width(keys));
   const shown = width(notice) > room ? truncate(notice, room) : notice;
   const gap = cols - width(keys) - width(shown);
@@ -284,6 +293,126 @@ function renderLanding(model, cols, rows, view) {
   return lines;
 }
 
+// ------------------------------------------------------------ settings page
+// The `.` page replaces the grid between the title line and the footer. Pure
+// like the rest: view.settings (lib/settings.mjs) in, lines out. The identity
+// block, the latest-release line and the menu are laid out from the top and
+// the read-only flags follow; the confirmation line, the upgrade output and
+// the result take what is left, newest lines kept, so the installer's last
+// line and the result are always on screen.
+const SETTINGS_FOOTER = ' j/k move  enter choose  r refetch  esc/. back  ? help';
+const SETTINGS_FOOTER_BETAS = ' j/k move  enter choose  esc back  . close  r refetch  ? help';
+const SETTINGS_FOOTER_SHORT = ' j/k  enter  r  esc/. back  ? help';
+
+function settingsFooterHints(s) {
+  if (s.running) return [' upgrading… keys are ignored until it exits (ctrl-c quits)', ' upgrading…'];
+  if (s.pending) return [' y confirm  esc cancel (any other key cancels too)', ' y confirm  esc cancel'];
+  const base = s.menu === 'betas' ? SETTINGS_FOOTER_BETAS : SETTINGS_FOOTER;
+  return [s.result && s.result.ok ? ` R relaunch ${base}` : base, SETTINGS_FOOTER_SHORT, FOOTER_KEYS_MIN];
+}
+
+function settingsTail(s) {
+  const tail = [];
+  if (s.pending) tail.push({ text: confirmText(s.pending), style: 'notice' });
+  if (s.running) tail.push({ text: `running fm-board upgrade ${s.running.args.join(' ')} … keys are ignored until it exits`, style: 'notice' });
+  for (const o of s.output) tail.push({ text: o, style: 'row' });
+  if (s.result && s.result.ok) tail.push({ text: `restart to use ${s.result.version || 'the installed copy'} · R quits and relaunches the board`, style: 'help' });
+  else if (s.result) {
+    const why = s.result.error ? s.result.error : s.result.signal ? `signal ${s.result.signal}` : `exit ${s.result.code}`;
+    tail.push({ text: `upgrade failed (${why}); the output above says why. A failed download or checksum leaves the current install untouched`, style: 'bad' });
+  }
+  return tail;
+}
+
+function renderSettings(model, cols, rows, view) {
+  const s = view.settings;
+  const L = (segments) => line(segments, cols);
+  const text = (t, style = 'row') => L([seg(` ${t}`, style)]);
+  const install = s.install;
+  const r = s.releases;
+  const height = rows - 2;
+  const tail = settingsTail(s).map((t) => text(t.text, t.style));
+  const head = [];
+  head.push(text(s.menu === 'betas' ? 'Settings · Betas' : 'Settings', 'heading'));
+  head.push(L([]));
+  // Identity: the words `fm-board version` prints, then where this copy lives.
+  if (install.version) head.push(text(describeVersion(install.version)));
+  else head.push(text(`fm-board: version unreadable (${install.error})`, 'bad'));
+  if (install.record) {
+    head.push(text(`installed at ${install.root} (from ${install.record.installed_from || 'unknown'}) · repository ${install.repo}`));
+  } else if (install.git) {
+    head.push(text(`running from a checkout at ${install.root} (no install record); update it with git:`));
+    head.push(text(`  git -C ${install.root} pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)`, 'help'));
+  } else {
+    head.push(text(`running from ${install.root} (no install record, not a git checkout); install a copy with:`));
+    head.push(text(`  curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/bin/install.sh | bash`, 'help'));
+  }
+  if (s.menu === 'main') {
+    let latest;
+    let style = 'row';
+    if (r.state === 'fetching') latest = 'fetching…';
+    else if (r.state === 'idle') latest = r.idleReason || 'not fetched';
+    else if (r.latest) {
+      const offer = upgradeOffer(s);
+      latest = `${r.latest.version} · published ${r.latest.date}${offer.status ? ` · ${offer.status}` : ''}`;
+    } else {
+      latest = upgradeOffer(s).status || r.latestError || 'unknown';
+      style = 'bad';
+    }
+    head.push(L([seg(' latest stable  ', 'dim'), seg(latest, style)]));
+  } else {
+    let about;
+    let style = 'row';
+    if (r.state === 'fetching') about = 'fetching…';
+    else if (r.state === 'idle') about = r.idleReason || 'release data not fetched';
+    else if (r.error) {
+      about = `list unavailable: ${r.error}`;
+      style = 'bad';
+    } else about = `prereleases of ${install.repo}, newest first${install.checkout ? ' (read-only from a checkout)' : ''}`;
+    head.push(text(about, style));
+  }
+  head.push(L([]));
+  // The menu, windowed around the cursor when the betas list is long.
+  const entries = settingsEntries(s);
+  const selectable = entries.filter((e) => e.selectable);
+  const current = selectable[clampCursor(s)] || null;
+  const currentIdx = current ? entries.indexOf(current) : 0;
+  const after = s.menu === 'main' ? s.flags.length + 1 : 0;
+  const room = Math.max(3, height - head.length - after - Math.min(tail.length, 4));
+  let start = 0;
+  let shown = entries;
+  let above = 0;
+  let below = 0;
+  if (entries.length > room) {
+    const window = Math.max(1, room - 2);
+    start = scrollStart(entries.length, window, currentIdx, 0);
+    shown = entries.slice(start, start + window);
+    above = start;
+    below = entries.length - (start + shown.length);
+  }
+  const labelW = Math.min(40, Math.max(1, ...entries.map((e) => width(e.label))));
+  if (above > 0) head.push(text(`  ↑ ${above} more`, 'grey'));
+  for (const e of shown) {
+    const label = fitRaw(e.label, labelW);
+    const detail = e.detail ? `  ${e.detail}` : '';
+    if (e === current) head.push(L([seg(' ▸ ', 'help'), seg(label, 'selected'), seg(detail, 'grey')]));
+    else if (e.selectable) head.push(L([seg('   ', 'row'), seg(label, 'row'), seg(detail, 'grey')]));
+    else head.push(L([seg('   ', 'row'), seg(e.label, e.bad ? 'bad' : 'grey'), seg(detail, 'grey')]));
+  }
+  if (below > 0) head.push(text(`  ↓ ${below} more`, 'grey'));
+  if (s.menu === 'main') {
+    head.push(L([]));
+    const flagW = Math.max(1, ...s.flags.map((f) => width(f.label)));
+    for (const f of s.flags) head.push(L([seg(` ${padRight(f.label, flagW)}  `, 'dim'), seg(f.value, 'row')]));
+  }
+  head.push(L([]));
+  const body = head.slice(0, height);
+  const left = height - body.length;
+  if (left > 0 && tail.length) body.push(...tail.slice(Math.max(0, tail.length - left)));
+  while (body.length < height) body.push(L([]));
+  return [titleLine(model, cols, view), ...body.slice(0, height), footerLine(model, cols, view, settingsFooterHints(s))];
+}
+
 function overlayHelp(lines, cols) {
   const boxW = Math.min(cols - 4, Math.max(...HELP_LINES.map(width)) + 4);
   const boxH = HELP_LINES.length + 2;
@@ -304,12 +433,14 @@ function overlayHelp(lines, cols) {
   return lines;
 }
 
-// view: { pane, row, scroll[], help, notice, noticeBad, stale } (the app's view
-// also carries `expanded`, `hidden`, `hiddenPanes` and `showHidden`, which only
-// buildModel reads)
+// view: { pane, row, scroll[], help, notice, noticeBad, stale, page, settings }
+// (the app's view also carries `expanded`, `hidden`, `hiddenPanes` and
+// `showHidden`, which only buildModel reads). page is 'board' or 'settings';
+// with 'settings' the frame is the Settings page over view.settings.
 // Returns { lines, cols, rows, mode, scroll } where scroll holds the start
 // offsets actually used so the app can keep them for the next frame. mode is
-// 'panes', 'list' (narrow) or 'landing' (every pane hidden: the key page).
+// 'panes', 'list' (narrow), 'landing' (every pane hidden: the key page) or
+// 'settings'.
 export function renderFrame(model, size, view = {}) {
   const cols = Math.max(MIN_COLS, size.cols | 0);
   const rows = Math.max(MIN_ROWS, size.rows | 0);
@@ -322,10 +453,13 @@ export function renderFrame(model, size, view = {}) {
     notice: view.notice || '',
     noticeBad: Boolean(view.noticeBad),
     stale: Boolean(view.stale),
+    page: view.page === 'settings' && view.settings ? 'settings' : 'board',
+    settings: view.settings || null,
   };
-  const mode = allPanesHidden(model) ? 'landing' : layoutMode(cols);
+  const mode = v.page === 'settings' ? 'settings' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
   let lines;
-  if (mode === 'landing') lines = renderLanding(model, cols, rows, v);
+  if (mode === 'settings') lines = renderSettings(model, cols, rows, v);
+  else if (mode === 'landing') lines = renderLanding(model, cols, rows, v);
   else if (mode === 'list') lines = renderList(model, cols, rows, v);
   else lines = renderPanes(model, cols, rows, v);
   if (v.help) lines = overlayHelp(lines, cols);

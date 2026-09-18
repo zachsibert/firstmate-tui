@@ -32,6 +32,13 @@ options:
                          $(herdr plugin config-dir firstmate.board)/view-state.json via
                          the wrapper, else $XDG_CONFIG_HOME/fm-board/view-state.json,
                          else ~/.config/fm-board/view-state.json; never inside FM_HOME)
+  --curl-cmd <argv>      command the Settings page (.) fetches the GitHub releases API
+                         with (default: curl); quoted string, split on whitespace. In
+                         --render-once nothing is fetched without it
+  --install-root <dir>   where the Settings page looks for bin/fm-board/package.json,
+                         install-record and bin/fm-board.sh (default: the directory two
+                         levels above this package: the install prefix, or the checkout;
+                         test mode points it at a fake prefix)
   --render-once          print one frame to stdout and exit (test mode)
   --fixture <json>       with --render-once: render this facts file instead of live reads
   --cols N / --rows N    frame size for --render-once (default: terminal, else 120x40)
@@ -72,6 +79,8 @@ export function parseArgs(argv, env = {}) {
     openerCmd: null,
     viewerCmd: null,
     viewState: null,
+    curlCmd: null,
+    installRoot: null,
     tags: false,
     keys: [],
     expand: [],
@@ -146,6 +155,12 @@ export function parseArgs(argv, env = {}) {
         break;
       case '--view-state':
         opts.viewState = need(a);
+        break;
+      case '--curl-cmd':
+        opts.curlCmd = need(a).split(/\s+/).filter(Boolean);
+        break;
+      case '--install-root':
+        opts.installRoot = need(a);
         break;
       case '--tags':
         opts.tags = true;
