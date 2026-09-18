@@ -5,18 +5,23 @@
 # (.github/workflows/release.yml runs that script and nothing else to build
 # it), so this suite builds one into a scratch directory, installs it with
 # `bin/install.sh --from-file` into a scratch prefix and bin dir, and proves
-# the installed `fm-board` command renders a frame from a fixture. It then
-# builds a per-commit beta with `package.sh --commit` and swaps an install
-# between the stable build and the beta in both directions through `fm-board
-# upgrade`, with tests/fake-curl.sh standing in for GitHub: it serves the
-# releases API and the download URLs from a local directory, so the real
-# channel logic in install.sh (--stable, --pre, --version) runs offline.
-# Nothing reaches GitHub: no tag, no release, no download. Each check's
-# comment names what would make it fail.
+# the installed `firstmate-tui` command (and `fm-board`, the alias beside it)
+# renders a frame from a fixture. It then builds a per-commit beta with
+# `package.sh --commit` and swaps an install between the stable build and the
+# beta in both directions through `firstmate-tui upgrade`, with
+# tests/fake-curl.sh standing in for GitHub: it serves the releases API and
+# the download URLs from a local directory, so the real channel logic in
+# install.sh (--stable, --pre, --version) runs offline. Last it walks the
+# upgrade from a 0.1.0 install (built from the v0.1.0 tag) to the current
+# tarball through the 0.1.0 installer, which is why the asset name and the
+# paths inside the tarball are frozen (AGENTS.md). Nothing reaches GitHub: no
+# tag, no release, no download. Each check's comment names what would make it
+# fail.
 #
 # Needs node and npm (scripts/package.sh runs `npm ci --omit=dev` to vendor
 # neo-blessed), plus tar and shasum or sha256sum, which the installer needs
-# too. No firstmate home, herdr server or TTY.
+# too, and the v0.1.0 tag in the clone (git fetch --tags origin). No firstmate
+# home, herdr server or TTY.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -34,6 +39,10 @@ trap 'rm -rf -- "${SCRATCH:?}"' EXIT
 VERSION=$(node -p 'require(process.argv[1]).version' "$ROOT/bin/fm-board/package.json")
 TAG="v$VERSION"
 TAG_RE=${TAG//./\\.}
+# The tarball is fm-board-<tag>.tar.gz and unpacks to firstmate-tui-<tag>/: the
+# asset name is frozen for 0.1.0 upgrades, the directory inside carries the
+# new name because every installer strips it.
+DIRNAME="firstmate-tui-$TAG"
 
 fails=0
 checks=0
@@ -74,6 +83,9 @@ DIST="$SCRATCH/dist"
 if pkg_out=$("$PACKAGE" "$TAG" "$DIST" 2>"$SCRATCH/package.err"); then pass; else fail "package.sh $TAG exited non-zero: $(cat "$SCRATCH/package.err")"; fi
 TARBALL="$DIST/fm-board-$TAG.tar.gz"
 CHECKSUM="$TARBALL.sha256"
+# The asset keeps the fm-board- name (falsify: rename it in package.sh; the
+# 0.1.0 walk at the end would then fail to download it).
+assert_file "$TARBALL" "the asset is named fm-board-$TAG.tar.gz"
 # stdout is only key=value lines because the workflow appends it to $GITHUB_OUTPUT (falsify: let npm ci write to stdout)
 if printf '%s\n' "$pkg_out" | grep -Evq '^[a-z]+=' ; then fail "package.sh stdout has a line that is not key=value: $pkg_out"; else pass; fi
 assert_contains "$pkg_out" "tag=$TAG" "package.sh reports the tag"
@@ -86,19 +98,19 @@ assert_file "$CHECKSUM" "the checksum file exists"
 
 listing=$(tar -tzf "$TARBALL")
 tops=$(printf '%s\n' "$listing" | sed 's#/.*##' | sort -u)
-if [ "$tops" = "fm-board-$TAG" ]; then pass; else fail "the tarball unpacks to one directory fm-board-$TAG, got: $(printf '%s' "$tops" | tr '\n' ' ') (falsify: tar the staging contents without the top directory)"; fi
-assert_contains "$listing" "fm-board-$TAG/bin/fm-board.sh" "the wrapper ships"
-assert_contains "$listing" "fm-board-$TAG/bin/install.sh" "the installer ships beside the wrapper, so fm-board upgrade runs the one that matches its version (falsify: drop the cp in package.sh)"
+if [ "$tops" = "$DIRNAME" ]; then pass; else fail "the tarball unpacks to one directory $DIRNAME, got: $(printf '%s' "$tops" | tr '\n' ' ') (falsify: tar the staging contents without the top directory, or name it after the asset)"; fi
+assert_contains "$listing" "$DIRNAME/bin/fm-board.sh" "the wrapper ships under its frozen path (falsify: rename bin/fm-board.sh; the 0.1.0 installer looks for it)"
+assert_contains "$listing" "$DIRNAME/bin/install.sh" "the installer ships beside the wrapper, so firstmate-tui upgrade runs the one that matches its version (falsify: drop the cp in package.sh)"
 if [ "$(printf '%s\n' "$listing" | grep -c 'install.sh')" -eq 1 ]; then pass; else fail "install.sh ships once, at bin/install.sh: $(printf '%s\n' "$listing" | grep 'install.sh' | tr '\n' ' ')"; fi
-assert_contains "$listing" "fm-board-$TAG/bin/fm-board/index.mjs" "the entry point ships"
-assert_contains "$listing" "fm-board-$TAG/bin/fm-board/package.json" "package.json ships (the installer reads the version from it)"
-assert_contains "$listing" "fm-board-$TAG/bin/fm-board/package-lock.json" "the lockfile ships"
-assert_contains "$listing" "fm-board-$TAG/bin/fm-board/herdr-plugin.toml" "the herdr plugin manifest ships"
+assert_contains "$listing" "$DIRNAME/bin/fm-board/index.mjs" "the entry point ships"
+assert_contains "$listing" "$DIRNAME/bin/fm-board/package.json" "package.json ships (the installer reads the version from it)"
+assert_contains "$listing" "$DIRNAME/bin/fm-board/package-lock.json" "the lockfile ships"
+assert_contains "$listing" "$DIRNAME/bin/fm-board/herdr-plugin.toml" "the herdr plugin manifest ships"
 for f in "$ROOT"/bin/fm-board/lib/*.mjs; do
-  assert_contains "$listing" "fm-board-$TAG/bin/fm-board/lib/$(basename "$f")" "every lib module ships (falsify: copy lib files by name in package.sh and miss one)"
+  assert_contains "$listing" "$DIRNAME/bin/fm-board/lib/$(basename "$f")" "every lib module ships (falsify: copy lib files by name in package.sh and miss one)"
 done
-assert_contains "$listing" "fm-board-$TAG/bin/fm-board/node_modules/neo-blessed/package.json" "production node_modules are vendored (falsify: drop npm ci from package.sh)"
-assert_contains "$listing" "fm-board-$TAG/README.md" "the README ships"
+assert_contains "$listing" "$DIRNAME/bin/fm-board/node_modules/neo-blessed/package.json" "production node_modules are vendored (falsify: drop npm ci from package.sh)"
+assert_contains "$listing" "$DIRNAME/README.md" "the README ships"
 for unwanted in "/tests/" "/docs/" "/scripts/" "/.git" ".gitignore" "/.claude/" "install-record"; do
   assert_not_contains "$listing" "$unwanted" "the tarball carries no $unwanted (falsify: tar the repository root)"
 done
@@ -133,8 +145,23 @@ cp -R "$ROOT/bin/fm-board" "$PRE_REPO/bin/fm-board"
 rm -rf -- "${PRE_REPO:?}/bin/fm-board/node_modules"
 cp "$PACKAGE" "$PRE_REPO/scripts/package.sh"
 cp "$ROOT/README.md" "$PRE_REPO/README.md"
-sed -i.bak "s/\"version\": \"$VERSION\"/\"version\": \"$PRE_VERSION\"/" "$PRE_REPO/bin/fm-board/package.json" "$PRE_REPO/bin/fm-board/package-lock.json"
-rm -f -- "${PRE_REPO:?}/bin/fm-board/"*.bak
+# Only the root version fields change: a dependency may share the package's
+# version number (neo-blessed is 0.2.0), and a blanket substitution would put
+# the lockfile out of step with package.json and fail npm ci.
+stamp_version() { # <package dir> <version>: package.json and the lockfile's root entries
+  node -e '
+    const fs = require("fs");
+    const [dir, version] = process.argv.slice(1);
+    for (const file of ["package.json", "package-lock.json"]) {
+      const path = dir + "/" + file;
+      const json = JSON.parse(fs.readFileSync(path, "utf8"));
+      json.version = version;
+      if (json.packages && json.packages[""]) json.packages[""].version = version;
+      fs.writeFileSync(path, JSON.stringify(json, null, 2) + "\n");
+    }
+  ' "$1" "$2"
+}
+stamp_version "$PRE_REPO/bin/fm-board" "$PRE_VERSION"
 if pre_out=$("$PRE_REPO/scripts/package.sh" "$PRE_TAG" "$SCRATCH/dist-pre" 2>"$SCRATCH/pre.err"); then pass; else fail "package.sh $PRE_TAG exited non-zero: $(cat "$SCRATCH/pre.err")"; fi
 assert_contains "$pre_out" "prerelease=true" "a version with a -suffix is flagged as a prerelease for the workflow (falsify: drop the *-* case in package.sh)"
 assert_contains "$pre_out" "version=$PRE_VERSION" "the prerelease version is reported"
@@ -159,13 +186,17 @@ assert_contains "$beta_out" "prerelease=true" "every per-commit build is a prere
 assert_contains "$beta_out" "tarball=$BETA_TARBALL" "the beta tarball carries the beta tag in its name"
 assert_file "$BETA_TARBALL" "the beta tarball exists"
 assert_file "$BETA_CHECKSUM" "the beta checksum file exists"
-staged_pkg=$(tar -xzOf "$BETA_TARBALL" "fm-board-$BETA_TAG/bin/fm-board/package.json")
+staged_pkg=$(tar -xzOf "$BETA_TARBALL" "firstmate-tui-$BETA_TAG/bin/fm-board/package.json")
 assert_contains "$staged_pkg" "\"version\": \"$BETA_VERSION\"" "the staged package.json carries the full beta version (falsify: skip the stamp)"
-staged_lock=$(tar -xzOf "$BETA_TARBALL" "fm-board-$BETA_TAG/bin/fm-board/package-lock.json")
+staged_lock=$(tar -xzOf "$BETA_TARBALL" "firstmate-tui-$BETA_TAG/bin/fm-board/package-lock.json")
 assert_contains "$staged_lock" "\"version\": \"$BETA_VERSION\"" "the staged lockfile carries the beta version too"
-assert_not_contains "$staged_lock" "\"version\": \"$VERSION\"" "no root version field in the staged lockfile still says $VERSION"
+# Both root fields of the lockfile carry the beta version (a dependency's own
+# "version" line is not the package's, so the fields are read, not grepped).
+# shellcheck disable=SC2016 # the ${...} are JavaScript template fields, not shell expansions
+lock_roots=$(printf '%s' "$staged_lock" | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)); process.stdin.on("end", () => { const j = JSON.parse(s); process.stdout.write(`${j.version} ${j.packages[""].version}`); });')
+assert_equal "$lock_roots" "$BETA_VERSION $BETA_VERSION" "the staged lockfile's root version and packages[\"\"].version both say $BETA_VERSION (falsify: stamp only one of them)"
 assert_contains "$(cat "$ROOT/bin/fm-board/package.json")" "\"version\": \"$VERSION\"" "the source package.json is untouched (falsify: stamp the source tree instead of the staged copy)"
-assert_contains "$(tar -tzf "$BETA_TARBALL")" "fm-board-$BETA_TAG/bin/fm-board/node_modules/neo-blessed/package.json" "the beta tarball is vendored like a release"
+assert_contains "$(tar -tzf "$BETA_TARBALL")" "firstmate-tui-$BETA_TAG/bin/fm-board/node_modules/neo-blessed/package.json" "the beta tarball is vendored like a release"
 # A seven-character sha is enough; a non-sha is refused before anything is built.
 if out=$("$PACKAGE" --commit "$SHA7" "$SCRATCH/dist-short" 2>/dev/null); then pass; else fail "package.sh --commit with a 7-char sha should work"; fi
 assert_contains "$out" "tag=$BETA_TAG" "a short sha yields the same tag as the full one"
@@ -182,9 +213,10 @@ PREFIX="$SCRATCH/prefix"
 BIN="$SCRATCH/bin"
 if inst_out=$("$INSTALL" --from-file "$TARBALL" --prefix "$PREFIX" --bin-dir "$BIN" 2>&1); then pass; else fail "install.sh --from-file exited non-zero: $inst_out"; fi
 assert_contains "$inst_out" "checksum verified" "the .sha256 beside a local tarball is verified (falsify: skip verification under --from-file)"
-assert_contains "$inst_out" "fm-board $VERSION installed" "the report names the installed version (falsify: stop reading package.json in the installer)"
+assert_contains "$inst_out" "firstmate-tui $VERSION installed" "the report names the installed version under the new name (falsify: stop reading package.json in the installer)"
 assert_contains "$inst_out" "files:   $PREFIX" "the report names the prefix"
-assert_contains "$inst_out" "command: $BIN/fm-board" "the report names the command"
+assert_contains "$inst_out" "command: $BIN/firstmate-tui" "the report names the firstmate-tui command"
+assert_contains "$inst_out" "$BIN/fm-board" "the report names the fm-board alias too"
 assert_contains "$inst_out" "$BIN is not on your PATH" "a bin dir that is not on PATH gets the one-line note (falsify: drop the PATH check)"
 assert_contains "$inst_out" "next: export FM_HOME" "a first install gets the next-step line"
 assert_file "$PREFIX/bin/fm-board.sh" "the wrapper is installed"
@@ -194,11 +226,17 @@ assert_exec "$PREFIX/bin/install.sh" "the installed installer is executable"
 assert_file "$PREFIX/bin/fm-board/index.mjs" "the entry point is installed"
 assert_file "$PREFIX/bin/fm-board/node_modules/neo-blessed/package.json" "the vendored dependency is installed"
 assert_file "$PREFIX/README.md" "the README is installed"
-assert_exec "$BIN/fm-board" "the fm-board command is executable"
-assert_contains "$(cat "$BIN/fm-board")" "$PREFIX/bin/fm-board.sh" "the command runs the installed wrapper, not the checkout (falsify: point the shim at the checkout)"
+assert_exec "$BIN/firstmate-tui" "the firstmate-tui command is executable"
+assert_contains "$(cat "$BIN/firstmate-tui")" "$PREFIX/bin/fm-board.sh" "the command runs the installed wrapper, not the checkout (falsify: point the shim at the checkout)"
+# The former name is written beside it for one release (falsify: drop the
+# second write_command call in install.sh).
+assert_exec "$BIN/fm-board" "the fm-board alias is executable"
+assert_contains "$(cat "$BIN/fm-board")" "$PREFIX/bin/fm-board.sh" "the alias runs the same installed wrapper"
+assert_contains "$(cat "$BIN/fm-board")" "former name" "the alias says it is the former name"
+assert_not_contains "$(cat "$BIN/firstmate-tui")" "former name" "the firstmate-tui command is not marked as an alias"
 assert_no_leftovers "$SCRATCH" "a successful install leaves no staging directory"
-# The install record names the prefix, bin dir and repository for fm-board
-# upgrade (falsify: write it after the swap, or leave a field out).
+# The install record names the prefix, bin dir and repository for
+# firstmate-tui upgrade (falsify: write it after the swap, or leave a field out).
 assert_file "$PREFIX/install-record" "the install record is written under the prefix"
 record=$(cat "$PREFIX/install-record")
 assert_contains "$record" "prefix=$PREFIX" "the record names the prefix"
@@ -210,10 +248,29 @@ assert_contains "$record" "installed_from=file $TARBALL" "the record names the t
 # The installed command renders a frame from a fixture, from an unrelated
 # working directory (falsify: leave lib/ out of the tarball, or make the shim
 # a symlink so fm-board.sh resolves ROOT to the bin dir).
-if frame=$(cd / && "$BIN/fm-board" --render-once --fixture "$FIX/populated.json" --no-herdr 2>&1); then pass; else fail "installed fm-board --render-once exited non-zero: $frame"; fi
+if frame=$(cd / && "$BIN/firstmate-tui" --render-once --fixture "$FIX/populated.json" --no-herdr 2>&1); then pass; else fail "installed firstmate-tui --render-once exited non-zero: $frame"; fi
 assert_contains "$frame" "Needs you (4)" "the installed command prints the Needs you pane"
 assert_contains "$frame" "In flight" "the installed command prints the In flight pane"
 assert_contains "$frame" "blocked: gh auth expired" "the installed command prints fixture rows"
+if alias_frame=$(cd / && "$BIN/fm-board" --render-once --fixture "$FIX/populated.json" --no-herdr 2>&1); then pass; else fail "installed fm-board alias --render-once exited non-zero: $alias_frame"; fi
+assert_equal "$alias_frame" "$frame" "the fm-board alias prints the same frame as firstmate-tui"
+# The usage page from the installed command: exit 0 for --help and help, the
+# page names this install, an unknown subcommand prints the page to stderr and
+# exits 2 with nothing on stdout (falsify: drop the help case or the catch-all
+# in the launcher's subcommand case, or let usage() print to stdout there).
+if help_out=$(cd / && "$BIN/firstmate-tui" --help 2>/dev/null); then pass; else fail "installed firstmate-tui --help should exit 0"; fi
+assert_contains "$help_out" "this install: $PREFIX" "--help says where this install lives (falsify: print the checkout line regardless of the record)"
+assert_contains "$help_out" "firstmate-tui upgrade" "--help names the upgrade subcommand"
+assert_contains "$help_out" "Press ? inside the" "--help points at ? for the keys"
+if help_sub=$(cd / && "$BIN/firstmate-tui" help 2>/dev/null); then pass; else fail "installed firstmate-tui help should exit 0"; fi
+assert_equal "$help_sub" "$help_out" "help prints the same page as --help"
+if [ "$(cd / && "$BIN/firstmate-tui" -h 2>/dev/null)" = "$help_out" ]; then pass; else fail "-h prints the same page as --help"; fi
+bogus_out=$(cd / && "$BIN/firstmate-tui" bogus 2>"$SCRATCH/bogus.err")
+bogus_status=$?
+assert_equal "$bogus_status" 2 "an unknown subcommand exits 2"
+assert_equal "$bogus_out" "" "an unknown subcommand prints nothing on stdout"
+assert_contains "$(cat "$SCRATCH/bogus.err")" "unknown subcommand bogus" "the unknown subcommand is named on stderr"
+assert_contains "$(cat "$SCRATCH/bogus.err")" "usage: firstmate-tui [open] [flags]" "the usage page follows on stderr"
 # The vendored neo-blessed loads from the installed tree (a one-shot render
 # never imports it, so this is the check that the vendoring is complete;
 # falsify: delete node_modules/neo-blessed/lib from the tarball).
@@ -221,9 +278,10 @@ loaded=$(cd "$PREFIX/bin/fm-board" && node --input-type=module -e "const b = (aw
 if [ "$loaded" = function ]; then pass; else fail "neo-blessed does not load from the installed tree: $loaded"; fi
 
 # The command runs the installed copy: a marker written into the installed
-# wrapper's usage text shows through the command (falsify: exec the checkout).
-sed -i.bak '2s/^#/# INSTALLED-COPY-MARKER/' "$PREFIX/bin/fm-board.sh" && rm -f -- "${PREFIX:?}/bin/fm-board.sh.bak"
-assert_contains "$("$BIN/fm-board" --help 2>&1)" "INSTALLED-COPY-MARKER" "fm-board --help comes from the installed wrapper"
+# wrapper's usage page shows through the command (falsify: exec the checkout).
+sed -i.bak 's/^firstmate-tui: a live, read-only/INSTALLED-COPY-MARKER firstmate-tui: a live, read-only/' "$PREFIX/bin/fm-board.sh" && rm -f -- "${PREFIX:?}/bin/fm-board.sh.bak"
+grep -Fq INSTALLED-COPY-MARKER "$PREFIX/bin/fm-board.sh" || fail "test setup: the marker did not land in the installed wrapper's usage page"
+assert_contains "$("$BIN/firstmate-tui" --help 2>&1)" "INSTALLED-COPY-MARKER" "firstmate-tui --help comes from the installed wrapper"
 
 # Re-running upgrades in place: the old tree goes as a whole, the report names
 # the replaced version, and the command still works.
@@ -232,8 +290,8 @@ if up_out=$("$INSTALL" --from-file "$TARBALL" --prefix "$PREFIX" --bin-dir "$BIN
 assert_contains "$up_out" "installed (replaced $VERSION)" "a second run reports the version it replaced (falsify: read the old version after the move)"
 assert_not_contains "$up_out" "next: export FM_HOME" "an upgrade does not repeat the first-run line"
 assert_absent "$PREFIX/stale-file" "the previous install is replaced as a whole, not overlaid (falsify: extract over the existing prefix)"
-assert_not_contains "$("$BIN/fm-board" --help 2>&1)" "INSTALLED-COPY-MARKER" "the wrapper is the fresh copy after the upgrade"
-if frame=$(cd / && "$BIN/fm-board" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "installed fm-board after upgrade exited non-zero: $frame"; fi
+assert_not_contains "$("$BIN/firstmate-tui" --help 2>&1)" "INSTALLED-COPY-MARKER" "the wrapper is the fresh copy after the upgrade"
+if frame=$(cd / && "$BIN/firstmate-tui" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "installed firstmate-tui after upgrade exited non-zero: $frame"; fi
 assert_contains "$frame" "Needs you (0)" "the upgraded command renders"
 assert_no_leftovers "$SCRATCH" "an upgrade leaves no staging or previous directory"
 
@@ -273,7 +331,7 @@ assert_file "$SCRATCH/prefix-nosum/bin/fm-board.sh" "the install without a check
 mkdir -p "$SCRATCH/other"
 echo keep > "$SCRATCH/other/keep.txt"
 if out=$("$INSTALL" --from-file "$TARBALL" --prefix "$SCRATCH/other" --bin-dir "$BIN" 2>&1); then fail "a prefix holding unrelated files should be refused"; else pass; fi
-assert_contains "$out" "not an fm-board install" "the refusal says why"
+assert_contains "$out" "not a firstmate-tui install" "the refusal says why"
 assert_file "$SCRATCH/other/keep.txt" "the unrelated prefix is left alone"
 
 # Defaults: ~/.local/share/fm-board and ~/.local/bin under HOME, XDG_DATA_HOME
@@ -282,15 +340,16 @@ FAKE_HOME="$SCRATCH/home"
 mkdir -p "$FAKE_HOME"
 if out=$(cd "$SCRATCH" && env -u XDG_DATA_HOME HOME="$FAKE_HOME" "$INSTALL" --from-file "$TARBALL" 2>&1); then pass; else fail "install with default paths exited non-zero: $out"; fi
 assert_file "$FAKE_HOME/.local/share/fm-board/bin/fm-board.sh" "the default prefix is ~/.local/share/fm-board"
-assert_file "$FAKE_HOME/.local/bin/fm-board" "the default bin dir is ~/.local/bin"
-others=$(find "$FAKE_HOME" -type f ! -path "$FAKE_HOME/.local/share/fm-board/*" ! -path "$FAKE_HOME/.local/bin/fm-board")
+assert_file "$FAKE_HOME/.local/bin/firstmate-tui" "the default bin dir is ~/.local/bin"
+assert_file "$FAKE_HOME/.local/bin/fm-board" "the alias lands in the same bin dir"
+others=$(find "$FAKE_HOME" -type f ! -path "$FAKE_HOME/.local/share/fm-board/*" ! -path "$FAKE_HOME/.local/bin/firstmate-tui" ! -path "$FAKE_HOME/.local/bin/fm-board")
 if [ -z "$others" ]; then pass; else fail "the installer wrote outside the prefix and the bin dir: $others"; fi
 if out=$(env XDG_DATA_HOME="$SCRATCH/xdg" HOME="$FAKE_HOME" "$INSTALL" --from-file "$TARBALL" --bin-dir "$SCRATCH/bin-xdg" 2>&1); then pass; else fail "install with XDG_DATA_HOME exited non-zero: $out"; fi
 assert_file "$SCRATCH/xdg/fm-board/bin/fm-board.sh" "XDG_DATA_HOME moves the default prefix"
 # Relative --prefix, --bin-dir and --from-file resolve against the working directory.
 if out=$(cd "$SCRATCH" && "$INSTALL" --from-file "dist/fm-board-$TAG.tar.gz" --prefix rel-prefix --bin-dir rel-bin 2>&1); then pass; else fail "install with relative paths exited non-zero: $out"; fi
 assert_file "$SCRATCH/rel-prefix/bin/fm-board.sh" "a relative --prefix lands under the working directory"
-assert_contains "$(cat "$SCRATCH/rel-bin/fm-board")" "$SCRATCH/rel-prefix/bin/fm-board.sh" "the shim carries the absolute prefix even when --prefix was relative"
+assert_contains "$(cat "$SCRATCH/rel-bin/firstmate-tui")" "$SCRATCH/rel-prefix/bin/fm-board.sh" "the shim carries the absolute prefix even when --prefix was relative"
 
 # `curl | bash` shape: the script runs from stdin, with arguments after `-s --`,
 # and never reads BASH_SOURCE (falsify: derive usage from BASH_SOURCE, or move
@@ -322,8 +381,8 @@ for flag in --stable --version --pre --prefix --bin-dir --from-file --repo; do
 done
 
 # --------------------------------------------------- version and upgrade
-# `fm-board version` reports the version and its kind; `fm-board upgrade`
-# swaps an install between the stable build and a hash beta in both directions
+# `firstmate-tui version` reports the version and its kind; `firstmate-tui
+# upgrade` swaps an install between the stable build and a hash beta in both directions
 # by running the installed bin/install.sh against the install record. GitHub
 # is stood in for by tests/fake-curl.sh first on PATH: it serves
 # api/latest.json (the latest release), api/newest.json (the newest release,
@@ -349,7 +408,7 @@ offline() {
 SWAP="$SCRATCH/swap"
 SWAP_PREFIX="$SWAP/prefix"
 SWAP_BIN="$SWAP/bin"
-FM="$SWAP_BIN/fm-board"
+FM="$SWAP_BIN/firstmate-tui"
 # A view-state file where the board keeps it (outside the prefix, see
 # bin/fm-board.sh) must come through every swap byte for byte, and the wrapper
 # must never derive its default view-state path from its own location.
@@ -363,7 +422,7 @@ assert_not_contains "$(grep -F 'view-state' "$BOARD")" "\$ROOT" "the wrapper nev
 # explains that git updates a checkout and exits non-zero without running the
 # installer (falsify: fall through to install.sh with default paths).
 if out=$("$BOARD" version 2>&1); then pass; else fail "fm-board.sh version from a checkout should exit 0: $out"; fi
-assert_contains "$out" "fm-board $VERSION (stable release)" "version from the checkout reports the source version as stable"
+assert_contains "$out" "firstmate-tui $VERSION (stable release)" "version from the checkout reports the source version as stable, under the new name"
 assert_contains "$out" "not an installed copy" "version from the checkout says it is not an install"
 assert_equal "$("$BOARD" --version 2>&1)" "$out" "--version is the same as the version command"
 assert_equal "$("$BOARD" -V 2>&1)" "$out" "-V is the same as the version command"
@@ -389,10 +448,11 @@ assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "the default channel ask
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/fm-board-$TAG.tar.gz" "the stable tarball is downloaded from the release"
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/fm-board-$TAG.tar.gz.sha256" "its checksum is downloaded too"
 assert_contains "$out" "checksum verified" "the download is verified"
-assert_contains "$out" "fm-board $VERSION installed" "the stable version is installed"
+assert_contains "$out" "firstmate-tui $VERSION installed" "the stable version is installed"
 assert_contains "$(cat "$SWAP_PREFIX/install-record")" "installed_from=release $TAG" "the record names the release tag"
-if out=$("$FM" version 2>&1); then pass; else fail "installed fm-board version exited non-zero: $out"; fi
-assert_contains "$out" "fm-board $VERSION (stable release)" "version reports the stable release (falsify: call every version a beta)"
+if out=$("$FM" version 2>&1); then pass; else fail "installed firstmate-tui version exited non-zero: $out"; fi
+assert_contains "$out" "firstmate-tui $VERSION (stable release)" "version reports the stable release (falsify: call every version a beta)"
+assert_equal "$("$SWAP_BIN/fm-board" version 2>&1)" "$out" "the fm-board alias answers version the same way"
 assert_contains "$out" "installed at $SWAP_PREFIX" "version names the install prefix"
 assert_contains "$out" "from release $TAG" "version names the release it came from"
 assert_not_contains "$out" "beta" "a stable install is not called a beta"
@@ -405,15 +465,15 @@ grep -Fq INSTALLED-INSTALLER-MARKER "$SWAP_PREFIX/bin/install.sh" || fail "test 
 
 # 2. Stable to beta with --pre: the newest release through the API, the beta
 # tarball verified, the swap reported, and version reports the beta.
-if out=$(cd / && offline "$FM" upgrade --pre 2>&1); then pass; else fail "fm-board upgrade --pre exited non-zero: $out"; fi
+if out=$(cd / && offline "$FM" upgrade --pre 2>&1); then pass; else fail "firstmate-tui upgrade --pre exited non-zero: $out"; fi
 assert_contains "$out" "INSTALLED-INSTALLER-MARKER" "upgrade runs the install.sh that shipped with the install"
 assert_contains "$(cat "$CURL_LOG")" "/releases?per_page=1" "--pre asks for the newest release, prereleases included (falsify: reuse /latest)"
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/fm-board-$BETA_TAG.tar.gz" "the beta tarball is downloaded"
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/fm-board-$BETA_TAG.tar.gz.sha256" "the beta checksum is downloaded"
 assert_contains "$out" "checksum verified" "the beta download is verified before the swap"
-assert_contains "$out" "fm-board $BETA_VERSION installed (replaced $VERSION)" "the swap to the beta is reported with both versions"
-if out=$("$FM" version 2>&1); then pass; else fail "fm-board version after --pre exited non-zero: $out"; fi
-assert_contains "$out" "fm-board $BETA_VERSION (beta: $VERSION at commit $SHA7)" "version reports the beta with its base version and commit (falsify: drop the sha pattern)"
+assert_contains "$out" "firstmate-tui $BETA_VERSION installed (replaced $VERSION)" "the swap to the beta is reported with both versions"
+if out=$("$FM" version 2>&1); then pass; else fail "firstmate-tui version after --pre exited non-zero: $out"; fi
+assert_contains "$out" "firstmate-tui $BETA_VERSION (beta: $VERSION at commit $SHA7)" "version reports the beta with its base version and commit (falsify: drop the sha pattern)"
 assert_contains "$out" "from release $BETA_TAG" "version names the beta release it came from"
 assert_contains "$(cat "$SWAP_PREFIX/install-record")" "prefix=$SWAP_PREFIX" "the beta's record still names the same prefix"
 assert_contains "$(cat "$SWAP_PREFIX/install-record")" "bin_dir=$SWAP_BIN" "the beta's record still names the same bin dir"
@@ -424,30 +484,30 @@ if [ -z "$(find "$SWAP_PREFIX" -name 'view-state*' 2>/dev/null)" ]; then pass; e
 
 # 3. Beta back to stable with --stable: a lower version by sort order, and it
 # installs like any other (falsify: refuse a downgrade in install.sh).
-if out=$(cd / && offline "$FM" upgrade --stable 2>&1); then pass; else fail "fm-board upgrade --stable from a beta exited non-zero: $out"; fi
+if out=$(cd / && offline "$FM" upgrade --stable 2>&1); then pass; else fail "firstmate-tui upgrade --stable from a beta exited non-zero: $out"; fi
 assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "--stable asks for the latest release, never a prerelease"
-assert_contains "$out" "fm-board $VERSION installed (replaced $BETA_VERSION)" "the swap back to stable is reported"
-assert_contains "$("$FM" version 2>&1)" "fm-board $VERSION (stable release)" "version reports stable again after --stable"
+assert_contains "$out" "firstmate-tui $VERSION installed (replaced $BETA_VERSION)" "the swap back to stable is reported"
+assert_contains "$("$FM" version 2>&1)" "firstmate-tui $VERSION (stable release)" "version reports stable again after --stable"
 assert_equal "$(file_sha "$VIEW_STATE")" "$VIEW_STATE_SHA" "view state survives the swap back to stable"
 
 # 4. An exact beta by version, without the v: --version adds it (falsify: pass
 # the version to the download URL as typed).
-if out=$(cd / && offline "$FM" upgrade --version "$BETA_VERSION" 2>&1); then pass; else fail "fm-board upgrade --version $BETA_VERSION exited non-zero: $out"; fi
+if out=$(cd / && offline "$FM" upgrade --version "$BETA_VERSION" 2>&1); then pass; else fail "firstmate-tui upgrade --version $BETA_VERSION exited non-zero: $out"; fi
 assert_not_contains "$(cat "$CURL_LOG")" "api.github.com" "--version needs no API call"
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/fm-board-$BETA_TAG.tar.gz" "--version without the v downloads the v-tagged asset"
-assert_contains "$out" "fm-board $BETA_VERSION installed (replaced $VERSION)" "the exact beta replaces stable"
+assert_contains "$out" "firstmate-tui $BETA_VERSION installed (replaced $VERSION)" "the exact beta replaces stable"
 assert_contains "$("$FM" version 2>&1)" "(beta: $VERSION at commit $SHA7)" "version reports the exact beta"
 
-# 5. A plain `fm-board upgrade` from a beta lands on the latest stable release.
-if out=$(cd / && offline "$FM" upgrade 2>&1); then pass; else fail "plain fm-board upgrade exited non-zero: $out"; fi
+# 5. A plain `firstmate-tui upgrade` from a beta lands on the latest stable release.
+if out=$(cd / && offline "$FM" upgrade 2>&1); then pass; else fail "plain firstmate-tui upgrade exited non-zero: $out"; fi
 assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "a plain upgrade is the stable channel (falsify: default to --pre)"
 assert_contains "$out" "installed (replaced $BETA_VERSION)" "a plain upgrade from a beta swaps to stable"
 assert_contains "$("$FM" version 2>&1)" "(stable release)" "version reports stable after a plain upgrade"
 
 # 6. An exact version with the v is accepted as typed.
-if out=$(cd / && offline "$FM" upgrade --version "$BETA_TAG" 2>&1); then pass; else fail "fm-board upgrade --version $BETA_TAG exited non-zero: $out"; fi
+if out=$(cd / && offline "$FM" upgrade --version "$BETA_TAG" 2>&1); then pass; else fail "firstmate-tui upgrade --version $BETA_TAG exited non-zero: $out"; fi
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/" "--version with the v downloads that tag"
-assert_contains "$("$FM" version 2>&1)" "fm-board $BETA_VERSION (beta" "version reports the beta after --version v..."
+assert_contains "$("$FM" version 2>&1)" "firstmate-tui $BETA_VERSION (beta" "version reports the beta after --version v..."
 
 # 7. A version that has no release fails before the swap and leaves the
 # install alone (falsify: swap in whatever was staged).
@@ -455,7 +515,7 @@ touch "$SWAP_PREFIX/keep-me"
 if out=$(cd / && offline "$FM" upgrade --version 0.9.9-abcdef0 2>&1); then fail "upgrade to a version with no release should exit non-zero"; else pass; fi
 assert_contains "$out" "download failed" "the missing release is reported as a failed download"
 assert_file "$SWAP_PREFIX/keep-me" "a failed upgrade leaves the current install in place"
-assert_contains "$("$FM" version 2>&1)" "fm-board $BETA_VERSION" "the version is unchanged after a failed upgrade"
+assert_contains "$("$FM" version 2>&1)" "firstmate-tui $BETA_VERSION" "the version is unchanged after a failed upgrade"
 assert_no_leftovers "$SWAP" "a failed upgrade leaves no staging directory"
 rm -f -- "${SWAP_PREFIX:?}/keep-me"
 
@@ -464,14 +524,14 @@ rm -f -- "${SWAP_PREFIX:?}/keep-me"
 if out=$(cd / && offline "$FM" upgrade --stable --pre 2>&1); then fail "upgrade --stable --pre should exit non-zero"; else pass; fi
 assert_contains "$out" "exclude each other" "two channel flags are refused with the installer's message"
 if [ -s "$CURL_LOG" ]; then fail "refused flags must not reach the network: $(cat "$CURL_LOG")"; else pass; fi
-if out=$(cd / && offline "$FM" upgrade --from-file "$TARBALL" 2>&1); then pass; else fail "fm-board upgrade --from-file exited non-zero: $out"; fi
+if out=$(cd / && offline "$FM" upgrade --from-file "$TARBALL" 2>&1); then pass; else fail "firstmate-tui upgrade --from-file exited non-zero: $out"; fi
 assert_contains "$out" "installed (replaced $BETA_VERSION)" "--from-file swaps from the local tarball"
 if [ -s "$CURL_LOG" ]; then fail "--from-file must not touch the network: $(cat "$CURL_LOG")"; else pass; fi
 assert_contains "$("$FM" version 2>&1)" "(stable release)" "version reports stable after --from-file"
 assert_equal "$(file_sha "$VIEW_STATE")" "$VIEW_STATE_SHA" "view state survives every swap in this section"
 assert_no_leftovers "$SWAP" "the swap section leaves no staging or previous directory"
 # The command still renders after all the swaps.
-if frame=$(cd / && "$FM" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "fm-board after the swaps exited non-zero: $frame"; fi
+if frame=$(cd / && "$FM" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "firstmate-tui after the swaps exited non-zero: $frame"; fi
 assert_contains "$frame" "Needs you (0)" "the swapped command renders"
 
 # 9. A moved install and a missing record are refused with a pointer to the
@@ -484,6 +544,89 @@ if out=$(cd / && offline bash "$SWAP/moved/bin/fm-board.sh" upgrade 2>&1); then 
 assert_contains "$out" "no install record" "a missing record is named"
 assert_contains "$out" "install.sh | bash" "a missing record points at the installer"
 assert_contains "$(bash "$SWAP/moved/bin/fm-board.sh" version 2>&1)" "not an installed copy" "version without a record says so"
+
+# --------------------------------------------- upgrade from a 0.1.0 install
+# The path that pins the frozen names. A 0.1.0 install runs the 0.1.0
+# installer on `fm-board upgrade`; that installer downloads
+# fm-board-<tag>.tar.gz, strips the top-level directory whatever it is called,
+# and looks for bin/fm-board.sh and bin/fm-board/node_modules/neo-blessed
+# inside. The 0.1.0 tree comes from the v0.1.0 tag (git archive for the
+# tarball, git show for the installer). The walk: install 0.1.0 through the
+# fake network, point the fake latest release at the current tarball, run the
+# 0.1.0 install's own `fm-board upgrade`, then check that the upgraded
+# launcher reports the current version and writes the firstmate-tui command
+# beside fm-board (falsify: rename the asset or bin/fm-board.sh in
+# package.sh, or drop ensure_new_command from bin/fm-board.sh).
+OLD_TAG=v0.1.0
+OLD_VERSION=0.1.0
+OLD_SRC="$SCRATCH/src-$OLD_TAG"
+OLD_INSTALLER="$SCRATCH/install-$OLD_TAG.sh"
+mkdir -p "$OLD_SRC"
+if git -C "$ROOT" archive --format=tar "$OLD_TAG" 2>/dev/null | tar -x -C "$OLD_SRC" && git -C "$ROOT" show "$OLD_TAG:bin/install.sh" > "$OLD_INSTALLER" 2>/dev/null; then
+  pass
+  old_ok=1
+else
+  fail "the $OLD_TAG tag is needed for the 0.1.0 upgrade walk (git fetch --tags origin)"
+  old_ok=0
+fi
+if [ "$old_ok" -eq 1 ]; then
+  if "$OLD_SRC/scripts/package.sh" "$OLD_TAG" "$SCRATCH/dist-old" >/dev/null 2>"$SCRATCH/old.err"; then pass; else fail "package.sh from $OLD_TAG exited non-zero: $(cat "$SCRATCH/old.err")"; fi
+  OLD_TARBALL="$SCRATCH/dist-old/fm-board-$OLD_TAG.tar.gz"
+  assert_file "$OLD_TARBALL" "the 0.1.0 tarball is built under the same asset name"
+  assert_equal "$(tar -tzf "$OLD_TARBALL" | sed 's#/.*##' | sort -u)" "fm-board-$OLD_TAG" "the 0.1.0 tarball unpacks to fm-board-$OLD_TAG, the old top directory (the installer strips it either way)"
+  mkdir -p "$MIRROR/download/$OLD_TAG"
+  cp "$OLD_TARBALL" "$OLD_TARBALL.sha256" "$MIRROR/download/$OLD_TAG/"
+  OLD="$SCRATCH/old"
+  OLD_PREFIX="$OLD/prefix"
+  OLD_BIN="$OLD/bin"
+
+  # 1. A real 0.1.0 install: the 0.1.0 installer, with the 0.1.0 release as latest.
+  printf '{\n  "tag_name": "%s",\n  "prerelease": false\n}\n' "$OLD_TAG" > "$MIRROR/api/latest.json"
+  if out=$(offline bash "$OLD_INSTALLER" --prefix "$OLD_PREFIX" --bin-dir "$OLD_BIN" 2>&1); then pass; else fail "the 0.1.0 installer exited non-zero: $out"; fi
+  assert_contains "$out" "fm-board $OLD_VERSION installed" "the 0.1.0 installer reports fm-board 0.1.0"
+  assert_exec "$OLD_BIN/fm-board" "a 0.1.0 install has the fm-board command"
+  assert_absent "$OLD_BIN/firstmate-tui" "a 0.1.0 install has no firstmate-tui command"
+  assert_contains "$("$OLD_BIN/fm-board" version 2>&1)" "fm-board $OLD_VERSION (stable release)" "the 0.1.0 install calls itself fm-board 0.1.0"
+  assert_contains "$(cat "$OLD_PREFIX/install-record")" "version=$OLD_VERSION" "the 0.1.0 record carries 0.1.0"
+
+  # 2. `fm-board upgrade` on it with the current release as latest: the 0.1.0
+  # installer downloads the frozen asset name and accepts the new top directory.
+  printf '{\n  "tag_name": "%s",\n  "prerelease": false\n}\n' "$TAG" > "$MIRROR/api/latest.json"
+  if out=$(cd / && offline "$OLD_BIN/fm-board" upgrade 2>&1); then pass; else fail "fm-board upgrade from the 0.1.0 install exited non-zero: $out"; fi
+  assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "the 0.1.0 install asks for the latest release"
+  assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/fm-board-$TAG.tar.gz" "the 0.1.0 installer downloads the current release under the frozen asset name"
+  assert_contains "$out" "checksum verified" "the 0.1.0 installer verifies the current tarball"
+  assert_contains "$out" "fm-board $VERSION installed (replaced $OLD_VERSION)" "the 0.1.0 installer reports the swap to $VERSION (in its own words)"
+  assert_file "$OLD_PREFIX/bin/fm-board.sh" "the upgraded install still has bin/fm-board.sh where the 0.1.0 shim points"
+  assert_contains "$(cat "$OLD_PREFIX/install-record")" "version=$VERSION" "the record carries $VERSION after the upgrade"
+  assert_absent "$OLD_BIN/firstmate-tui" "the 0.1.0 installer alone writes no firstmate-tui command; the launcher does, next"
+  assert_no_leftovers "$OLD" "the 0.1.0 installer leaves no staging or previous directory"
+
+  # 3. The first run of the upgraded launcher finishes the rename, once.
+  if out=$("$OLD_BIN/fm-board" version 2>&1); then pass; else fail "fm-board version after the upgrade exited non-zero: $out"; fi
+  assert_contains "$out" "firstmate-tui $VERSION (stable release)" "the upgraded install reports firstmate-tui $VERSION"
+  assert_contains "$out" "installed at $OLD_PREFIX" "version names the same prefix"
+  assert_contains "$out" "the command is now firstmate-tui" "the launcher says it wrote the new command"
+  assert_exec "$OLD_BIN/firstmate-tui" "the firstmate-tui command now exists beside fm-board"
+  assert_exec "$OLD_BIN/fm-board" "fm-board is still there"
+  assert_contains "$(cat "$OLD_BIN/firstmate-tui")" "$OLD_PREFIX/bin/fm-board.sh" "the new command runs the upgraded install"
+  if out=$("$OLD_BIN/firstmate-tui" version 2>&1); then pass; else fail "firstmate-tui version after the rename exited non-zero: $out"; fi
+  assert_contains "$out" "firstmate-tui $VERSION (stable release)" "the new command works"
+  assert_not_contains "$out" "the command is now" "the rename line is printed once, not on every run (falsify: drop the -e test in ensure_new_command)"
+  if frame=$(cd / && "$OLD_BIN/firstmate-tui" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "the renamed command does not render: $frame"; fi
+  assert_contains "$frame" "Needs you (0)" "the renamed command renders"
+  assert_contains "$(cd / && "$OLD_BIN/firstmate-tui" --help 2>&1)" "this install: $OLD_PREFIX" "--help on the renamed command names the install"
+
+  # 4. The next upgrade runs the current installer, which rewrites both
+  # commands; the shim the launcher wrote is byte for byte the one install.sh
+  # writes (falsify: change write_command in one file only).
+  launcher_shim=$(cat "$OLD_BIN/firstmate-tui")
+  if out=$(cd / && offline "$OLD_BIN/firstmate-tui" upgrade --from-file "$TARBALL" 2>&1); then pass; else fail "firstmate-tui upgrade --from-file after the rename exited non-zero: $out"; fi
+  assert_contains "$out" "firstmate-tui $VERSION installed (replaced $VERSION)" "the current installer runs this time"
+  assert_equal "$(cat "$OLD_BIN/firstmate-tui")" "$launcher_shim" "the launcher's shim and the installer's shim are identical"
+  assert_contains "$(cat "$OLD_BIN/fm-board")" "former name" "the current installer rewrites fm-board as the alias"
+  assert_no_leftovers "$OLD" "the 0.1.0 walk leaves no staging or previous directory"
+fi
 
 # ------------------------------------------------------------- workflow
 # Grep-level pins on the release workflow; actionlint is the structural check
@@ -517,9 +660,14 @@ if printf '%s\n' "$wf" | grep -E '^[[:space:]]*-?[[:space:]]*uses:' | grep -Evq 
 # retention in the workflow and not the README).
 readme=$(cat "$ROOT/README.md")
 assert_contains "$readme" "at most 30" "the README states the retention limit"
-for cmd in "fm-board upgrade --pre" "fm-board upgrade --stable" "fm-board upgrade --version" "fm-board version"; do
+for cmd in "firstmate-tui upgrade --pre" "firstmate-tui upgrade --stable" "firstmate-tui upgrade --version" "firstmate-tui version" "firstmate-tui help" "firstmate-tui open --detached" "firstmate-tui focus"; do
   assert_contains "$readme" "$cmd" "the README documents $cmd"
 done
+# The release notes and the README name the command users type (falsify: leave
+# `fm-board upgrade` in the workflow's notes or reintroduce it as a README command).
+assert_contains "$wf" "printf 'firstmate-tui upgrade" "the release notes say firstmate-tui upgrade"
+assert_not_contains "$wf" "printf 'fm-board upgrade" "the release notes no longer say fm-board upgrade"
+assert_contains "$readme" "alias" "the README explains the fm-board alias"
 
 printf '%s checks, %s failed\n' "$checks" "$fails"
 [ "$fails" -eq 0 ]

@@ -1,4 +1,4 @@
-# .github/workflows/release.yml - the one release path for fm-board.
+# .github/workflows/release.yml - the one release path for firstmate-tui.
 #
 # The version source is "version" in bin/fm-board/package.json; nobody tags by
 # hand. scripts/package.sh builds every tarball (the same script
@@ -7,6 +7,8 @@
 #
 #   push to a branch other than main   a per-commit beta: package.sh --commit
 #                                      builds fm-board-v<version>-<sha7>.tar.gz
+#                                      (the asset keeps that name for 0.1.0
+#                                      upgrades; see scripts/package.sh)
 #                                      and a prerelease tagged v<version>-<sha7>
 #                                      is created at that commit (0.1.0-d8b290e
 #                                      is version 0.1.0 at commit d8b290e); then
@@ -98,11 +100,11 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           {
-            printf 'Beta build of fm-board %s from commit %s on branch %s.\n\n' "$VERSION" "$GITHUB_SHA" "$BRANCH"
+            printf 'Beta build of firstmate-tui %s from commit %s on branch %s.\n\n' "$VERSION" "$GITHUB_SHA" "$BRANCH"
             printf 'Switch an install to it, or install it fresh:\n\n```sh\n'
-            printf 'fm-board upgrade --version %s\n' "$VERSION"
+            printf 'firstmate-tui upgrade --version %s\n' "$VERSION"
             printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/bin/install.sh | bash -s -- --version %s\n' "$GITHUB_REPOSITORY" "$VERSION"
-            printf '```\n\nBack to the stable release: fm-board upgrade --stable\n\n'
+            printf '```\n\nBack to the stable release: firstmate-tui upgrade --stable\n\n'
             printf 'The .sha256 file beside the tarball is the checksum the installer verifies. '
             printf 'Betas are deleted when their pull request closes, and at most %s are kept.\n' "$KEEP_BETAS"
           } > notes.md
@@ -152,10 +154,10 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
             echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "fm-board $version is already released as $tag; nothing to do. To cut the next release, bump the version in bin/fm-board/package.json in a PR and merge it."
+            echo "firstmate-tui $version is already released as $tag; nothing to do. To cut the next release, bump the version in bin/fm-board/package.json in a PR and merge it."
           else
             echo "released=false" >> "$GITHUB_OUTPUT"
-            echo "tag $tag does not exist yet; releasing fm-board $version from commit $GITHUB_SHA"
+            echo "tag $tag does not exist yet; releasing firstmate-tui $version from commit $GITHUB_SHA"
           fi
 
       - name: Build the tarball and checksum
@@ -178,8 +180,8 @@ jobs:
           CHECKSUM: ${{ steps.package.outputs.checksum }}
         run: |
           {
-            printf 'Install fm-board %s, or upgrade an install to it:\n\n```sh\n' "$VERSION"
-            printf 'fm-board upgrade\n'
+            printf 'Install firstmate-tui %s, or upgrade an install to it:\n\n```sh\n' "$VERSION"
+            printf 'firstmate-tui upgrade\n'
             printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/bin/install.sh | bash\n' "$GITHUB_REPOSITORY"
             printf '```\n\nThe .sha256 file beside the tarball is the checksum the installer verifies.\n'
           } > notes.md

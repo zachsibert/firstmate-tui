@@ -1,11 +1,24 @@
 # firstmate-tui: agent notes
 
-Project-intrinsic knowledge for anyone working on `fm-board`. Read the README
-first; this file records only what the code does not say on its own.
+Project-intrinsic knowledge for anyone working on `firstmate-tui`. Read the
+README first; this file records only what the code does not say on its own.
 
 ## What this is
 
 A read-only terminal board over the firstmate fleet, hosted in herdr. The
+command is `firstmate-tui` (bare, or `open`, runs the board in the current
+pane; `focus`, `upgrade`, `version`, `help`; `run` is a hidden synonym of the
+default); `fm-board`, the name up to 0.1.0, is written by the installer as an
+alias for the 0.2.x release only. The release asset `fm-board-<tag>.tar.gz`,
+the default prefix `~/.local/share/fm-board`, and `bin/fm-board.sh` and
+`bin/fm-board/` inside the tarball are frozen under the old name because a
+0.1.0 install upgrades by running its own `bin/install.sh`, which downloads
+and checks exactly those; the launcher then writes `firstmate-tui` beside
+`fm-board` (`ensure_new_command`). Rename them only once no 0.1.0 install
+remains, and keep `tests/install.test.sh`'s 0.1.0 upgrade walk (built from
+the `v0.1.0` tag) green until then. The herdr plugin id `firstmate.board`
+stays for the same reason: linked plugins and the view-state directory are
+keyed by it. The
 scout report at `docs/scout-report-2026-09-16.md` is the design record: its
 section 1 table is the pane-to-data mapping that `bin/fm-board/lib/model.mjs`
 implements row for row, and its section 7 table is the milestone plan. Check
@@ -89,7 +102,7 @@ the findings watermark belong to later milestones.
   `bin/install.sh` must stay runnable through `curl | bash`: everything
   inside `main()`, no `BASH_SOURCE`, only curl, tar and sha256sum or shasum
   (grep and sed parse the releases API), and it writes only under `--prefix`
-  and `--bin-dir`; it ships in the tarball because `fm-board upgrade` execs
+  and `--bin-dir`; it ships in the tarball because `firstmate-tui upgrade` execs
   the installed copy, so download, verify and swap have one implementation.
   Tests reach GitHub through `tests/fake-curl.sh` on PATH, never the network.
   Lint the workflow with `actionlint` after changing it.

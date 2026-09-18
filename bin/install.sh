@@ -1,26 +1,35 @@
 #!/usr/bin/env bash
-# bin/install.sh - install or upgrade fm-board from a GitHub Release.
+# bin/install.sh - install or upgrade firstmate-tui from a GitHub Release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --pre
 #   curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --version 0.1.0-d8b290e
 #   bin/install.sh [flags]          the same, from a checkout
-#   fm-board upgrade [flags]        the same, from an install: runs the copy of
+#   firstmate-tui upgrade [flags]   the same, from an install: runs the copy of
 #                                   this script that shipped in the tarball
 #
 # Downloads fm-board-<tag>.tar.gz and its .sha256 from the release, verifies
-# the checksum, unpacks the tarball into --prefix and writes an `fm-board`
-# command into --bin-dir that runs the installed bin/fm-board.sh. Re-running
-# upgrades in place: the download is verified and unpacked beside the prefix
-# first, then the previous install is replaced as a whole and the command is
-# rewritten. Versions are never compared, so moving from a beta back to the
-# stable release (a lower version) is the same step as any upgrade. Nothing
-# else is touched: no shell rc file, no herdr config, nothing outside --prefix
-# and --bin-dir; the board's view state lives outside both.
+# the checksum, unpacks the tarball into --prefix and writes a `firstmate-tui`
+# command into --bin-dir that runs the installed bin/fm-board.sh, plus
+# `fm-board`, the command's former name, as an alias for one release.
+# Re-running upgrades in place: the download is verified and unpacked beside
+# the prefix first, then the previous install is replaced as a whole and the
+# commands are rewritten. Versions are never compared, so moving from a beta
+# back to the stable release (a lower version) is the same step as any
+# upgrade. Nothing else is touched: no shell rc file, no herdr config, nothing
+# outside --prefix and --bin-dir; the board's view state lives outside both.
+#
+# The asset name (fm-board-<tag>.tar.gz), the default prefix
+# (~/.local/share/fm-board) and the paths inside the tarball (bin/fm-board.sh,
+# bin/fm-board/) keep the old name on purpose: a 0.1.0 install upgrades by
+# running its own copy of this script, which downloads and checks exactly
+# those, and the new launcher then adds the `firstmate-tui` command beside
+# `fm-board` (see bin/fm-board.sh). They can be renamed once no 0.1.0 install
+# remains.
 #
 # The install record, <prefix>/install-record, is one key=value file naming
-# the prefix, the bin dir, the repository and what was installed. `fm-board
-# upgrade` reads it and runs this script again with those values.
+# the prefix, the bin dir, the repository and what was installed.
+# `firstmate-tui upgrade` reads it and runs this script again with those values.
 #
 # Needs curl (for the download), tar, and sha256sum or shasum. The installed
 # board still needs what the README lists under "Prerequisites": a firstmate
@@ -31,6 +40,8 @@
 set -euo pipefail
 
 REPO_DEFAULT=zachsibert/firstmate-tui
+NAME=firstmate-tui
+OLD_NAME=fm-board
 
 usage() {
   cat <<'EOF'
@@ -43,7 +54,8 @@ usage: install.sh [--stable | --pre | --version <version>] [--prefix <dir>]
                         0.1.0-d8b290e (a leading v is accepted: v0.2.0)
   --prefix <dir>        where the files go
                         (default: $XDG_DATA_HOME/fm-board, i.e. ~/.local/share/fm-board)
-  --bin-dir <dir>       where the fm-board command goes (default: ~/.local/bin)
+  --bin-dir <dir>       where the firstmate-tui command goes, with fm-board, its
+                        former name, beside it as an alias (default: ~/.local/bin)
   --from-file <tar.gz>  install this local tarball instead of downloading one;
                         a <tar.gz>.sha256 beside it is verified when present
   --repo <owner/name>   GitHub repository to download from
@@ -52,8 +64,9 @@ usage: install.sh [--stable | --pre | --version <version>] [--prefix <dir>]
 
 Re-running upgrades in place, in either direction: a beta can replace the
 stable release and --stable brings the stable release back. Once installed,
-`fm-board upgrade` takes the same channel flags. To uninstall, delete the
-prefix directory and the fm-board command in the bin dir.
+`firstmate-tui upgrade` takes the same channel flags. To uninstall, delete
+the prefix directory and the firstmate-tui and fm-board commands in the bin
+dir.
 EOF
 }
 
@@ -122,12 +135,35 @@ check_prefix() {
   [ -e "$prefix" ] || return 0
   [ -d "$prefix" ] || die "$prefix exists and is not a directory"
   if [ ! -f "$prefix/bin/fm-board.sh" ] && [ -n "$(ls -A "$prefix")" ]; then
-    die "$prefix exists and is not an fm-board install (no bin/fm-board.sh in it); pick another --prefix"
+    die "$prefix exists and is not a $NAME install (no bin/fm-board.sh in it); pick another --prefix"
   fi
 }
 
 package_version() { # <package.json>: the "version" field, no node needed
   sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
+}
+
+# write_command <bin dir> <name> <prefix>: the command that runs the installed
+# bin/fm-board.sh, written whole to a temporary name and moved into place.
+# bin/fm-board.sh carries the same function so a launcher upgraded by the
+# 0.1.0 installer can add the firstmate-tui command itself; keep the two
+# identical.
+write_command() {
+  local bin_dir=$1 name=$2 prefix=$3 shim_tmp
+  shim_tmp="$bin_dir/.$name.$$"
+  {
+    printf '#!/usr/bin/env bash\n'
+    if [ "$name" = "$OLD_NAME" ]; then
+      printf '# %s: the former name of %s, kept for one release; written by install.sh.\n' "$name" "$NAME"
+    else
+      printf '# %s: written by install.sh.\n' "$name"
+    fi
+    printf '# The board lives in %s; run "%s upgrade" to upgrade,\n' "$prefix" "$NAME"
+    printf '# or delete that directory and the %s and %s commands here to uninstall.\n' "$NAME" "$OLD_NAME"
+    printf 'exec bash %q "$@"\n' "$prefix/bin/fm-board.sh"
+  } > "$shim_tmp"
+  chmod +x "$shim_tmp"
+  mv -f "$shim_tmp" "$bin_dir/$name"
 }
 
 # Scratch paths the EXIT trap removes: the download directory, the staging
@@ -226,9 +262,9 @@ main() {
   rm -rf -- "${staging:?}"
   mkdir "$staging"
   tar -xzf "$tarball" -C "$staging" --strip-components=1 || die "could not unpack $(basename "$tarball")"
-  [ -f "$staging/bin/fm-board.sh" ] || die "the tarball has no bin/fm-board.sh; not an fm-board release"
+  [ -f "$staging/bin/fm-board.sh" ] || die "the tarball has no bin/fm-board.sh; not a $NAME release"
   [ -f "$staging/bin/fm-board/node_modules/neo-blessed/package.json" ] \
-    || die "the tarball has no vendored node_modules/neo-blessed; not an fm-board release"
+    || die "the tarball has no vendored node_modules/neo-blessed; not a $NAME release"
   chmod +x "$staging/bin/fm-board.sh"
   [ ! -f "$staging/bin/install.sh" ] || chmod +x "$staging/bin/install.sh"
   local new_version old_version=''
@@ -238,7 +274,7 @@ main() {
   # The install record goes into the staged tree, so it is swapped in with the
   # rest and an install never carries a record from a different location.
   {
-    printf '# written by fm-board install.sh and read by fm-board upgrade; do not edit\n'
+    printf '# written by %s install.sh and read by %s upgrade; do not edit\n' "$NAME" "$NAME"
     printf 'prefix=%s\n' "$prefix"
     printf 'bin_dir=%s\n' "$bin_dir"
     printf 'repo=%s\n' "$repo"
@@ -258,30 +294,23 @@ main() {
   previous=''
 
   mkdir -p "$bin_dir"
-  local shim="$bin_dir/fm-board" shim_tmp="$bin_dir/.fm-board.$$"
-  {
-    printf '#!/usr/bin/env bash\n'
-    printf '# fm-board: written by install.sh. The board lives in %s;\n' "$prefix"
-    printf '# run "fm-board upgrade" to upgrade, or delete that directory and this file to uninstall.\n'
-    printf 'exec bash %q "$@"\n' "$prefix/bin/fm-board.sh"
-  } > "$shim_tmp"
-  chmod +x "$shim_tmp"
-  mv -f "$shim_tmp" "$shim"
+  write_command "$bin_dir" "$NAME" "$prefix"
+  write_command "$bin_dir" "$OLD_NAME" "$prefix"
 
   # ------------------------------------------------------------- report
   if [ -n "$old_version" ]; then
-    log "fm-board ${new_version:-?} installed (replaced $old_version)"
+    log "$NAME ${new_version:-?} installed (replaced $old_version)"
   else
-    log "fm-board ${new_version:-?} installed"
+    log "$NAME ${new_version:-?} installed"
   fi
   log "  files:   $prefix"
-  log "  command: $shim"
+  log "  command: $bin_dir/$NAME (and $bin_dir/$OLD_NAME, its former name, for one more release)"
   case ":$PATH:" in
     *":$bin_dir:"*) ;;
-    *) log "note: $bin_dir is not on your PATH; add it, or run $shim by its full path" ;;
+    *) log "note: $bin_dir is not on your PATH; add it, or run $bin_dir/$NAME by its full path" ;;
   esac
   if [ -z "$old_version" ]; then
-    log "next: export FM_HOME=<your firstmate home> and run fm-board (README: Prerequisites, First run)"
+    log "next: export FM_HOME=<your firstmate home> and run $NAME (README: Prerequisites, First run)"
   fi
 }
 

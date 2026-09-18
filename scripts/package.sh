@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/package.sh - build the fm-board release tarball and its checksum.
+# scripts/package.sh - build the firstmate-tui release tarball and its checksum.
 #
 #   scripts/package.sh <tag> <out-dir>              a release build
 #   scripts/package.sh --commit <sha> <out-dir>     a per-commit (beta) build
@@ -9,24 +9,30 @@
 # is the tarball a release publishes. The one version source is the "version"
 # in bin/fm-board/package.json.
 #
-# A release build takes the tag: it must be "v" plus that version (v0.1.0);
+# A release build takes the tag: it must be "v" plus that version (v0.2.0);
 # anything else exits 2, which is how a wrong tag fails the release before
 # anything is published. A per-commit build takes the commit instead and names
-# itself: version <version>-<sha7> (0.1.0-d8b290e), tag v<version>-<sha7>. The
+# itself: version <version>-<sha7> (0.2.0-d8b290e), tag v<version>-<sha7>. The
 # staged copy's package.json (and lockfile) carry that full version, so an
 # installed beta reports the version it really is; the source tree is not
 # touched. Every per-commit build is a prerelease.
 #
 # Output files in <out-dir>:
-#   fm-board-<tag>.tar.gz         unpacks to one directory, fm-board-<tag>/,
+#   fm-board-<tag>.tar.gz         unpacks to one directory, firstmate-tui-<tag>/,
 #                                 holding bin/fm-board.sh, bin/install.sh (so
-#                                 `fm-board upgrade` can run the installer that
-#                                 matches its own version), bin/fm-board/ with
-#                                 its production node_modules (npm ci
+#                                 `firstmate-tui upgrade` can run the installer
+#                                 that matches its own version), bin/fm-board/
+#                                 with its production node_modules (npm ci
 #                                 --omit=dev, so an install needs no npm step),
 #                                 README.md, and LICENSE when the repository
 #                                 has one
 #   fm-board-<tag>.tar.gz.sha256  its SHA-256 in sha256sum / shasum format
+#
+# The asset keeps the name fm-board-<tag>.tar.gz, and the paths inside it keep
+# bin/fm-board.sh and bin/fm-board/, because a 0.1.0 install upgrades by
+# downloading and checking exactly those names; only the top-level directory
+# carries the new name, since every installer strips it. Rename the asset once
+# no 0.1.0 install remains (AGENTS.md).
 #
 # stdout is key=value lines for the workflow ($GITHUB_OUTPUT): tag, version
 # (the version the staged copy reports), prerelease (true when the version has
@@ -89,7 +95,9 @@ case "$version" in
 esac
 
 # ---------------------------------------------------------------- staging
-name="fm-board-$tag"
+# `name` is the directory inside the tarball; `asset` is the tarball's own name.
+name="firstmate-tui-$tag"
+asset="fm-board-$tag"
 stage=$(mktemp -d "${TMPDIR:-/tmp}/fm-board-package.XXXXXX")
 trap 'rm -rf -- "${stage:?}"' EXIT
 mkdir -p "$stage/$name/bin"
@@ -128,13 +136,13 @@ fi
 # ------------------------------------------------------------------ output
 mkdir -p "$out"
 out=$(cd "$out" && pwd -P)
-tarball="$out/$name.tar.gz"
+tarball="$out/$asset.tar.gz"
 checksum="$tarball.sha256"
 tar -czf "$tarball" -C "$stage" "$name"
 if command -v sha256sum >/dev/null 2>&1; then
-  (cd "$out" && sha256sum "$name.tar.gz" > "$checksum")
+  (cd "$out" && sha256sum "$asset.tar.gz" > "$checksum")
 elif command -v shasum >/dev/null 2>&1; then
-  (cd "$out" && shasum -a 256 "$name.tar.gz" > "$checksum")
+  (cd "$out" && shasum -a 256 "$asset.tar.gz" > "$checksum")
 else
   die "sha256sum or shasum is required to write the checksum"
 fi
