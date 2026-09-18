@@ -24,7 +24,8 @@
 # `--view-state <temp file>`. The r key is checked against a stand-in firstmate
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
 # that they ran and print canned JSON, with tests/fake-gh.sh first on PATH as
-# `gh` (it logs its argv and answers canned open-PR lists with createdAt), so a
+# `gh` (it logs its argv and answers canned PR lists in every state, with the
+# fields the board asks for), so a
 # live --render-once with --keys r shows exactly which fetches a refresh
 # triggers without GitHub or a real home; a run under a PATH holding no gh
 # proves the fallback to the firstmate script. Every live render must put the
@@ -58,6 +59,10 @@
 #                   creation time, without one, with a future and a malformed
 #                   one, the camel-case alias, no-task candidates and a
 #                   recorded PR missing from the live list
+#   pr-status.json  160x40, Ready for review STATUS: one PR per status (DRAFT,
+#                   IN REVIEW, APPROVED, CLOSED, MERGED), a merged PR 11h59m and
+#                   one 12h01m before now, an open PR of a done task, a closed PR
+#                   with no time stamp, a closed draft and an unlisted recorded PR
 #   grouped.json    160x44, In flight grouping: two secondmate homes, one with
 #                   four children (a keyed decision, a blocked child with a hold
 #                   reason) plus live and dated captain holds, one quiet
@@ -274,13 +279,13 @@ assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ merge\?' "--all-hom
 frame_noprs=$(render populated.json --no-prs) || fail "populated --no-prs: render exited non-zero"
 assert_contains "$frame_noprs" "Ready for review (2)" "--no-prs lists the two recorded PRs only"
 assert_contains "$frame_noprs" "· checks off" "--no-prs: the review header says checks off"
-assert_row "$frame_noprs" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: off[^│]* acme/widgets +main +5m~ │$' "recorded PR 41 row: with the fetch off the AGE is the status-log age marked ~ (falsify: keep the PR age without the fetch)"
-assert_row "$frame_noprs" '^│ PR +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +acme/api +main +1m~ │$' "recorded PR 7 row names the flag"
+assert_row "$frame_noprs" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: off[^│]* - +5m~ │$' "recorded PR 41 row: with the fetch off STATUS and BASE are unknown (-) and the AGE is the status-log age marked ~ (falsify: keep the PR age without the fetch)"
+assert_row "$frame_noprs" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +- +1m~ │$' "recorded PR 7 row names the flag"
 assert_not_contains "$frame_noprs" "passing" "no live check state with --no-prs"
 assert_not_contains "$frame_noprs" "fetching" "--no-prs never says fetching"
 # Finished work stays out (falsify: drop the taskBacklogState or the secondmate check in recordedPrs).
-assert_no_row "$frame_noprs" '^│ PR +#30 ' "a task whose backlog row is done does not list its PR"
-assert_no_row "$frame_noprs" '^│ PR +#12 ' "a PR mentioned on a secondmate record is not ready for review"
+assert_no_row "$frame_noprs" '^│ PR +- +ship-old ' "a task whose backlog row is done does not list its PR without a fetched record"
+assert_no_row "$frame_noprs" '^│ PR +- +hyperion ' "a PR mentioned on a secondmate record is not ready for review"
 
 # In flight rows: state, herdr join, tmux (falsify: remove the herdr agents block, or change
 # tmux-task's endpoint target).
@@ -371,11 +376,11 @@ assert_contains "$frame_k" "0            show every pane (with all five hidden t
 # landedRows, drop 'landed' from OPEN_PANES, or drop the 'open' case in keyAction). The opener
 # receives the exact URL as its only argument.
 frame_o=$(render_open populated.json "tab,enter") || fail "open review: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/8" "enter on the first Ready for review row (the failing live candidate) opens its PR"
-assert_contains "$frame_o" "opened https://github.com/acme/api/pull/8 (api#8)" "footer notice names the opened URL"
-frame_o=$(render_open populated.json "tab,j,enter") || fail "open review second row: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "enter on the second Ready for review row opens the recorded PR joined to its task"
+assert_opened "https://github.com/acme/widgets/pull/41" "enter on the first Ready for review row (the newest IN REVIEW PR, joined to its task) opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "footer notice names the task, not the candidate"
+frame_o=$(render_open populated.json "tab,j,enter") || fail "open review second row: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/8" "enter on the second Ready for review row (the failing live candidate nobody recorded) opens its PR"
+assert_contains "$frame_o" "opened https://github.com/acme/api/pull/8 (api#8)" "footer notice names the opened URL"
 frame_o=$(render_open populated.json "j,j,j,enter") || fail "open needs enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on the Needs-you merge? row opens its PR"
 frame_o=$(render_open populated.json "tab,tab,tab,tab,enter") || fail "open landed enter: render exited non-zero"
@@ -388,7 +393,7 @@ frame_o=$(render_open populated.json "tab,tab,enter") || fail "enter inflight: r
 assert_not_opened "enter on an In flight worker calls no opener"
 rm -f "$OPENER_LOG"
 frame_o=$(render populated.json --keys "tab,enter") || fail "open without opener: render exited non-zero"
-assert_contains "$frame_o" "would open https://github.com/acme/api/pull/8" "without --opener-cmd, --render-once only reports the open"
+assert_contains "$frame_o" "would open https://github.com/acme/widgets/pull/41" "without --opener-cmd, --render-once only reports the open"
 assert_not_opened "without --opener-cmd nothing is launched"
 
 # Live PR data (falsify: remove candidate_prs from the fixture or the enabled branch in reviewRows).
@@ -398,12 +403,14 @@ frame_prs=$(render populated.json --prs) || fail "populated --prs: render exited
 if [ "$frame_prs" = "$frame" ]; then pass; else fail "--prs renders a different frame from the default: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_prs") | head -n 5)"; fi
 assert_contains "$frame_prs" "Ready for review (3)" "live PR data adds the unrecorded candidate"
 assert_contains "$frame_prs" "checks 30s ago" "review header shows the checks age"
-assert_row "$frame_prs" '^│ failing +changes +api#8 +https://github.com/acme/api/pull/8 · conflicting +acme/api +main +- │$' "failing candidate with review and mergeable"
-assert_row "$frame_prs" '^│ passing +review +ship-alpha +https://github.com/acme/widgets/pull/41 +acme/widgets +main +3h │$' "passing candidate joined to its task, AGE from its created_at (falsify: drop prCreatedAt from reviewRows)"
-assert_row "$frame_prs" '^│ unlisted +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +acme/api +main +1m~ │$' "recorded PR missing from the live list, AGE from the status log marked ~"
-assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^ ]+ +ship-old ' "a candidate GitHub reports MERGED is dropped (falsify: drop prClosed from reviewRows)"
-assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^ ]+ +[^ ]+ +https://github.com/acme/widgets/pull/30' "the merged PR appears nowhere in Ready for review"
-assert_before "$frame_prs" '^│ failing +changes' '^│ passing +review' "failing sorts before passing"
+assert_row "$frame_prs" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "Ready for review draws its own six columns (falsify: drop the review branch from columns in lib/layout.mjs)"
+assert_no_row "$frame_prs" '^│ CHECKS [^│]*(REPO|HOME|WHAT|REVIEW)' "the review pane draws no REPO, HOME, WHAT or REVIEW column"
+assert_row "$frame_prs" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +- │$' "failing candidate nobody recorded: changes requested reads IN REVIEW, the title and base branch come from the fetch, no age without a creation time (falsify: map CHANGES_REQUESTED to its own word in prStatus)"
+assert_row "$frame_prs" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "passing candidate joined to its task, AGE from its created_at (falsify: drop prCreatedAt from reviewRows)"
+assert_row "$frame_prs" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +1m~ │$' "recorded PR missing from the live list: STATUS -, the URL and note in TITLE, BASE -, AGE from the status log marked ~"
+assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]* ship-old ' "a candidate GitHub reports MERGED with no merge time cannot be placed in the 12-hour window and is dropped (falsify: return true from insideWindow when the stamp is missing)"
+assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]*Rename the widget table' "the merged PR's title appears nowhere in Ready for review"
+assert_before "$frame_prs" '^│ passing +IN REVIEW +ship-alpha' '^│ failing +IN REVIEW +api#8' "inside IN REVIEW the PR with a creation time sorts before the one without (newest first, no age last; falsify: sort by the CHECKS word)"
 
 # Medium width: REPO and AGE drop below 100 columns (falsify: change WIDE_BREAKPOINT in lib/layout.mjs).
 frame_med=$(render populated.json --cols 90 --rows 30) || fail "medium: render exited non-zero"
@@ -411,6 +418,8 @@ assert_contains "$frame_med" "Needs you (4)" "medium keeps five panes"
 assert_row "$frame_med" '^│ STATE +HERDR +ID +WHAT +HOME +│$' "medium keeps the HERDR column and drops REPO and AGE"
 assert_no_row "$frame_med" ' REPO +HOME' "medium drops REPO"
 assert_no_row "$frame_med" ' HOME +AGE' "medium drops AGE"
+assert_row "$frame_med" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "medium: Ready for review drops BASE and keeps AGE (falsify: drop AGE with BASE in the review branch of columns)"
+assert_no_row "$frame_med" ' TITLE +BASE' "medium: no BASE column"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
 assert_row "$frame_med" '^ j/k  tab  enter  l/h  x hide  H  1-5 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer"
@@ -461,7 +470,7 @@ frame_g=$(render grouped.json) || fail "grouped: render exited non-zero"
 # the recorded PR say fetching, never "not fetched" (falsify: drop the fetching branch in
 # unlistedChecks or checksLabel).
 assert_contains "$frame_g" "Ready for review (1) · snapshot 12s ago · herdr fixture · checks fetching" "grouped: review header says checks fetching before the first fetch"
-assert_row "$frame_g" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +acme/widgets +main +5m~ │$' "grouped: recorded PR row says checks fetching before the first fetch, AGE marked as the fallback"
+assert_row "$frame_g" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "grouped: recorded PR row says checks fetching before the first fetch, STATUS unknown, AGE marked as the fallback"
 assert_not_contains "$frame_g" "not fetched" "grouped: nothing reads not fetched before the first fetch"
 
 # Needs you is main-home only (falsify: remove the opts.allHomesNeeds guard in needsRows).
@@ -749,7 +758,7 @@ assert_lines "$frame_p" 24 "narrow landing page: 24 lines"
 # Hiding the selected pane moves the selection to the next shown pane (falsify: drop the shown() clamp in
 # moveSelection): 1 hides Needs you, then enter opens the first Ready for review PR.
 frame_o=$(render_open populated.json "1,enter") || fail "panes selection: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/8" "after hiding the selected pane, enter acts on the next shown pane"
+assert_opened "https://github.com/acme/widgets/pull/41" "after hiding the selected pane, enter acts on the next shown pane"
 frame_p=$(render narrow.json --keys "5") || fail "panes narrow: render exited non-zero"
 assert_not_contains "$frame_p" "── Landed" "list mode: the hidden pane's section is gone (falsify: drop the hidden skip in flattenRows)"
 assert_contains "$frame_p" "panes hidden: 5" "list mode: the title lists the hidden pane"
@@ -775,17 +784,20 @@ if grep -Fq -- "-firstmate" "$ROOT/bin/fm-board/herdr-plugin.toml"; then fail "h
 # ------------------------------------------------------------------ PR ages
 # Ready for review's AGE is the time since the PR was opened when the live fetch carries created_at,
 # else the task's status-log age with a trailing ~ (falsify: drop prCreatedAt or the ageFallback
-# marker in lib/model.mjs; the rows below then read 2d for 2d~, or 3h~ for 3h).
+# marker in lib/model.mjs; the rows below then read 2d for 2d~, or 3h~ for 3h). These candidates
+# carry no title or base branch, as the script fallback's do not: TITLE falls back to the recorded
+# task's backlog title (the URL for a PR no task recorded) and BASE reads - (falsify: drop the
+# rec.title fallback from reviewRows).
 frame_age=$(render pr-ages.json) || fail "pr-ages: render exited non-zero"
 assert_contains "$frame_age" "Ready for review (8)" "pr-ages: seven live candidates plus one unlisted recorded PR"
-assert_row "$frame_age" '^│ passing +review +pr-fresh +https://github.com/acme/api/pull/101 +acme/api +main +3h │$' "created_at 3h before now: AGE 3h with no marker (falsify: read the status-log age first)"
-assert_row "$frame_age" '^│ passing +review +pr-nodate +https://github.com/acme/api/pull/102 +acme/api +main +2d~ │$' "no creation time: the status-log age with ~ (falsify: drop ageFallback from reviewAge)"
-assert_row "$frame_age" '^│ passing +review +pr-future +https://github.com/acme/api/pull/103 +acme/api +main +4h~ │$' "a future created_at counts as absent (falsify: drop the created > now check in prCreatedAt)"
-assert_row "$frame_age" '^│ passing +review +pr-bad +https://github.com/acme/api/pull/104 +acme/api +main +30m~ │$' "a malformed created_at counts as absent (falsify: return 0 instead of null from parseTime)"
-assert_row "$frame_age" '^│ passing +approved +pr-camel +https://github.com/acme/api/pull/105 +acme/api +main +5d │$' "the camel-case createdAt is read too (falsify: drop the alias in prCreatedAt)"
-assert_row "$frame_age" '^│ passing +none +api#107 +https://github.com/acme/api/pull/107 +acme/api +main +2h │$' "a candidate with no task still shows its PR age"
-assert_row "$frame_age" '^│ passing +none +api#108 +https://github.com/acme/api/pull/108 +acme/api +main +- │$' "no creation time and no task: - with no marker (falsify: append ~ to a null age)"
-assert_row "$frame_age" '^│ unlisted +#106 +pr-unlisted +https://github.com/acme/api/pull/106 · checks: not fetched +acme/api +main +45m~ │$' "a recorded PR missing from the live list falls back with ~"
+assert_row "$frame_age" '^│ passing +IN REVIEW +pr-fresh +Paginate the address API +- +3h │$' "created_at 3h before now: AGE 3h with no marker, the backlog title in TITLE (falsify: read the status-log age first)"
+assert_row "$frame_age" '^│ passing +IN REVIEW +pr-nodate +Cache the geocoder +- +2d~ │$' "no creation time: the status-log age with ~ (falsify: drop ageFallback from reviewAge)"
+assert_row "$frame_age" '^│ passing +IN REVIEW +pr-future +Rate-limit headers +- +4h~ │$' "a future created_at counts as absent (falsify: drop the created > now check in prCreatedAt)"
+assert_row "$frame_age" '^│ passing +IN REVIEW +pr-bad +Retry budget +- +30m~ │$' "a malformed created_at counts as absent (falsify: return 0 instead of null from parseTime)"
+assert_row "$frame_age" '^│ passing +APPROVED +pr-camel +Bulk lookup endpoint +- +5d │$' "the camel-case createdAt is read too, and an APPROVED review decision reads APPROVED (falsify: drop the alias in prCreatedAt)"
+assert_row "$frame_age" '^│ passing +IN REVIEW +api#107 +https://github.com/acme/api/pull/107 +- +2h │$' "a candidate with no task and no title shows its URL and its PR age"
+assert_row "$frame_age" '^│ passing +IN REVIEW +api#108 +https://github.com/acme/api/pull/108 +- +- │$' "no creation time and no task: - with no marker (falsify: append ~ to a null age)"
+assert_row "$frame_age" '^│ unlisted +- +pr-unlisted +https://github.com/acme/api/pull/106 · checks: not fetched +- +45m~ │$' "a recorded PR missing from the live list falls back with ~"
 assert_count "$frame_age" "~ │" 4 "exactly the four fallback rows carry the marker (falsify: mark every review row)"
 # Only the display text carries the marker: the In flight row of the same task shows the plain
 # file-time age (falsify: put the marker into ageSeconds or fmtAge).
@@ -793,35 +805,111 @@ assert_row "$frame_age" '^│ working +- +pr-nodate +fixing the flaky test +acme
 # --no-prs: every recorded row falls back (falsify: skip the marker when prs.enabled is false).
 frame_age_np=$(render pr-ages.json --no-prs) || fail "pr-ages --no-prs: render exited non-zero"
 assert_contains "$frame_age_np" "Ready for review (6)" "--no-prs: the six recorded PRs"
-assert_row "$frame_age_np" '^│ PR +#101 +pr-fresh +https://github.com/acme/api/pull/101 · checks: off \(--no-prs\) +acme/api +main +10m~ │$' "--no-prs: the PR that had a live creation time shows its status-log age with ~ instead"
+assert_row "$frame_age_np" '^│ PR +- +pr-fresh +https://github.com/acme/api/pull/101 · checks: off \(--no-prs\) +- +10m~ │$' "--no-prs: the PR that had a live creation time shows its status-log age with ~ instead"
 assert_count "$frame_age_np" "~ │" 6 "--no-prs: every Ready for review row carries the marker"
 assert_no_row "$frame_age_np" '^│ PR .* (3h|5d|2h) │$' "--no-prs: no PR age survives without the fetch"
 # The marker fits the AGE column at every breakpoint: at the wide breakpoint (100 columns) the column
-# still holds 30m~ whole; below it AGE is dropped and no marker shows anywhere (falsify: narrow the
-# AGE column in lib/layout.mjs, or render the age into another column).
+# still holds 30m~ whole with BASE beside it; below it Ready for review drops BASE and keeps AGE, so
+# the marker still shows there while the other panes lose their AGE; in the narrow list AGE is gone
+# everywhere (falsify: narrow the AGE column in lib/layout.mjs, render the age into another column,
+# or drop AGE with BASE in the review branch of columns).
 frame_age_100=$(render pr-ages.json --cols 100 --rows 30) || fail "pr-ages 100: render exited non-zero"
-assert_row "$frame_age_100" '^│ passing +review +pr-bad +[^│]* main +30m~ │$' "100 columns: the widest fallback age fits the AGE column"
-assert_row "$frame_age_100" '^│ passing +review +pr-fresh +[^│]* main +3h │$' "100 columns: the PR age fits"
+assert_row "$frame_age_100" '^│ passing +IN REVIEW +pr-bad +[^│]* - +30m~ │$' "100 columns: the widest fallback age fits the AGE column beside BASE"
+assert_row "$frame_age_100" '^│ passing +IN REVIEW +pr-fresh +[^│]* - +3h │$' "100 columns: the PR age fits"
 assert_widths "$frame_age_100" 100 "100-column frame lines are 100 columns"
 frame_age_90=$(render pr-ages.json --cols 90 --rows 30) || fail "pr-ages 90: render exited non-zero"
-assert_not_contains "$frame_age_90" "~" "medium width: AGE is dropped, so no marker shows"
+assert_row "$frame_age_90" '^│ passing +IN REVIEW +pr-bad +[^│]* 30m~ │$' "medium width: Ready for review keeps AGE, so the marker still shows"
+assert_no_row "$frame_age_90" ' BASE ' "medium width: BASE is dropped"
+assert_no_row "$frame_age_90" '^│ working [^│]*~ │$' "medium width: the other panes have no AGE column, so no marker outside Ready for review"
 assert_widths "$frame_age_90" 90 "medium PR-ages frame lines are 90 columns"
 frame_age_70=$(render pr-ages.json --cols 70 --rows 30) || fail "pr-ages 70: render exited non-zero"
 assert_not_contains "$frame_age_70" "~" "narrow width: no marker in list mode"
 assert_widths "$frame_age_70" 70 "narrow PR-ages frame lines are 70 columns"
 
+# ------------------------------------------------------------------ PR status
+# Ready for review's STATUS column, its 12-hour window on finished PRs and its sort, from
+# tests/fixtures/pr-status.json: one PR per status, a PR merged 11h59m and one 12h01m before now, an
+# open PR of a done task, a closed PR with no time stamp, a closed draft and an unlisted recorded PR.
+frame_st=$(render pr-status.json) || fail "pr-status: render exited non-zero"
+# The six columns, in order, and nothing else; the other panes keep theirs (falsify: drop the review
+# branch from columns in lib/layout.mjs, reorder its pushes, or apply it to every pane).
+assert_row "$frame_st" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "pr-status: the header reads CHECKS, STATUS, ID, TITLE, BASE, AGE"
+assert_no_row "$frame_st" '^│ CHECKS [^│]*(REPO|HOME|WHAT|REVIEW)' "pr-status: the review pane draws no REPO, HOME, WHAT or REVIEW column"
+assert_row "$frame_st" '^│ STATE +HERDR +ID +WHAT +REPO +HOME +AGE │$' "pr-status: the other panes keep the shared columns"
+# One row per status (falsify: change a branch of prStatus in lib/model.mjs).
+assert_row "$frame_st" '^│ pending +DRAFT +st-draft +Rework the geocoder cache with a two-tier LRU +main +2h │$' "isDraft reads DRAFT, with the title, base branch and PR age from the fetch"
+assert_row "$frame_st" '^│ passing +IN REVIEW +st-review +Paginate the address API: cursor tokens, [^│]*… main +5h │$' "an open PR awaiting review reads IN REVIEW, and a long title ends in an ellipsis inside the TITLE column (falsify: pad instead of truncate in fit)"
+assert_row "$frame_st" '^│ failing +IN REVIEW +api#203 +Retry on 429 +develop +1h │$' "changes requested reads IN REVIEW too; a PR nobody recorded is named repo#number and shows its base branch"
+assert_row "$frame_st" '^│ passing +APPROVED +st-approved +Rate-limit headers on every list endpoint +main +1d │$' "an open PR whose review decision is APPROVED reads APPROVED"
+assert_row "$frame_st" '^│ none +CLOSED +st-closed +Retry budget for the geocoder +main +8h │$' "a PR closed unmerged 3h ago reads CLOSED and is still listed"
+assert_row "$frame_st" '^│ passing +MERGED +st-merged +Bulk lookup endpoint +main +6h │$' "a PR merged 30m ago reads MERGED, and the row of its done task is shown for it (falsify: skip done tasks in recordedPrs)"
+assert_row "$frame_st" '^│ none +CLOSED +api#212 +Draft closed unmerged +main +1h │$' "a draft closed unmerged reads CLOSED, not DRAFT, so it leaves with the window (falsify: test the draft flag before the state in prStatus)"
+assert_row "$frame_st" '^│ unlisted +- +st-unlisted +https://github.com/acme/api/pull/209 · checks: not fetched +- +45m~ │$' "a recorded PR the fetch did not list keeps its URL, note and file-time age, STATUS unknown"
+# The 12-hour window (falsify: change TERMINAL_WINDOW_SECONDS, or compare with <= in insideWindow).
+assert_row "$frame_st" '^│ passing +MERGED +api#207 +Fix the flaky geocoder test +release/2026.09 +2d │$' "a PR merged 11h59m before now is still listed"
+assert_not_contains "$frame_st" "Split the address migration" "a PR merged 12h01m before now is gone, and its done task with it"
+assert_no_row "$frame_st" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]* st-old ' "the done task of the PR outside the window has no review row (its In flight row stays)"
+assert_not_contains "$frame_st" "Rename the widget table" "an open PR of a done task is not listed: a done task's PR shows only once terminal (falsify: drop the rec.done check in reviewRows)"
+assert_not_contains "$frame_st" "Abandoned spike" "a closed PR with no close time cannot be placed in the window and is dropped"
+assert_contains "$frame_st" "Ready for review (9)" "the pane count is the rows shown after the window filter (falsify: count candidate_prs instead of rows)"
+assert_count "$frame_st" " MERGED " 2 "exactly two MERGED rows"
+assert_count "$frame_st" " CLOSED " 2 "exactly two CLOSED rows"
+# The sort: DRAFT, IN REVIEW, APPROVED, unknown, CLOSED, MERGED, newest first inside a status (falsify:
+# reorder STATUS_ORDER, or sort by ageSeconds descending in byNewest).
+assert_before "$frame_st" '^│ pending +DRAFT ' '^│ failing +IN REVIEW +api#203' "DRAFT sorts first"
+assert_before "$frame_st" '^│ failing +IN REVIEW +api#203' '^│ passing +IN REVIEW +st-review' "inside IN REVIEW the 1h-old PR sorts before the 5h-old one"
+assert_before "$frame_st" '^│ passing +IN REVIEW +st-review' '^│ passing +APPROVED ' "IN REVIEW sorts before APPROVED"
+assert_before "$frame_st" '^│ passing +APPROVED ' '^│ unlisted +- ' "APPROVED sorts before the unlisted recorded PR"
+assert_before "$frame_st" '^│ unlisted +- ' '^│ none +CLOSED +api#212' "the unlisted recorded PR sorts before CLOSED"
+assert_before "$frame_st" '^│ none +CLOSED +api#212' '^│ none +CLOSED +st-closed' "inside CLOSED the 1h-old PR sorts before the 8h-old one"
+assert_before "$frame_st" '^│ none +CLOSED +st-closed' '^│ passing +MERGED +st-merged' "CLOSED sorts before MERGED"
+assert_before "$frame_st" '^│ passing +MERGED +st-merged' '^│ passing +MERGED +api#207' "inside MERGED the 6h-old PR sorts before the 2d-old one"
+assert_widths "$frame_st" 160 "pr-status frame lines are 160 columns"
+# enter still opens a row's PR, a finished one included, through the fake opener only (falsify: drop
+# url from the review makeRow calls).
+frame_o=$(render_open pr-status.json "tab,enter") || fail "pr-status open first: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/201" "enter on the DRAFT row opens its PR"
+frame_o=$(render_open pr-status.json "tab,j,j,j,j,j,j,j,enter") || fail "pr-status open merged: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/206" "enter on a MERGED row still opens its PR"
+assert_contains "$frame_o" "opened https://github.com/acme/api/pull/206 (st-merged)" "the notice names the task of the merged PR"
+# --no-prs: the recorded PRs of unfinished tasks only, STATUS unknown, as before (falsify: list a done
+# task's PR without a fetched record).
+frame_st_np=$(render pr-status.json --no-prs) || fail "pr-status --no-prs: render exited non-zero"
+assert_contains "$frame_st_np" "Ready for review (5)" "--no-prs: the five recorded PRs of unfinished tasks"
+assert_row "$frame_st_np" '^│ PR +- +st-approved +https://github.com/acme/api/pull/204 · checks: off \(--no-prs\) +- +1h~ │$' "--no-prs: STATUS is unknown without the fetch"
+assert_no_row "$frame_st_np" '^│ PR +- +st-merged ' "--no-prs: a done task's PR is not listed without a fetched record"
+# Breakpoints: at 100 columns all six columns; below 100 BASE goes and AGE stays; below 80 the list
+# shares one header (falsify: drop BASE and AGE together, or keep BASE below WIDE_BREAKPOINT).
+frame_st_100=$(render pr-status.json --cols 100 --rows 30) || fail "pr-status 100: render exited non-zero"
+assert_row "$frame_st_100" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "100 columns: the six columns"
+assert_row "$frame_st_100" '^│ pending +DRAFT +st-draft +Rework the geocoder … main +2h │$' "100 columns: the title truncates with an ellipsis to make room"
+assert_widths "$frame_st_100" 100 "100-column pr-status frame lines are 100 columns"
+frame_st_90=$(render pr-status.json --cols 90 --rows 30) || fail "pr-status 90: render exited non-zero"
+assert_row "$frame_st_90" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "90 columns: BASE is dropped, AGE stays"
+assert_no_row "$frame_st_90" ' BASE ' "90 columns: no BASE column"
+assert_row "$frame_st_90" '^│ failing +IN REVIEW +api#203 +Retry on 429 +1h │$' "90 columns: the row loses its base branch and keeps its age"
+assert_widths "$frame_st_90" 90 "90-column pr-status frame lines are 90 columns"
+frame_st_70=$(render pr-status.json --cols 70 --rows 30) || fail "pr-status 70: render exited non-zero"
+assert_row "$frame_st_70" '^ STATE +ID +WHAT +HOME +$' "70 columns: the list shares one header across panes"
+assert_row "$frame_st_70" '^ pending +st-draft +Rework the geoc… main +$' "70 columns: a review row in the shared list"
+assert_not_contains "$frame_st_70" "DRAFT" "70 columns: the list has no STATUS column"
+assert_widths "$frame_st_70" 70 "70-column pr-status frame lines are 70 columns"
+
 # The fetch's pure pieces, straight from lib/sources.mjs, copy fm-bearings-snapshot.sh's rules: the
 # repository slug, the statusCheckRollup mapping, the fm/<task> branch rule with the script's
-# defaults, the field list with createdAt, and the candidate rule (PR URLs of every task including a
-# secondmate's, then the origin remote of live non-secondmate worktrees only, capped at ten). Two
-# scratch git repositories stand in for worktrees (falsify: change any branch of checksState, drop
-# the .git strip in repoSlug, the kind check in candidateRepos, or createdAt from GH_PR_FIELDS).
+# defaults, the projection of the title, base branch, draft flag, state and merge and close times, the
+# field list, the 12-hour keep rule on fetched PRs (open always; merged or closed only while the
+# finish time is less than twelve hours before now, a missing stamp dropped, a future one kept) and
+# the candidate rule (PR URLs of every task including a secondmate's, then the origin remote of live
+# non-secondmate worktrees only, capped at ten). Two scratch git repositories stand in for worktrees
+# (falsify: change any branch of checksState, drop the .git strip in repoSlug, the kind check in
+# candidateRepos, a field from GH_PR_FIELDS, or compare with <= in keepFetchedPr).
 WT_DIR="$SCRATCH/wt"
 WT_SM_DIR="$SCRATCH/wt-secondmate"
 git init -q "$WT_DIR" && git -C "$WT_DIR" remote add origin git@github.com:acme/wt.git
 git init -q "$WT_SM_DIR" && git -C "$WT_SM_DIR" remote add origin https://github.com/acme/mate-only.git
 unit_out=$(node --input-type=module -e "
-  import { checksState, projectPr, repoSlug, candidateRepos, GH_PR_FIELDS } from '$ROOT/bin/fm-board/lib/sources.mjs';
+  import { checksState, projectPr, repoSlug, candidateRepos, keepFetchedPr, GH_PR_FIELDS } from '$ROOT/bin/fm-board/lib/sources.mjs';
   const out = [];
   out.push(['none', checksState([])], ['none-null', checksState(null)]);
   out.push(['passing', checksState([{ status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
@@ -832,10 +920,22 @@ unit_out=$(node --input-type=module -e "
   out.push(['slug-pull', repoSlug('https://github.com/acme/widgets/pull/41')]);
   out.push(['slug-ssh', repoSlug('git@github.com:acme/widgets.git')]);
   out.push(['slug-other', String(repoSlug('https://gitlab.com/acme/widgets'))]);
-  const p = projectPr({ number: 41, title: 't', url: 'https://github.com/acme/widgets/pull/41', headRefName: 'fm/ship-alpha', reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }], createdAt: '2026-09-16T09:00:00Z' }, 'acme/widgets');
-  out.push(['project', [p.num, p.repo, p.task, p.review, p.mergeable, p.checks, p.created_at].join(' ')]);
+  const p = projectPr({ number: 41, title: 'Add the widget cache', url: 'https://github.com/acme/widgets/pull/41', headRefName: 'fm/ship-alpha', baseRefName: 'main', reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }], createdAt: '2026-09-16T09:00:00Z', isDraft: true, state: 'OPEN', mergedAt: null, closedAt: null }, 'acme/widgets');
+  out.push(['project', [p.num, p.repo, p.task, p.review, p.mergeable, p.checks, p.created_at, p.title, p.base, p.draft, p.state, String(p.merged_at), String(p.closed_at)].join(' ')]);
   const q = projectPr({ number: 8, url: 'u', headRefName: 'retry-429' }, 'acme/api');
-  out.push(['project-defaults', [q.task, q.review, q.mergeable, q.checks, String(q.created_at)].join(' ')]);
+  out.push(['project-defaults', [q.task, q.review, q.mergeable, q.checks, String(q.created_at), String(q.title), String(q.base), q.draft, String(q.state), String(q.merged_at)].join(' ')]);
+  const m = projectPr({ number: 9, url: 'u', headRefName: 'x', state: 'merged', mergedAt: '2026-09-16T11:30:00Z', closedAt: '2026-09-16T11:30:00Z' }, 'acme/api');
+  out.push(['project-merged', [m.state, m.merged_at, m.closed_at].join(' ')]);
+  const now = 1789560000; // 2026-09-16T12:00:00Z
+  out.push(['keep-open', keepFetchedPr({ state: 'OPEN' }, now)]);
+  out.push(['keep-no-state', keepFetchedPr({}, now)]);
+  out.push(['keep-merged-inside', keepFetchedPr({ state: 'MERGED', merged_at: '2026-09-16T00:01:00Z' }, now)]);
+  out.push(['keep-merged-outside', keepFetchedPr({ state: 'MERGED', merged_at: '2026-09-15T23:59:00Z' }, now)]);
+  out.push(['keep-merged-exact', keepFetchedPr({ state: 'MERGED', merged_at: '2026-09-16T00:00:00Z' }, now)]);
+  out.push(['keep-merged-closed-only', keepFetchedPr({ state: 'MERGED', closed_at: '2026-09-16T11:00:00Z' }, now)]);
+  out.push(['keep-closed-inside', keepFetchedPr({ state: 'CLOSED', closed_at: '2026-09-16T11:00:00Z' }, now)]);
+  out.push(['keep-closed-nostamp', keepFetchedPr({ state: 'CLOSED' }, now)]);
+  out.push(['keep-merged-future', keepFetchedPr({ state: 'MERGED', merged_at: '2026-09-16T13:00:00Z' }, now)]);
   out.push(['fields', GH_PR_FIELDS.join(',')]);
   const tasks = [
     { kind: 'ship', pr: { url: 'https://github.com/acme/widgets/pull/41' }, paths: { worktree: { path: '$WT_DIR' } } },
@@ -849,9 +949,12 @@ unit_out=$(node --input-type=module -e "
 ") || fail "sources unit checks: node exited non-zero: $unit_out"
 for expected in "none=none" "none-null=none" "passing=passing" "passing-state=passing" "pending=pending" "failing=failing" "failing-state=failing" \
   "slug-pull=acme/widgets" "slug-ssh=acme/widgets" "slug-other=null" \
-  "project=41 acme/widgets ship-alpha REVIEW_REQUIRED MERGEABLE passing 2026-09-16T09:00:00Z" \
-  "project-defaults=- none UNKNOWN none null" \
-  "fields=number,title,url,headRefName,reviewDecision,mergeable,statusCheckRollup,createdAt" \
+  "project=41 acme/widgets ship-alpha REVIEW_REQUIRED MERGEABLE passing 2026-09-16T09:00:00Z Add the widget cache main true OPEN null null" \
+  "project-defaults=- none UNKNOWN none null null null false null null" \
+  "project-merged=MERGED 2026-09-16T11:30:00Z 2026-09-16T11:30:00Z" \
+  "keep-open=true" "keep-no-state=true" "keep-merged-inside=true" "keep-merged-outside=false" "keep-merged-exact=false" \
+  "keep-merged-closed-only=true" "keep-closed-inside=true" "keep-closed-nostamp=false" "keep-merged-future=true" \
+  "fields=number,title,url,headRefName,baseRefName,reviewDecision,mergeable,statusCheckRollup,createdAt,isDraft,state,mergedAt,closedAt" \
   "repos=acme/widgets acme/etl acme/wt" \
   "cap=acme/r0 acme/r1 acme/r2 acme/r3 acme/r4 acme/r5 acme/r6 acme/r7 acme/r8 acme/r9"; do
   if printf '%s\n' "$unit_out" | grep -Fxq -- "$expected"; then pass; else fail "sources: expected line '$expected' in: $unit_out"; fi
@@ -861,10 +964,11 @@ done
 # r is the same refresh a timer tick runs: the fleet snapshot, then the PR fetch against the
 # repositories that snapshot names. The board asks GitHub itself, so the fake gh on PATH logs one
 # call per candidate repository (acme/widgets, acme/api and acme/etl carry PR URLs in the stand-in
-# snapshot), createdAt in the field list; the start-up read is one set and r adds the second. The
-# stand-in's fm-bearings-snapshot.sh must not run at all (falsify: keep runBearingsPrs as the
-# default source, drop createdAt from GH_PR_FIELDS, or drop fetchPrs from refreshLive).
-gh_line() { printf 'gh pr list --repo %s --state open --limit 21 --json number,title,url,headRefName,reviewDecision,mergeable,statusCheckRollup,createdAt' "$1"; }
+# snapshot), every state, newest-updated first, one over the 50 cap, the full field list; the start-up
+# read is one set and r adds the second. The stand-in's fm-bearings-snapshot.sh must not run at all
+# (falsify: keep runBearingsPrs as the default source, keep --state open or drop a field in ghPrList,
+# or drop fetchPrs from refreshLive).
+gh_line() { printf 'gh pr list --repo %s --state all --search sort:updated-desc --limit 51 --json number,title,url,headRefName,baseRefName,reviewDecision,mergeable,statusCheckRollup,createdAt,isDraft,state,mergedAt,closedAt' "$1"; }
 expected_live="$(gh_line acme/api)
 $(gh_line acme/api)
 $(gh_line acme/etl)
@@ -877,12 +981,19 @@ frame_r=$(render_live --keys "r" --cols 160 --rows 40) || fail "refresh default:
 assert_fetch_log "$expected_live" "r by default runs the snapshot and then one gh pr list per candidate repository, never the firstmate PR script (falsify: flip the prs default in parseArgs, or call runBearingsPrs with gh on PATH)"
 assert_contains "$frame_r" "refreshed: snapshot and PR checks" "r reports the refresh"
 # The rows come from the fake gh's answers: ship-alpha's PR, opened in 2020, shows a day count with no
-# marker; the failing PR nobody recorded shows the mapped checks state; ship-gamma's recorded PR 7 is
-# not in the fake's list and, with no status file on this host, has no age to fall back to
-# (falsify: drop created_at from projectPr, or the FAILURE branch of checksState).
-assert_row "$frame_r" '^│ passing +review +ship-alpha +https://github.com/acme/widgets/pull/41 +acme/widgets +main +[0-9]+d │$' "live: the PR age comes from gh's createdAt"
-assert_row "$frame_r" '^│ failing +changes +api#8 +https://github.com/acme/api/pull/8 · conflicting +acme/api +main +[0-9]+d │$' "live: a FAILURE conclusion maps to failing"
-assert_row "$frame_r" '^│ unlisted +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +acme/api +main +- │$' "live: a recorded PR the fetch did not list stays unlisted"
+# marker and its title and base branch; the failing PR nobody recorded shows the mapped checks state;
+# ship-gamma's recorded PR 7 is not in the fake's list and, with no status file on this host, has no
+# age to fall back to; api#9, merged at run time, is listed as MERGED inside the window, and api#10,
+# closed in 2020, is dropped by the fetch before the model sees it (falsify: drop created_at, title or
+# base from projectPr, the FAILURE branch of checksState, the MERGED branch of prStatus, or
+# keepFetchedPr from ghPrList).
+assert_row "$frame_r" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +[0-9]+d │$' "live: STATUS, title and base branch come from gh, the PR age from its createdAt"
+assert_row "$frame_r" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +[0-9]+d │$' "live: a FAILURE conclusion maps to failing"
+assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "live: a recorded PR the fetch did not list stays unlisted"
+assert_row "$frame_r" '^│ passing +MERGED +api#9 +Bump the retry budget +main +[0-9]+d │$' "live: a PR gh reports merged just now is listed as MERGED"
+assert_no_row "$frame_r" 'api#10|Old spike' "live: a PR closed in 2020 is outside the 12-hour window and dropped by the fetch"
+assert_contains "$frame_r" "Ready for review (4)" "live: the pane counts the rows shown after the window filter"
+assert_before "$frame_r" '^│ failing +IN REVIEW +api#8' '^│ passing +MERGED +api#9' "live: MERGED sorts after the open PRs"
 frame_r=$(render_live --keys "r" --prs) || fail "refresh --prs: render exited non-zero"
 assert_fetch_log "$expected_live" "--prs is a no-op: the same calls (falsify: make --prs disable or double the fetch)"
 frame_r=$(render_live --keys "r" --no-prs) || fail "refresh --no-prs: render exited non-zero"
@@ -1141,16 +1252,18 @@ assert_no_upgrade "checkout: y with nothing pending runs nothing"
 
 # Closing: esc, . and q bring the board back with its selection and expanded groups intact (falsify:
 # reset view.pane or view.row when the page closes, or drop the close case).
+# tab,j selects the second Ready for review row, api#8 (the pane sorts by status, newest first, so
+# ship-alpha's newer PR 41 comes first), a selection enter would not reach from the default one.
 rm -f "$OPENER_LOG"
 frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings esc: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "esc closes the page and enter acts on the row selected before it opened"
+assert_opened "https://github.com/acme/api/pull/8" "esc closes the page and enter acts on the row selected before it opened"
 assert_count "$frame_o" "┌─" 5 "esc: the grid is back"
 rm -f "$OPENER_LOG"
 frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,.,enter" --opener-cmd "$FAKE_OPENER") || fail "settings dot: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" ". closes the page with the selection intact"
+assert_opened "https://github.com/acme/api/pull/8" ". closes the page with the selection intact"
 rm -f "$OPENER_LOG"
 frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,q,enter" --opener-cmd "$FAKE_OPENER") || fail "settings q: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "q closes the page like the help overlay, and the board is not quit"
+assert_opened "https://github.com/acme/api/pull/8" "q closes the page like the help overlay, and the board is not quit"
 frame_k=$(render populated.json --install-root "$INSTALL" --keys "tab,tab,j,j,j,j,l,.,escape") || fail "settings expanded: render exited non-zero"
 assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "a group expanded before the page opened is still expanded after it closes"
 # . works from the landing page too and esc returns there (falsify: drop . from LANDING_KEYS).
@@ -1209,7 +1322,7 @@ assert_row "$frame_s" '^ Settings +$' "--no-mouse: a double-click opens no subme
 # board's selection from before the page opened is what enter acts on afterwards.
 rm -f "$OPENER_LOG"
 frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,." --mouse "click:30,29 wheel:down:30,29" --keys "escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings click through: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "a click and a wheel on the page leave the board's selection where it was"
+assert_opened "https://github.com/acme/api/pull/8" "a click and a wheel on the page leave the board's selection where it was"
 
 # ------------------------------------------------------------ refresh schedule
 # The interactive schedule, run with --headless against a stand-in whose snapshot sleeps 7 s, with
@@ -1243,7 +1356,7 @@ if [ -s "$SCRATCH/headless.log" ]; then fail "headless run wrote to the terminal
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x40 the lines are: 0 title,
 # 1 Needs you title, 3-6 its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 8 Ready for
-# review title, 10-12 its rows (api#8, ship-alpha #41, ship-gamma #7), 14 In flight title, 15 its
+# review title, 10-12 its rows (ship-alpha #41, api#8, ship-gamma #7), 14 In flight title, 15 its
 # column header, 16-22 its rows (ship-alpha, tmux-task, remote-sm group, scout-beta, hyperion group,
 # ship-gamma, ship-old), 26 Findings title, 28-30 its rows (scout-beta, mobile-fix, old-scout),
 # 32 Landed title, 34-37 its rows (etl-index, ship-old, mobile-fix, old-scout), 39 footer.
@@ -1283,8 +1396,8 @@ assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[1\].*Needs you \(1\)' "list 
 # A double-click is enter on that row: two left clicks on one row within 400 ms, recognized in
 # lib/controller.mjs, not by the terminal library (falsify: drop the lastClick check from mouseAction, or
 # stamp the two dblclick events with different times in driveOnce).
-frame_m=$(render_mouse populated.json "dblclick:30,11") || fail "mouse dblclick review: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "double-click on the second Ready for review row opens its PR, as enter does"
+frame_m=$(render_mouse populated.json "dblclick:30,10") || fail "mouse dblclick review: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "double-click on the first Ready for review row opens its PR, as enter does"
 assert_contains "$frame_m" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "double-click: the footer names the opened PR"
 frame_m=$(render_mouse populated.json "click:30,11 click:30,11") || fail "mouse two clicks: render exited non-zero"
 assert_not_opened "two single clicks a second apart on one row open nothing"

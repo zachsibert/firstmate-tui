@@ -38,7 +38,8 @@
 //     "herdr": { "state": "connected" | "disconnected" | ... (optional),
 //                "agents": [ { pane_id, agent_status, terminal_title_stripped } ] } | null,
 //     "prs": { "candidate_prs": [ { num, repo, task, url, review, mergeable,
-//                                   checks, created_at? } ] } | null,
+//                                   checks, created_at?, title?, base?, draft?,
+//                                   state?, merged_at?, closed_at? } ] } | null,
 //     "mtimes": { "<absolute path>": epoch seconds } }
 // With --no-herdr the fixture's herdr block is still applied as an offline
 // overlay (header says "herdr fixture") so the join is testable without a

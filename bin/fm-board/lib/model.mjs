@@ -13,9 +13,11 @@
 //   prs           { enabled, fetchedAt, error, candidate_prs[] } from the live
 //                 PR fetch in lib/sources.mjs (enabled unless --no-prs; fetchedAt
 //                 is null until the first fetch of a session lands). A candidate
-//                 is {num, repo, task, url, review, mergeable, checks} plus
-//                 created_at (ISO 8601, from gh's createdAt; absent from the
-//                 fm-bearings-snapshot.sh fallback)
+//                 is {num, repo, task, url, review, mergeable, checks} plus,
+//                 from gh only (absent from the fm-bearings-snapshot.sh
+//                 fallback): created_at, merged_at, closed_at (ISO 8601),
+//                 title, base (the base branch), draft (boolean) and state
+//                 (OPEN, MERGED or CLOSED)
 //   mtime(path)   epoch seconds of a file's last write, or null
 //
 // Options (second argument of buildModel):
@@ -27,7 +29,8 @@
 //   hiddenPanes   Set of pane ids switched off with `1`-`5`
 //
 // Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount } x5 ], meta }.
-// Every row carries tag, extra, id, text, repo, home, age (display fields) plus
+// Every row carries tag, extra, id, text, repo, home, base, age (display
+// fields; base is the PR's base branch, drawn by Ready for review only) plus
 // name (the undecorated id for notices), homeId (main or the secondmate id),
 // hideKey (pane:home:name, plus the completion date for Landed), ageSeconds
 // (numeric; `age` is its short form, with a trailing `~` when ageFallback says
@@ -124,6 +127,7 @@ function makeRow(fields) {
     repo: '-',
     home: MAIN_HOME_LABEL,
     homeId: MAIN_HOME_LABEL,
+    base: '-',
     hideKey: null,
     ageSeconds: null,
     paneId: null,
@@ -146,6 +150,7 @@ function makeRow(fields) {
   // row with no age at all reads "-" with no marker.
   row.age = fmtAge(row.ageSeconds) + (row.ageFallback && row.ageSeconds !== null && row.ageSeconds !== undefined ? '~' : '');
   row.repo = row.repo || '-';
+  row.base = row.base || '-';
   row.url = row.url && /^https?:\/\//.test(row.url) ? row.url : null;
   return row;
 }
@@ -301,9 +306,29 @@ function needsRows(facts, opts) {
 }
 
 // --------------------------------------------------------- Ready for review
-// A PR is still "ready for review" while its task is unfinished. A secondmate
-// record's pr.url is the mate's own mention of a PR (its work lands through its
-// ledger), and a task whose backlog row is done is finished work; both stay out.
+//
+// One row per pull request GitHub lists for the candidate repositories, plus
+// the recorded PRs of unfinished tasks the fetch did not list. A PR stays
+// listed while it is open and, once merged or closed, for
+// TERMINAL_WINDOW_SECONDS after it finished, so the captain sees what landed
+// or was abandoned since the last look; then it leaves the pane. A PR a
+// secondmate record merely mentions is not a recorded PR (the mate's work
+// lands through its ledger). A recorded PR of a task whose backlog row is done
+// appears only through its fetched record, and only while that record is
+// terminal and inside the window: the task is finished, so the row is a notice
+// that its PR landed, not open work.
+
+export const TERMINAL_WINDOW_SECONDS = 12 * 3600;
+
+// The STATUS column's words, in the order the pane lists them: open work
+// first, then what finished. '-' is a recorded PR the fetch did not list (or
+// the fetch is off), whose status is unknown; it sits between the two.
+export const REVIEW_STATUSES = ['DRAFT', 'IN REVIEW', 'APPROVED', 'CLOSED', 'MERGED'];
+const STATUS_ORDER = { DRAFT: 0, 'IN REVIEW': 1, APPROVED: 2, '-': 3, CLOSED: 4, MERGED: 5 };
+
+// Recorded PRs: task records and backlog rows with a PR URL, keyed by URL, each
+// with its task id, the backlog title (the TITLE fallback for a source that
+// carries no PR titles) and whether the task's backlog row is done.
 function recordedPrs(facts) {
   const snap = facts.snapshot || {};
   const backlogById = backlogIndex(snap);
@@ -311,37 +336,45 @@ function recordedPrs(facts) {
   for (const task of Array.isArray(snap.tasks) ? snap.tasks : []) {
     if (!(task.pr && task.pr.url)) continue;
     if (task.kind === 'secondmate') continue;
-    if (taskBacklogState(task, backlogById) === 'done') continue;
-    out.set(task.pr.url, { url: task.pr.url, task: task.id, source: task.pr.source || 'meta' });
+    const row = backlogById.get(task.id);
+    const title = (row && row.title) || (task.backlog && task.backlog.title) || null;
+    out.set(task.pr.url, { url: task.pr.url, task: task.id, title, done: taskBacklogState(task, backlogById) === 'done' });
   }
   const backlog = snap.backlog && Array.isArray(snap.backlog.records) ? snap.backlog.records : [];
   for (const r of backlog) {
-    if (r.pr_url && r.state !== 'done' && !out.has(r.pr_url)) out.set(r.pr_url, { url: r.pr_url, task: r.id, source: 'backlog' });
+    if (r.pr_url && !out.has(r.pr_url)) out.set(r.pr_url, { url: r.pr_url, task: r.id, title: r.title || null, done: r.state === 'done' });
   }
   return [...out.values()];
 }
 
-function reviewShort(review) {
-  switch (review) {
-    case 'APPROVED':
-      return 'approved';
-    case 'CHANGES_REQUESTED':
-      return 'changes';
-    case 'REVIEW_REQUIRED':
-      return 'review';
-    default:
-      return review ? clean(review).toLowerCase().slice(0, 9) : '-';
-  }
+// The STATUS cell of a fetched PR. MERGED and CLOSED are read first, so a
+// draft closed unmerged reads CLOSED and leaves with the window instead of
+// sitting as DRAFT for good; then DRAFT; an open PR is APPROVED when GitHub's
+// review decision says so and IN REVIEW otherwise. A record with no state
+// (the fm-bearings-snapshot.sh fallback lists open PRs only) counts as open.
+export function prStatus(c) {
+  const state = String(c.state || 'OPEN').toUpperCase();
+  if (c.merged === true || state === 'MERGED') return 'MERGED';
+  if (state === 'CLOSED') return 'CLOSED';
+  if (c.draft === true || c.isDraft === true) return 'DRAFT';
+  return c.review === 'APPROVED' ? 'APPROVED' : 'IN REVIEW';
 }
 
-// GitHub says the PR is no longer open. fm-bearings-snapshot.sh lists open PRs
-// only and carries no state field today, so this reads `state` (MERGED, CLOSED)
-// or `merged` when a candidate carries one; such a PR is dropped, and a
-// recorded PR it matches is dropped too rather than shown as unlisted.
-function prClosed(c) {
-  if (c.merged === true) return true;
-  const state = String(c.state || '').toUpperCase();
-  return state === 'MERGED' || state === 'CLOSED';
+// When a finished PR left the open state, as epoch seconds: merged_at for a
+// merged PR (closed_at when that is missing), closed_at for a closed one; null
+// when the record carries no usable time. A stamp in the future counts as now.
+function prFinishedAt(c, status, now) {
+  const stamp = status === 'MERGED' ? (c.merged_at ?? c.mergedAt ?? c.closed_at ?? c.closedAt) : (c.closed_at ?? c.closedAt);
+  const t = parseTime(stamp);
+  return t === null ? null : Math.min(t, now);
+}
+
+// A merged or closed PR is listed while it finished less than
+// TERMINAL_WINDOW_SECONDS ago; one with no time stamp cannot be placed in the
+// window and is dropped, as every finished PR was before the window existed.
+export function insideWindow(c, status, now) {
+  const at = prFinishedAt(c, status, now);
+  return at !== null && now - at < TERMINAL_WINDOW_SECONDS;
 }
 
 // The CHECKS cell and the text suffix of a recorded PR the live list does not
@@ -373,9 +406,20 @@ function reviewAge(facts, taskById, taskId, created) {
   return { ageSeconds: task ? statusLogAge(facts, task) : null, ageFallback: true };
 }
 
+// Newest first by ageSeconds (the PR's creation time, else the file time); a
+// row with no age at all goes after the rows that have one.
+function byNewest(a, b) {
+  const aa = a.ageSeconds ?? null;
+  const bb = b.ageSeconds ?? null;
+  if (aa === null) return bb === null ? 0 : 1;
+  if (bb === null) return -1;
+  return aa - bb;
+}
+
 function reviewRows(facts) {
   const rows = [];
   const recorded = recordedPrs(facts);
+  const byUrl = new Map(recorded.map((r) => [r.url, r]));
   const snap = facts.snapshot || {};
   const taskById = new Map((Array.isArray(snap.tasks) ? snap.tasks : []).map((t) => [t.id, t]));
   const prs = facts.prs || { enabled: false };
@@ -384,17 +428,20 @@ function reviewRows(facts) {
   if (prs.enabled && Array.isArray(prs.candidate_prs)) {
     for (const c of prs.candidate_prs) {
       seen.add(c.url);
-      if (prClosed(c)) continue;
-      const rec = recorded.find((r) => r.url === c.url);
+      const status = prStatus(c);
+      const terminal = status === 'MERGED' || status === 'CLOSED';
+      if (terminal && !insideWindow(c, status, facts.now)) continue;
+      const rec = byUrl.get(c.url);
+      if (rec && rec.done && !terminal) continue;
       const taskId = rec ? rec.task : c.task && c.task !== '-' ? c.task : '-';
-      const parts = [c.url];
-      if (c.mergeable && c.mergeable !== 'MERGEABLE') parts.push(String(c.mergeable).toLowerCase());
       rows.push(
         makeRow({
           tag: c.checks || 'none',
-          extra: reviewShort(c.review),
+          extra: status,
+          status,
           id: taskId === '-' ? `${basename(c.repo)}#${c.num}` : taskId,
-          text: parts.join(' · '),
+          text: c.title || (rec && rec.title) || c.url,
+          base: c.base || '-',
           repo: c.repo,
           url: c.url,
           ...reviewAge(facts, taskById, taskId, prCreatedAt(c, facts.now)),
@@ -403,12 +450,13 @@ function reviewRows(facts) {
     }
   }
   for (const r of recorded) {
-    if (seen.has(r.url)) continue;
+    if (seen.has(r.url) || r.done) continue;
     const pr = repoFromUrl(r.url);
     rows.push(
       makeRow({
         tag: unlisted.tag,
-        extra: pr ? `#${pr.num}` : '-',
+        extra: '-',
+        status: '-',
         id: r.task,
         text: `${r.url} · ${unlisted.note}`,
         repo: pr ? pr.repo : '-',
@@ -417,10 +465,11 @@ function reviewRows(facts) {
       }),
     );
   }
-  const order = { failing: 0, pending: 1, passing: 2, none: 3 };
+  // Status order first (open work, then unknown, then finished), newest first
+  // inside a status, fetch order for a tie.
   return rows
     .map((r, i) => ({ r, i }))
-    .sort((a, b) => (order[a.r.tag] ?? 5) - (order[b.r.tag] ?? 5) || a.i - b.i)
+    .sort((a, b) => (STATUS_ORDER[a.r.status] ?? 3) - (STATUS_ORDER[b.r.status] ?? 3) || byNewest(a.r, b.r) || a.i - b.i)
     .map((x) => x.r);
 }
 
