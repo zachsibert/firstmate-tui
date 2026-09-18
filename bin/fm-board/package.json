@@ -1,8 +1,8 @@
 {
-  "name": "fm-board",
-  "version": "0.1.0",
+  "name": "firstmate-tui",
+  "version": "0.2.1",
   "private": true,
-  "description": "Read-only herdr-hosted terminal board over the firstmate fleet snapshot",
+  "description": "firstmate-tui: read-only herdr-hosted terminal board over the firstmate fleet snapshot",
   "type": "module",
   "license": "MIT",
   "engines": {

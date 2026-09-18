@@ -19,4 +19,4 @@ if [ "${FM_BOARD_TEST_UPGRADE_EXIT:-0}" != 0 ]; then
   echo "install: error: checksum mismatch for fm-board-v0.2.0.tar.gz: expected 'abc', got 'def'" >&2
   exit "$FM_BOARD_TEST_UPGRADE_EXIT"
 fi
-echo "install: fm-board 0.2.0 installed (replaced 0.1.0)"
+echo "install: firstmate-tui 0.2.0 installed (replaced 0.1.0)"

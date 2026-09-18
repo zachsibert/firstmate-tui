@@ -357,7 +357,7 @@ function settingsFooterHints(s) {
 function settingsTail(s) {
   const tail = [];
   if (s.pending) tail.push({ text: confirmText(s.pending), style: 'notice' });
-  if (s.running) tail.push({ text: `running fm-board upgrade ${s.running.args.join(' ')} … keys are ignored until it exits`, style: 'notice' });
+  if (s.running) tail.push({ text: `running firstmate-tui upgrade ${s.running.args.join(' ')} … keys are ignored until it exits`, style: 'notice' });
   for (const o of s.output) tail.push({ text: o, style: 'row' });
   if (s.result && s.result.ok) tail.push({ text: `restart to use ${s.result.version || 'the installed copy'} · R quits and relaunches the board`, style: 'help' });
   else if (s.result) {
@@ -378,7 +378,7 @@ function renderSettings(model, cols, rows, view) {
   const head = [];
   head.push(text(s.menu === 'betas' ? 'Settings · Betas' : 'Settings', 'heading'));
   head.push(L([]));
-  // Identity: the words `fm-board version` prints, then where this copy lives.
+  // Identity: the words `firstmate-tui version` prints, then where this copy lives.
   if (install.version) head.push(text(describeVersion(install.version)));
   else head.push(text(`fm-board: version unreadable (${install.error})`, 'bad'));
   if (install.record) {

@@ -921,7 +921,7 @@ if [ -f "$FETCH_LOG" ]; then fail "a fixture render ran a snapshot script: $(cat
 # `--curl-cmd bash tests/fake-curl.sh` over REL (tests/fixtures/releases/api: 0.2.0 is the latest
 # stable release, three prereleases out of publish order in the list), REL_CURRENT (the same list
 # with 0.1.0 as the latest) or REL_NONE (nothing behind the API). The fake upgrade logs its argv to
-# UPGRADE_LOG and exits FM_BOARD_TEST_UPGRADE_EXIT; a real `fm-board upgrade`, install.sh or
+# UPGRADE_LOG and exits FM_BOARD_TEST_UPGRADE_EXIT; a real `firstmate-tui upgrade`, install.sh or
 # GitHub is never reached.
 REL="$FIX/releases"
 REL_CURRENT="$SCRATCH/releases-current"
@@ -968,10 +968,10 @@ assert_no_upgrade() { # <label>
 frame_s=$(render_settings "$REL" "$INSTALL" ".") || fail "settings: render exited non-zero"
 assert_row "$frame_s" '^ Settings +$' "settings: heading"
 assert_count "$frame_s" "┌─" 0 "settings: no pane is drawn behind the page"
-assert_row "$frame_s" '^ fm-board 0\.1\.0 \(stable release\) +$' "settings: the running version, in the words fm-board version prints"
+assert_row "$frame_s" '^ firstmate-tui 0\.1\.0 \(stable release\) +$' "settings: the running version, in the words firstmate-tui version prints"
 assert_contains "$frame_s" " installed at $INSTALL (from release v0.1.0) · repository acme/fm-board-test" "settings: prefix, origin and repository come from the install record"
 assert_row "$frame_s" '^ latest stable  0\.2\.0 · published 2026-09-17 · upgrade available +$' "settings: the latest stable release, its date and the verdict (falsify: compare suffixes in compareBase)"
-assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 +fm-board upgrade --version 0\.2\.0 +$' "settings: the upgrade action leads, highlighted, naming the exact command"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 +firstmate-tui upgrade --version 0\.2\.0 +$' "settings: the upgrade action leads, highlighted, naming the exact command"
 assert_row "$frame_s" '^   Betas +3 prereleases +$' "settings: the Betas entry counts the prereleases and not the stable releases"
 assert_row "$frame_s" '^   Refresh release data +GitHub releases of acme/fm-board-test +$' "settings: the refetch entry"
 assert_row "$frame_s" '^ refresh cadence +30 s \(--refresh\) +$' "settings: refresh cadence, read-only"
@@ -1042,7 +1042,7 @@ assert_not_contains "$frame_s" "Settings · Betas" "esc in Betas leaves the subm
 # starts it; any other key cancels and does nothing else (falsify: run the upgrade from the confirm
 # case, or let j move while a confirmation is pending).
 frame_s=$(render_settings "$REL" "$INSTALL" ".,enter") || fail "confirm: render exited non-zero"
-assert_row "$frame_s" '^ install 0\.2\.0 \(fm-board upgrade --version 0\.2\.0\)\? y to confirm, esc to cancel +$' "confirm: the line names the version and the command"
+assert_row "$frame_s" '^ install 0\.2\.0 \(firstmate-tui upgrade --version 0\.2\.0\)\? y to confirm, esc to cancel +$' "confirm: the line names the version and the command"
 assert_row "$frame_s" '^ y confirm  esc cancel' "confirm: the footer shows the two keys"
 assert_no_upgrade "choosing the upgrade runs nothing before y"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,j") || fail "confirm j: render exited non-zero"
@@ -1064,9 +1064,9 @@ frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,y") || fail "upgrade y: ren
 assert_upgrade_log "upgrade --version 0.2.0" "y runs bash <prefix>/bin/fm-board.sh upgrade --version 0.2.0, once"
 assert_row "$frame_s" '^ install: downloading fm-board-v0\.2\.0\.tar\.gz from acme/fm-board-test release v0\.2\.0 +$' "upgrade: the download line is on the page"
 assert_row "$frame_s" '^ install: checksum verified +$' "upgrade: the verify line is on the page"
-assert_row "$frame_s" '^ install: fm-board 0\.2\.0 installed \(replaced 0\.1\.0\) +$' "upgrade: the swap line is on the page"
+assert_row "$frame_s" '^ install: firstmate-tui 0\.2\.0 installed \(replaced 0\.1\.0\) +$' "upgrade: the swap line is on the page"
 assert_before "$frame_s" 'install: downloading' 'install: checksum verified' "upgrade: lines keep their order (1)"
-assert_before "$frame_s" 'install: checksum verified' 'install: fm-board 0\.2\.0 installed' "upgrade: lines keep their order (2)"
+assert_before "$frame_s" 'install: checksum verified' 'install: firstmate-tui 0\.2\.0 installed' "upgrade: lines keep their order (2)"
 assert_row "$frame_s" '^ restart to use 0\.2\.0 · R quits and relaunches the board +$' "upgrade: success names the installed version and the relaunch key"
 assert_row "$frame_s" '^ ▸ Relaunch now +quit and start 0\.2\.0 \(R\) +$' "upgrade: the relaunch entry leads the menu after a success"
 assert_not_contains "$frame_s" "Upgrade to 0.2.0" "upgrade: the upgrade entry gives way to the relaunch entry"
@@ -1076,6 +1076,16 @@ assert_contains "$frame_s" "would relaunch: exit 75 makes bin/fm-board.sh run st
 assert_upgrade_log "upgrade --version 0.2.0" "R runs no second upgrade"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,R") || fail "R early: render exited non-zero"
 assert_not_contains "$frame_s" "would relaunch" "R before any success does nothing (falsify: drop the result check from the R case)"
+# The version in "restart to use" is read from the installer's last line, in the current wording and
+# in the 0.1.0 installer's, which a 0.1.0 install's own upgrade still prints (falsify: match only one
+# name in installedVersionFromOutput).
+parsed=$(node --input-type=module -e "
+  import { installedVersionFromOutput } from '$ROOT/bin/fm-board/lib/settings.mjs';
+  console.log(installedVersionFromOutput(['install: checksum verified', 'install: firstmate-tui 0.2.1 installed (replaced 0.2.0)']));
+  console.log(installedVersionFromOutput(['install: fm-board 0.2.1 installed']));
+  console.log(installedVersionFromOutput(['install: checksum verified']));
+")
+if [ "$(printf '%s\n' "$parsed" | grep -c '^0\.2\.1$')" -eq 2 ] && [ "$(printf '%s\n' "$parsed" | tail -n 1)" = null ]; then pass; else fail "installedVersionFromOutput: expected 0.2.1 from both wordings and null without the line, got: $parsed"; fi
 
 # A failing upgrade: the launcher's stderr is on the page verbatim with the exit status, nothing says
 # restart, and the page stays usable with the upgrade still offered (falsify: drop stderr from
@@ -1094,12 +1104,12 @@ assert_row "$frame_s" '^ Settings · Betas +$' "failure: keys work again afterwa
 # A beta and Back to stable go through the same confirm and the same launcher (falsify: give the
 # beta entries a different channel, or drop the stable channel from upgradeArgs).
 frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,enter") || fail "beta confirm: render exited non-zero"
-assert_row "$frame_s" '^ install 0\.1\.0-d8b290e \(fm-board upgrade --version 0\.1\.0-d8b290e\)\? y to confirm, esc to cancel +$' "beta: the confirm line names the exact beta"
+assert_row "$frame_s" '^ install 0\.1\.0-d8b290e \(firstmate-tui upgrade --version 0\.1\.0-d8b290e\)\? y to confirm, esc to cancel +$' "beta: the confirm line names the exact beta"
 assert_no_upgrade "beta: nothing runs before y"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,enter,y") || fail "beta y: render exited non-zero"
 assert_upgrade_log "upgrade --version 0.1.0-d8b290e" "beta: y runs the launcher with --version and the exact beta"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,j,j,enter") || fail "stable confirm: render exited non-zero"
-assert_row "$frame_s" '^ back to stable 0\.2\.0 \(fm-board upgrade --stable\)\? y to confirm, esc to cancel +$' "Back to stable: the confirm line names the release and the --stable command"
+assert_row "$frame_s" '^ back to stable 0\.2\.0 \(firstmate-tui upgrade --stable\)\? y to confirm, esc to cancel +$' "Back to stable: the confirm line names the release and the --stable command"
 assert_no_upgrade "Back to stable: nothing runs before y"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,j,j,enter,y") || fail "stable y: render exited non-zero"
 assert_upgrade_log "upgrade --stable" "Back to stable: y runs the launcher's --stable path"
@@ -1110,7 +1120,7 @@ assert_row "$frame_s" '^ ▸ Relaunch now ' "a success from the Betas menu offer
 # no upgrade and no Back to stable, lists the betas read-only and asks the default repository
 # (falsify: drop the checkout guard from settingsEntries, or make readInstall default to a record).
 frame_s=$(render_settings "$REL" "$CHECKOUT" ".") || fail "checkout: render exited non-zero"
-assert_row "$frame_s" '^ fm-board 0\.1\.0 \(stable release\) +$' "checkout: the running version"
+assert_row "$frame_s" '^ firstmate-tui 0\.1\.0 \(stable release\) +$' "checkout: the running version"
 assert_contains "$frame_s" " running from a checkout at $CHECKOUT (no install record); update it with git:" "checkout: the page says it is a checkout"
 assert_contains "$frame_s" "   git -C $CHECKOUT pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)" "checkout: the git command the launcher prints"
 assert_not_contains "$frame_s" "installed at" "checkout: no install line"
@@ -1183,14 +1193,14 @@ assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "wheel up at the top stays on 
 frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "click:10,12 click:30,0 click:30,39") || fail "settings chrome click: render exited non-zero"
 assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "clicks on a flag line, the title line and the footer change nothing on the page"
 frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "dblclick:10,7") || fail "settings dblclick upgrade: render exited non-zero"
-assert_row "$frame_s" '^ install 0\.2\.0 \(fm-board upgrade --version 0\.2\.0\)\? y to confirm, esc to cancel +$' "a double-click on Upgrade asks for confirmation like enter"
+assert_row "$frame_s" '^ install 0\.2\.0 \(firstmate-tui upgrade --version 0\.2\.0\)\? y to confirm, esc to cancel +$' "a double-click on Upgrade asks for confirmation like enter"
 assert_no_upgrade "a double-click runs nothing before y"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,enter" --mouse "click:10,9") || fail "settings click while pending: render exited non-zero"
 assert_contains "$frame_s" "cancelled; nothing was installed" "a click while a confirmation is pending cancels it"
 assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "the cancelling click does not move the highlight"
 assert_no_upgrade "a click while pending runs nothing"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter" --mouse "dblclick:10,8") || fail "settings betas dblclick: render exited non-zero"
-assert_row "$frame_s" '^ install 0\.1\.0-d8b290e \(fm-board upgrade --version 0\.1\.0-d8b290e\)\? y to confirm, esc to cancel +$' "in Betas a double-click on the second prerelease asks to install exactly it"
+assert_row "$frame_s" '^ install 0\.1\.0-d8b290e \(firstmate-tui upgrade --version 0\.1\.0-d8b290e\)\? y to confirm, esc to cancel +$' "in Betas a double-click on the second prerelease asks to install exactly it"
 assert_no_upgrade "in Betas a double-click runs nothing before y"
 frame_s=$(render_settings "$REL" "$INSTALL" "." --no-mouse --mouse "click:10,8 dblclick:10,8") || fail "settings no-mouse click: render exited non-zero"
 assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "--no-mouse: clicks on the page change nothing"
@@ -1403,8 +1413,8 @@ else
 fi
 assert_contains "$out" "FM_HOME is not set" "wrapper names FM_HOME in its error"
 assert_lines "$out" 2 "the FM_HOME error is exactly two lines"
-assert_row "$out" '^fm-board: FM_HOME is not set\. In a terminal:  export FM_HOME=/path/to/firstmate   \(the directory holding bin/fm-fleet-snapshot\.sh\), then run this again\.$' "line 1 carries the export command"
-assert_row "$out" '^fm-board: for a herdr plugin action, which carries no FM_HOME:  mkdir -p "\$\(herdr plugin config-dir firstmate\.board\)" && echo /path/to/firstmate > "\$\(herdr plugin config-dir firstmate\.board\)/fm-home"$' "line 2 carries the fm-home command in its herdr-less form"
+assert_row "$out" '^firstmate-tui: FM_HOME is not set\. In a terminal:  export FM_HOME=/path/to/firstmate   \(the directory holding bin/fm-fleet-snapshot\.sh\), then run this again\.$' "line 1 carries the export command"
+assert_row "$out" '^firstmate-tui: for a herdr plugin action, which carries no FM_HOME:  mkdir -p "\$\(herdr plugin config-dir firstmate\.board\)" && echo /path/to/firstmate > "\$\(herdr plugin config-dir firstmate\.board\)/fm-home"$' "line 2 carries the fm-home command in its herdr-less form"
 assert_not_contains "$out" "Found a firstmate home" "no firstmate home above the scratch directory: nothing is suggested"
 # With herdr answering, the plugin line prints the resolved directory instead (falsify: drop the
 # plugin_config_dir call from die_no_home).
@@ -1434,11 +1444,30 @@ if "$BOARD" --help 2>/dev/null | grep -Fq -- "--keys"; then pass; else fail "wra
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--viewer-cmd"; then pass; else fail "wrapper --help lists --viewer-cmd"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--view-state"; then pass; else fail "wrapper --help lists --view-state"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "-firstmate"; then fail "wrapper --help still lists a firstmate pane subcommand"; else pass; fi
-# open runs in place: with the same flags it prints the frame run prints (falsify: drop the
-# open -> run mapping after the argument loop, or route plain open to open_detached).
+# Bare, `open` and `run` are one command: with the same flags all three print the same
+# frame, and it is the frame the suite checked above (falsify: drop the open -> run mapping
+# after the argument loop, route plain open to open_detached, or drop `run` from the
+# subcommand case so it falls into the unknown-subcommand branch).
+frame_bare=$("$BOARD" --render-once --fixture "$FIX/populated.json" --no-herdr) || fail "wrapper bare: render exited non-zero"
 frame_run=$("$BOARD" run --render-once --fixture "$FIX/populated.json" --no-herdr) || fail "wrapper run: render exited non-zero"
 frame_open=$("$BOARD" open --render-once --fixture "$FIX/populated.json" --no-herdr) || fail "wrapper open: render exited non-zero"
 if [ -n "$frame_open" ] && [ "$frame_open" = "$frame_run" ]; then pass; else fail "open printed a different frame from run: $(diff <(printf '%s\n' "$frame_run") <(printf '%s\n' "$frame_open") | head -n 5)"; fi
+if [ -n "$frame_bare" ] && [ "$frame_bare" = "$frame_open" ]; then pass; else fail "bare printed a different frame from open: $(diff <(printf '%s\n' "$frame_open") <(printf '%s\n' "$frame_bare") | head -n 5)"; fi
+if [ "$frame_bare" = "$frame" ]; then pass; else fail "the bare frame differs from the populated frame rendered through render() at the top of the suite"; fi
+# `help` is the usage page with exit 0, the same page as --help and -h; an unknown
+# subcommand prints it to stderr and exits 2 with nothing on stdout (falsify: drop the help
+# case or the catch-all from the subcommand case, or print the page to stdout there).
+if help_page=$("$BOARD" help 2>/dev/null); then pass; else fail "help should exit 0"; fi
+if [ "$help_page" = "$("$BOARD" --help 2>/dev/null)" ] && [ "$help_page" = "$("$BOARD" -h 2>/dev/null)" ]; then pass; else fail "help, --help and -h should print the same page"; fi
+bogus_stdout=$("$BOARD" bogus 2>"$SCRATCH/bogus.err")
+bogus_status=$?
+if [ "$bogus_status" -eq 2 ]; then pass; else fail "an unknown subcommand should exit 2, got $bogus_status"; fi
+if [ -z "$bogus_stdout" ]; then pass; else fail "an unknown subcommand printed to stdout: $bogus_stdout"; fi
+assert_file_contains "$SCRATCH/bogus.err" "unknown subcommand bogus" "the unknown subcommand is named on stderr"
+assert_file_contains "$SCRATCH/bogus.err" "usage: firstmate-tui [open] [flags]" "the usage page follows on stderr"
+# --help after open works like --help alone (falsify: handle -h/--help only before the
+# subcommand case).
+if "$BOARD" open --help >/dev/null 2>&1; then pass; else fail "open --help should exit 0"; fi
 # open --detached is the only route that places a pane, and it needs herdr; with --no-herdr the
 # wrapper refuses before any herdr call, which the fake's empty log proves (falsify: drop the
 # want_herdr guard from open_detached, or the --detached case from the argument loop).
@@ -1460,12 +1489,25 @@ if printf '%s\n' "$out" | grep -Fq -- "--detached applies to 'open' only"; then 
 # line in the header comment of bin/fm-board.sh).
 help=$("$BOARD" --help 2>/dev/null)
 if printf '%s\n' "$help" | grep -Fq -- "open --detached"; then pass; else fail "wrapper --help lists open --detached"; fi
-if printf '%s\n' "$help" | grep -Eq -- 'open \[flags\] +same as run'; then pass; else fail "wrapper --help says plain open is run"; fi
-if printf '%s\n' "$help" | grep -Fq -- "its own herdr pane"; then fail "wrapper --help still describes open as opening its own pane"; else pass; fi
+# The usage page leads with the bare command and `open` as one thing, running in this
+# terminal, and does not list `run`, which stays a hidden synonym (falsify: put [run] back
+# in the usage line, or dump the header comment again).
+if printf '%s\n' "$help" | grep -Eq -- '^usage: firstmate-tui \[open\] \[flags\] +run the board in this terminal'; then pass; else fail "wrapper --help leads with firstmate-tui [open] [flags] running in this terminal"; fi
+if printf '%s\n' "$help" | grep -Fq -- "[run]"; then fail "wrapper --help still lists run as the primary command"; else pass; fi
+if printf '%s\n' "$help" | grep -Eq -- '^ *firstmate-tui open \[flags\] .*herdr pane'; then fail "wrapper --help still describes plain open as opening its own pane"; else pass; fi
+if printf '%s\n' "$help" | grep -Fq -- "launcher for firstmate-tui"; then fail "wrapper --help dumps the header comment instead of a usage page"; else pass; fi
+for sub in "firstmate-tui focus" "firstmate-tui upgrade" "firstmate-tui version" "firstmate-tui help"; do
+  if printf '%s\n' "$help" | grep -Fq -- "$sub"; then pass; else fail "wrapper --help lists $sub"; fi
+done
+for flag in --refresh --no-prs --home --no-herdr; do
+  if printf '%s\n' "$help" | grep -Fq -- "$flag"; then pass; else fail "wrapper --help lists the common flag $flag"; fi
+done
+if printf '%s\n' "$help" | grep -Fq -- "Press ? inside the"; then pass; else fail "wrapper --help points at ? for the keys"; fi
+if printf '%s\n' "$help" | grep -Fq -- "running from a checkout at $ROOT"; then pass; else fail "wrapper --help from a checkout names the checkout (falsify: read the install record without testing for it)"; fi
 # The manifest's palette action has no terminal to run in, so it carries --detached; the pane
 # entry keeps running the board in place (falsify: edit either command in herdr-plugin.toml).
 if grep -Fq -- '"open", "--detached"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml open action carries --detached"; fi
-if grep -Fq -- '"../fm-board.sh", "run"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml pane entry runs the board in place"; fi
+if grep -Fq -- '"../fm-board.sh", "open"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml pane entry runs the board in place with the public subcommand"; fi
 if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --view-state 2>&1); then
   fail "--view-state without a value should exit non-zero"
 else

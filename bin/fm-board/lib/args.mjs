@@ -2,10 +2,10 @@
 // every flag through unchanged, so this is the single definition of the
 // board's options.
 
-export const USAGE = `usage: fm-board.sh [run] [options]
-       fm-board.sh open  [options]      open the board in its own herdr pane
-       fm-board.sh focus [options]      focus an already open board pane
-       fm-board.sh --render-once [--fixture <json>] [--cols N] [--rows N] [options]
+export const USAGE = `usage: firstmate-tui [open] [options]    run the board in this terminal
+       firstmate-tui open --detached [options]  open it in its own herdr pane
+       firstmate-tui focus [options]     focus an already open board pane
+       firstmate-tui --render-once [--fixture <json>] [--cols N] [--rows N] [options]
 
 options:
   --home <path>          add a secondmate home (repeatable). Default: FM_HOME plus

@@ -72,19 +72,19 @@ export function compareBase(a, b) {
   return 0;
 }
 
-// The same words `fm-board version` prints.
+// The same words `firstmate-tui version` prints (NAME in bin/fm-board.sh).
 export function describeVersion(v) {
   switch (versionKind(v)) {
     case 'stable':
-      return `fm-board ${v} (stable release)`;
+      return `firstmate-tui ${v} (stable release)`;
     case 'beta': {
       const p = parseVersion(v);
-      return `fm-board ${v} (beta: ${p.base} at commit ${p.suffix})`;
+      return `firstmate-tui ${v} (beta: ${p.base} at commit ${p.suffix})`;
     }
     case 'prerelease':
-      return `fm-board ${v} (prerelease)`;
+      return `firstmate-tui ${v} (prerelease)`;
     default:
-      return v ? `fm-board ${v}` : 'fm-board (version unknown)';
+      return v ? `firstmate-tui ${v}` : 'firstmate-tui (version unknown)';
   }
 }
 
@@ -204,7 +204,7 @@ export function settingsEntries(s) {
     entries.push({ id: 'relaunch', label: 'Relaunch now', detail: `quit and start ${s.result.version || 'the installed copy'} (R)`, selectable: true, action: { type: 'relaunch' } });
   } else if (!checkout) {
     const offer = upgradeOffer(s);
-    if (offer.version) entries.push({ id: 'upgrade', label: `Upgrade to ${offer.version}`, detail: `fm-board upgrade --version ${offer.version}`, selectable: true, action: { type: 'confirm', channel: 'version', version: offer.version } });
+    if (offer.version) entries.push({ id: 'upgrade', label: `Upgrade to ${offer.version}`, detail: `firstmate-tui upgrade --version ${offer.version}`, selectable: true, action: { type: 'confirm', channel: 'version', version: offer.version } });
   }
   entries.push({ id: 'betas', label: 'Betas', detail: betasDetail(r, checkout), selectable: true, action: { type: 'menu', menu: 'betas' } });
   entries.push({ id: 'refetch', label: 'Refresh release data', detail: `GitHub releases of ${s.install.repo}`, selectable: true, action: { type: 'fetch' } });
@@ -228,16 +228,17 @@ export function upgradeArgs({ channel, version }) {
 
 // The one line a pending choice shows: the exact version and the command.
 export function confirmText(pending) {
-  const cmd = `fm-board upgrade ${upgradeArgs(pending).join(' ')}`;
+  const cmd = `firstmate-tui upgrade ${upgradeArgs(pending).join(' ')}`;
   const what = pending.channel === 'stable' ? `back to stable${pending.version ? ` ${pending.version}` : ' (the latest stable release)'}` : `install ${pending.version}`;
   return `${what} (${cmd})? y to confirm, esc to cancel`;
 }
 
-// bin/install.sh ends with "install: fm-board <version> installed" (plus
-// "(replaced <old>)" on an upgrade); that is the version the swap put in place.
+// bin/install.sh ends with "install: firstmate-tui <version> installed" (plus
+// "(replaced <old>)" on an upgrade; the 0.1.0 installer said fm-board); that
+// is the version the swap put in place.
 export function installedVersionFromOutput(lines) {
   for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const m = /fm-board (\S+) installed\b/.exec(lines[i]);
+    const m = /(?:firstmate-tui|fm-board) (\S+) installed\b/.exec(lines[i]);
     if (m) return m[1];
   }
   return null;

@@ -1,47 +1,61 @@
 #!/usr/bin/env bash
-# bin/fm-board.sh - launcher for fm-board, the read-only herdr-hosted board over
-# the firstmate fleet.
+# bin/fm-board.sh - launcher for firstmate-tui, the read-only herdr-hosted board
+# over the firstmate fleet. The installer writes it into the bin dir as the
+# `firstmate-tui` command (and, for one release, as the `fm-board` alias it
+# used to be called); from a checkout, run this file. The file keeps its old
+# name because a 0.1.0 install upgrades by downloading a tarball with
+# bin/fm-board.sh in it; see AGENTS.md.
 #
-#   fm-board.sh [run] [flags]          run the board in the current terminal;
-#                                      when the board exits 75 (the relaunch key
-#                                      on its Settings page after an upgrade)
-#                                      this script starts the copy at this path
-#                                      again, which is then the new one
-#   fm-board.sh open [flags]           same as run: the board starts in the pane
-#                                      this command was typed in, so split your
-#                                      herdr pane first to put it beside firstmate
-#   fm-board.sh open --detached [flags]
+#   firstmate-tui [open] [flags]       run the board in the current terminal: the
+#                                      board starts in the pane this command was
+#                                      typed in, so split your herdr pane first to
+#                                      put it beside firstmate (`run` is accepted
+#                                      as a synonym for old launch lines); when the
+#                                      board exits 75 (the relaunch key on its
+#                                      Settings page after an upgrade) this script
+#                                      starts the copy at this path again, which
+#                                      is then the new one
+#   firstmate-tui open --detached [flags]
 #                                      open the board away from this terminal: a
 #                                      plugin tab pane in the current workspace
 #                                      when firstmate.board is linked, otherwise
 #                                      a hidden workspace; prints the pane id
-#   fm-board.sh focus [flags]          focus the pane `open --detached` recorded
-#   fm-board.sh version                print the installed version and whether it
+#   firstmate-tui focus [flags]        focus the pane `open --detached` recorded
+#   firstmate-tui version              print the installed version and whether it
 #                                      is a stable release or a beta (also -V,
 #                                      --version)
-#   fm-board.sh upgrade [--stable | --pre | --version <v> | --from-file <tar.gz>]
+#   firstmate-tui upgrade [--stable | --pre | --version <v> | --from-file <tar.gz>]
 #                                      replace this install with the latest stable
 #                                      release (default and --stable), the newest
 #                                      release betas included (--pre), or one exact
 #                                      version such as 0.1.0-d8b290e (--version);
 #                                      runs the bin/install.sh that shipped with
 #                                      this copy against the install record
-#   fm-board.sh --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
-#                             [--keys <list>] [--mouse <list>] [--expand <all|ids>]
-#                             [--opener-cmd <argv>] [--viewer-cmd <argv>]
-#                             [--view-state <file>] [--tags]
-#                             [--curl-cmd <argv>] [--install-root <dir>]
+#   firstmate-tui help                 the usage page (also -h, --help); an unknown
+#                                      subcommand prints it to stderr and exits 2
+#   firstmate-tui --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
+#                               [--keys <list>] [--mouse <list>] [--expand <all|ids>]
+#                               [--opener-cmd <argv>] [--viewer-cmd <argv>]
+#                               [--view-state <file>] [--tags]
+#                               [--curl-cmd <argv>] [--install-root <dir>]
 #                                      print one frame to stdout and exit
-#   fm-board.sh --headless [flags]     run the refresh schedule with no terminal
+#   firstmate-tui --headless [flags]   run the refresh schedule with no terminal
 #                                      (test mode; stop it with a signal)
 #
 # --detached is the wrapper's own flag and applies to `open` only. Every other
-# flag is passed through to bin/fm-board/index.mjs unchanged; see
-# `fm-board.sh --help` for the list (--home, --refresh, --no-prs, --no-herdr,
-# --no-mouse, --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state,
-# --curl-cmd, --install-root, --herdr-cmd, --herdr-socket, --snapshot-timeout,
-# --keys, --mouse, --expand, --tags, --headless; --prs is accepted and does
-# nothing, live PR data being the default).
+# flag is passed through to bin/fm-board/index.mjs unchanged, after `open` or
+# with no subcommand alike; see `firstmate-tui --help` for the list (--home,
+# --refresh, --no-prs, --no-herdr, --no-mouse, --all-homes-needs,
+# --opener-cmd, --viewer-cmd, --view-state, --curl-cmd, --install-root,
+# --herdr-cmd, --herdr-socket, --snapshot-timeout, --keys, --mouse, --expand,
+# --tags, --headless; --prs is accepted and does nothing, live PR data being
+# the default).
+#
+# When this copy runs from an install (an install-record beside bin/) whose
+# recorded bin dir has an `fm-board` command but no `firstmate-tui` yet, which
+# is what a 0.1.0 install looks like right after `fm-board upgrade` brought it
+# here, the launcher writes the `firstmate-tui` command there (the same shim
+# bin/install.sh writes) and says so on stderr once.
 #
 # FM_HOME resolution: the FM_HOME environment variable, else the one-line file
 # "$HERDR_PLUGIN_CONFIG_DIR/fm-home" (written once by the captain when the
@@ -67,17 +81,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 BOARD_DIR="$ROOT/fm-board"
 ENTRY="$BOARD_DIR/index.mjs"
 PLUGIN_ID="firstmate.board"
+NAME=firstmate-tui
+OLD_NAME=fm-board
 # The board exits with this status on the relaunch key of its Settings page
-# (RELAUNCH_EXIT in bin/fm-board/lib/settings.mjs); `run` answers it below.
+# (RELAUNCH_EXIT in bin/fm-board/lib/settings.mjs); run_board answers it.
 RELAUNCH_STATUS=75
 
 die() {
-  printf 'fm-board: %s\n' "$*" >&2
+  printf '%s: %s\n' "$NAME" "$*" >&2
   exit 2
-}
-
-usage() {
-  sed -n '2,/^set -u/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
 }
 
 # ------------------------------------------------------- version, upgrade
@@ -110,25 +122,108 @@ record_get() { # <key>: that key's value from the install record, or nothing
   sed -n "s/^$1=//p" "$RECORD" | head -n 1
 }
 
+# The usage page. Written for someone who has just installed the board: what
+# it is, the subcommands, the flags most people reach for, where the rest
+# are, and where this copy lives. The header comment above stays the
+# reference for the test-mode flags and the file layout.
+usage() {
+  cat <<'EOF'
+firstmate-tui: a live, read-only terminal board over the firstmate fleet, hosted in herdr.
+
+usage: firstmate-tui [open] [flags]          run the board in this terminal (the default)
+       firstmate-tui open --detached [flags] open it away from this terminal, in its own
+                                             herdr pane, and print the pane id
+       firstmate-tui focus                   bring that detached pane forward
+       firstmate-tui upgrade [--stable | --pre | --version <v>]
+                                             replace this install with the latest stable
+                                             release, the newest beta, or one exact version
+       firstmate-tui version                 print the installed version (also -V, --version)
+       firstmate-tui help                    this page (also -h, --help)
+
+common flags, after `open` or with no subcommand:
+  --refresh <seconds>    how often the board refreshes (default 30)
+  --no-prs               skip the live GitHub PR fetch on every refresh
+  --home <path>          add a secondmate home (repeatable; the default is FM_HOME plus
+                         every home in FM_HOME/data/secondmates.md)
+  --no-herdr             run without herdr: no live agent state, no pane placement
+  --no-mouse             ignore the mouse (click, double-click, wheel) and leave the
+                         terminal's own text selection alone
+
+more flags, same places: --all-homes-needs, --opener-cmd <argv>, --viewer-cmd <argv>,
+  --view-state <path>, --herdr-cmd <argv>, --herdr-socket <path>, --snapshot-timeout <s>;
+  test mode: --render-once, --fixture <json>, --cols N, --rows N, --keys <list>,
+  --mouse <list>, --expand <all|ids>, --tags, --headless, --curl-cmd <argv>,
+  --install-root <dir>. The README's Launch section explains each one.
+
+The board reads the firstmate home in FM_HOME (export it first). Press ? inside the
+board for the keys, and . for the Settings page: the installed version, the latest
+release, an upgrade or a beta from inside the board (each install asks y first).
+EOF
+  if [ -f "$RECORD" ]; then
+    printf '\nthis install: %s (from %s); firstmate-tui upgrade replaces it\n' "$PREFIX_DIR" "$(record_get installed_from)"
+  else
+    printf '\nrunning from a checkout at %s\n' "$PREFIX_DIR"
+  fi
+}
+
 show_version() {
   [ "$#" -eq 0 ] || die "version takes no arguments"
   local v
   v=$(package_version "$BOARD_DIR/package.json")
   [ -n "$v" ] || die "could not read the version from $BOARD_DIR/package.json"
   case "$(version_kind "$v")" in
-    stable) printf 'fm-board %s (stable release)\n' "$v" ;;
-    beta) printf 'fm-board %s (beta: %s at commit %s)\n' "$v" "${v%-*}" "${v##*-}" ;;
-    *) printf 'fm-board %s (prerelease)\n' "$v" ;;
+    stable) printf '%s %s (stable release)\n' "$NAME" "$v" ;;
+    beta) printf '%s %s (beta: %s at commit %s)\n' "$NAME" "$v" "${v%-*}" "${v##*-}" ;;
+    *) printf '%s %s (prerelease)\n' "$NAME" "$v" ;;
   esac
   if [ -f "$RECORD" ]; then
-    printf 'installed at %s (from %s); fm-board upgrade replaces it\n' "$PREFIX_DIR" "$(record_get installed_from)"
+    printf 'installed at %s (from %s); %s upgrade replaces it\n' "$PREFIX_DIR" "$(record_get installed_from)" "$NAME"
   else
     printf 'running from %s (not an installed copy)\n' "$PREFIX_DIR"
   fi
 }
 
-# fm-board upgrade: one implementation of download, verify and swap lives in
-# bin/install.sh, and the copy that shipped in this tarball is the one that
+# write_command <bin dir> <name>: the shim bin/install.sh writes into the bin
+# dir, one line that runs this install's bin/fm-board.sh. Kept identical to
+# the installer's write_command so a shim written here and one written there
+# cannot be told apart.
+write_command() {
+  local bin_dir=$1 name=$2 shim_tmp
+  shim_tmp="$bin_dir/.$name.$$"
+  {
+    printf '#!/usr/bin/env bash\n'
+    if [ "$name" = "$OLD_NAME" ]; then
+      printf '# %s: the former name of %s, kept for one release; written by install.sh.\n' "$name" "$NAME"
+    else
+      printf '# %s: written by install.sh.\n' "$name"
+    fi
+    printf '# The board lives in %s; run "%s upgrade" to upgrade,\n' "$PREFIX_DIR" "$NAME"
+    printf '# or delete that directory and the %s and %s commands here to uninstall.\n' "$NAME" "$OLD_NAME"
+    printf 'exec bash %q "$@"\n' "$PREFIX_DIR/bin/fm-board.sh"
+  } > "$shim_tmp" || return 1
+  chmod +x "$shim_tmp" && mv -f "$shim_tmp" "$bin_dir/$name"
+}
+
+# A 0.1.0 install that ran `fm-board upgrade` was upgraded by the 0.1.0
+# installer, which only knows the `fm-board` command. Finish the rename here:
+# when the recorded bin dir has `fm-board` and no `firstmate-tui`, write the
+# `firstmate-tui` command and say so once. A checkout has no record and a
+# fresh install has both commands, so this is a no-op for them.
+ensure_new_command() {
+  [ -f "$RECORD" ] || return 0
+  local bin_dir
+  bin_dir=$(record_get bin_dir)
+  [ -n "$bin_dir" ] && [ -d "$bin_dir" ] || return 0
+  [ -e "$bin_dir/$OLD_NAME" ] && [ ! -e "$bin_dir/$NAME" ] || return 0
+  if write_command "$bin_dir" "$NAME" 2>/dev/null; then
+    printf '%s: the command is now %s (fm-board still works this release); wrote %s\n' "$NAME" "$NAME" "$bin_dir/$NAME" >&2
+  else
+    printf '%s: could not write %s beside %s; re-run the installer once to add it:  curl -fsSL %s | bash\n' "$NAME" "$bin_dir/$NAME" "$bin_dir/$OLD_NAME" "$INSTALL_URL" >&2
+  fi
+}
+
+# firstmate-tui upgrade: one implementation of download, verify and swap lives
+# in bin/install.sh, and the copy that shipped in this tarball is the one that
 # runs, against the prefix, bin dir and repository the record names. Channel
 # flags pass through unchanged; install.sh checks that they exclude each
 # other and never compares versions, so --stable from a beta is a plain swap.
@@ -137,7 +232,7 @@ run_upgrade() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       -h|--help)
-        printf 'usage: fm-board upgrade [--stable | --pre | --version <version> | --from-file <tarball>]\n\n'
+        printf 'usage: %s upgrade [--stable | --pre | --version <version> | --from-file <tarball>]\n\n' "$NAME"
         printf '  --stable              the latest stable release (the default)\n'
         printf '  --pre                 the newest release, betas included\n'
         printf '  --version <version>   exactly this version: 0.2.0, or a beta such as 0.1.0-d8b290e\n'
@@ -147,13 +242,13 @@ run_upgrade() {
         exit 0 ;;
       --stable|--pre) flags+=("$1") ;;
       --version|--from-file) [ "$#" -ge 2 ] || die "upgrade $1 needs a value"; flags+=("$1" "$2"); shift ;;
-      *) die "unknown upgrade option $1: fm-board upgrade [--stable | --pre | --version <version> | --from-file <tarball>]" ;;
+      *) die "unknown upgrade option $1: $NAME upgrade [--stable | --pre | --version <version> | --from-file <tarball>]" ;;
     esac
     shift
   done
   if [ ! -f "$RECORD" ]; then
     if [ -e "$PREFIX_DIR/.git" ]; then
-      die "this fm-board is a git checkout at $PREFIX_DIR, not an installed copy; upgrade is for installs. Update the checkout with git:  git -C $(printf '%q' "$PREFIX_DIR") pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)"
+      die "this $NAME is a git checkout at $PREFIX_DIR, not an installed copy; upgrade is for installs. Update the checkout with git:  git -C $(printf '%q' "$PREFIX_DIR") pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)"
     fi
     die "no install record at $RECORD, so this copy was not put here by install.sh; install one with:  curl -fsSL $INSTALL_URL | bash"
   fi
@@ -172,10 +267,19 @@ run_upgrade() {
 }
 
 # ---------------------------------------------------------------- arguments
+# The first word is the subcommand when it does not start with a dash: `open`
+# (the default when there is none), `focus`, `version`, `upgrade`, `help`, and
+# `run`, the old name of the default, kept so existing launch lines work. Any
+# other bare word is a typo of one of these, so the usage page goes to stderr
+# with exit 2 instead of reaching the board as a flag error.
+ensure_new_command
 command=run
 case "${1:-}" in
   run|open|focus|version|upgrade) command=$1; shift ;;
+  help) usage; exit 0 ;;
   -V|--version) command=version; shift ;;
+  -*|'') ;;
+  *) printf '%s: unknown subcommand %s\n\n' "$NAME" "$1" >&2; usage >&2; exit 2 ;;
 esac
 case "$command" in
   version) show_version "$@"; exit 0 ;;
@@ -213,7 +317,7 @@ done
 # in the pane this command was typed in, so the captain splits his own pane
 # first and runs the board in the half he wants.
 if [ "$detached" -eq 1 ] && [ "$command" != open ]; then
-  die "--detached applies to 'open' only: fm-board.sh open --detached"
+  die "--detached applies to 'open' only: $NAME open --detached"
 fi
 if [ "$command" = open ] && [ "$detached" -eq 0 ]; then
   command=run
@@ -282,15 +386,15 @@ die_no_home() {
   cfg=$(plugin_config_dir) || cfg=
   {
     if [ -n "$found" ]; then
-      printf 'fm-board: FM_HOME is not set. Found a firstmate home above the current directory; it is used only once you export it. In a terminal:  export FM_HOME=%q   then run this again.\n' "$found"
+      printf '%s: FM_HOME is not set. Found a firstmate home above the current directory; it is used only once you export it. In a terminal:  export FM_HOME=%q   then run this again.\n' "$NAME" "$found"
     else
-      printf 'fm-board: FM_HOME is not set. In a terminal:  export FM_HOME=/path/to/firstmate   (the directory holding bin/fm-fleet-snapshot.sh), then run this again.\n'
+      printf '%s: FM_HOME is not set. In a terminal:  export FM_HOME=/path/to/firstmate   (the directory holding bin/fm-fleet-snapshot.sh), then run this again.\n' "$NAME"
     fi
     if [ -n "$cfg" ]; then
-      printf 'fm-board: for a herdr plugin action, which carries no FM_HOME:  mkdir -p %q && echo %q > %q\n' "$cfg" "$home" "$cfg/fm-home"
+      printf '%s: for a herdr plugin action, which carries no FM_HOME:  mkdir -p %q && echo %q > %q\n' "$NAME" "$cfg" "$home" "$cfg/fm-home"
     else
       # shellcheck disable=SC2016 # the $(...) is for the reader's shell, not this one
-      printf 'fm-board: for a herdr plugin action, which carries no FM_HOME:  mkdir -p "$(herdr plugin config-dir firstmate.board)" && echo %q > "$(herdr plugin config-dir firstmate.board)/fm-home"\n' "$home"
+      printf '%s: for a herdr plugin action, which carries no FM_HOME:  mkdir -p "$(herdr plugin config-dir firstmate.board)" && echo %q > "$(herdr plugin config-dir firstmate.board)/fm-home"\n' "$NAME" "$home"
     fi
   } >&2
   exit 2
@@ -349,7 +453,7 @@ fi
 # Route 1: the linked plugin, placement=tab in the current workspace.
 # Route 2: a hidden workspace (the fm-afk-launch pattern) plus `pane run`.
 open_detached() {
-  [ "$want_herdr" -eq 1 ] || die "open --detached needs herdr to place the pane; drop --no-herdr, or run 'fm-board.sh open' without --detached to use this terminal"
+  [ "$want_herdr" -eq 1 ] || die "open --detached needs herdr to place the pane; drop --no-herdr, or run '$NAME open' without --detached to use this terminal"
   herdr_run status >/dev/null 2>&1 || die "herdr server is not running (herdr status failed)"
   local out pane wsid
   if plugin_linked; then
@@ -361,12 +465,12 @@ open_detached() {
     [ -n "$pane" ] || die "plugin pane opened but no pane id came back: $out"
     printf 'route=plugin pane=%s\n' "$pane"
   else
-    out=$(herdr_run workspace create --cwd "$FM_HOME" --label "fm-board" --no-focus 2>&1) || die "workspace create failed: $out"
+    out=$(herdr_run workspace create --cwd "$FM_HOME" --label "$NAME" --no-focus 2>&1) || die "workspace create failed: $out"
     wsid=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
     pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
     [ -n "$wsid" ] && [ -n "$pane" ] || die "workspace create returned no ids: $out"
     local cmd
-    cmd=$(printf 'exec env FM_HOME=%q bash %q run --herdr-cmd %q' "$FM_HOME" "$ROOT/fm-board.sh" "$herdr_cmd")
+    cmd=$(printf 'exec env FM_HOME=%q bash %q open --herdr-cmd %q' "$FM_HOME" "$ROOT/fm-board.sh" "$herdr_cmd")
     herdr_run pane run "$pane" "$cmd" >/dev/null 2>&1 || die "pane run failed in $pane"
     printf 'route=workspace workspace=%s pane=%s\n' "$wsid" "$pane"
   fi
@@ -380,10 +484,10 @@ focus_board() {
   [ "$want_herdr" -eq 1 ] || die "focus needs herdr"
   local rec pane wsid route
   rec=$(record_path)
-  [ -r "$rec" ] || die "no board pane recorded at $rec; run 'fm-board.sh open --detached' first"
+  [ -r "$rec" ] || die "no board pane recorded at $rec; run '$NAME open --detached' first"
   read -r pane wsid route < "$rec"
-  [ -n "$pane" ] || die "empty board pane record at $rec; run 'fm-board.sh open --detached' again"
-  herdr_run pane get "$pane" >/dev/null 2>&1 || die "recorded pane $pane no longer exists; run 'fm-board.sh open --detached' again"
+  [ -n "$pane" ] || die "empty board pane record at $rec; run '$NAME open --detached' again"
+  herdr_run pane get "$pane" >/dev/null 2>&1 || die "recorded pane $pane no longer exists; run '$NAME open --detached' again"
   if [ "$route" = plugin ] && herdr_run plugin pane focus "$pane" >/dev/null 2>&1; then
     printf 'focused %s (plugin pane)\n' "$pane"
     return 0

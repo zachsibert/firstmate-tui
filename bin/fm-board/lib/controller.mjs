@@ -293,7 +293,7 @@ function applySettingsAction(ctx, action) {
       s.running = { channel: action.channel, version: action.version, args: upgradeArgs(action) };
       s.output = [];
       s.result = null;
-      ctx.notice(`running fm-board upgrade ${s.running.args.join(' ')} …`);
+      ctx.notice(`running firstmate-tui upgrade ${s.running.args.join(' ')} …`);
       ctx.settingsUpgrade(s.running);
       return;
     }

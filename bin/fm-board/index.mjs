@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bin/fm-board/index.mjs - entry point for the fm-board TUI.
+// bin/fm-board/index.mjs - entry point for the firstmate-tui board.
 //
 // Modes:
 //   run (default)  interactive board (neo-blessed through lib/tui-blessed.mjs)
@@ -61,7 +61,7 @@ import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsFl
 import { defaultInstallRoot, readInstall, runUpgrade } from './lib/upgrade.mjs';
 
 function fail(msg, code = 1) {
-  process.stderr.write(`fm-board: ${msg}\n`);
+  process.stderr.write(`firstmate-tui: ${msg}\n`);
   process.exit(code);
 }
 
@@ -314,7 +314,7 @@ async function main() {
   try {
     opts = parseArgs(process.argv.slice(2), process.env);
   } catch (e) {
-    process.stderr.write(`fm-board: ${e.message}\n${USAGE}\n`);
+    process.stderr.write(`firstmate-tui: ${e.message}\n${USAGE}\n`);
     process.exit(2);
   }
   if (opts.help) {
@@ -327,7 +327,7 @@ async function main() {
     const frame = renderFrame(model, size, { ...view, stale: Boolean(facts.snapshotError) });
     process.stdout.write(opts.tags ? `${toTags(frame.lines)}\n` : `${toPlain(frame.lines).join('\n')}\n`);
     if (facts.snapshotError && !opts.fixture) {
-      process.stderr.write(`fm-board: snapshot failed: ${facts.snapshotError}\n`);
+      process.stderr.write(`firstmate-tui: snapshot failed: ${facts.snapshotError}\n`);
       process.exit(1);
     }
     return;
@@ -338,7 +338,7 @@ async function main() {
   await runApp({ ...opts, fmHome: opts.fmHome.replace(/\/+$/, '') });
 }
 
-// A closed pipe (`fm-board.sh --render-once | head`) is not an error worth a
+// A closed pipe (`firstmate-tui --render-once | head`) is not an error worth a
 // stack trace.
 process.stdout.on('error', (e) => {
   if (e && e.code === 'EPIPE') process.exit(0);
