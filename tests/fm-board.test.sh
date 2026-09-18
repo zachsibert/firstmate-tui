@@ -1229,8 +1229,8 @@ config_out=$(node --input-type=module -e "
   out.push(['example', exampleConfigText() === readFileSync('$ROOT/docs/config.example.json', 'utf8')]);
   const ex = parseConfig(exampleConfigText());
   out.push(['example-parse', [String(ex.error), String(ex.config.identity.github_login), ex.config.review.default_labels.length, configuredRepos(ex.config).join(','), labelsFor(ex.config, 'MatthewsREIS/gemini').join(',')].join(' ')]);
-  // Node's JSON.parse message differs between versions (20 says "at position 1", 26 adds the line and
-  // column), so only the board's own prefix is pinned.
+  // Node's JSON.parse message differs between versions (20 stops at the position, 26 adds the line
+  // and column), so only the board's own prefix is pinned.
   out.push(['bad-json', String(parseConfig('{').error).startsWith('bad JSON (') ? 'bad JSON (...)' : String(parseConfig('{').error)]);
   out.push(['not-object', parseConfig('[1]').error]);
   out.push(['schema', parseConfig('{\"schema\":\"other.v9\"}').error]);
