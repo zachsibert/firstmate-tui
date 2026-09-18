@@ -11,7 +11,8 @@
 //                 error, generatedAt } where summary is fm-secondmate-home-summary.v1
 //   herdr         { state, detail, agents: { <pane-id>: { agent_status, title } } }
 //   prs           { enabled, fetchedAt, error, candidate_prs[] } from
-//                 fm-bearings-snapshot.sh --json --include-prs (only with --prs)
+//                 fm-bearings-snapshot.sh --json --include-prs (enabled unless
+//                 --no-prs; fetchedAt is null until the first fetch of a session lands)
 //   mtime(path)   epoch seconds of a file's last write, or null
 //
 // Options (second argument of buildModel):
@@ -335,10 +336,21 @@ function prClosed(c) {
   return state === 'MERGED' || state === 'CLOSED';
 }
 
+// The CHECKS cell and the text suffix of a recorded PR the live list does not
+// carry: off, still fetching (before the first fetch of a session lands),
+// failed before any fetch landed, or fetched and simply not in the list.
+function unlistedChecks(prs) {
+  if (!prs.enabled) return { tag: 'PR', note: 'checks: off (--no-prs)' };
+  if (prs.fetchedAt) return { tag: 'unlisted', note: 'checks: not fetched' };
+  if (prs.error) return { tag: 'PR', note: 'checks: fetch failed' };
+  return { tag: 'PR', note: 'checks: fetching' };
+}
+
 function reviewRows(facts) {
   const rows = [];
   const recorded = recordedPrs(facts);
   const prs = facts.prs || { enabled: false };
+  const unlisted = unlistedChecks(prs);
   const seen = new Set();
   if (prs.enabled && Array.isArray(prs.candidate_prs)) {
     for (const c of prs.candidate_prs) {
@@ -365,10 +377,10 @@ function reviewRows(facts) {
     const pr = repoFromUrl(r.url);
     rows.push(
       makeRow({
-        tag: prs.enabled ? 'unlisted' : 'PR',
+        tag: unlisted.tag,
         extra: pr ? `#${pr.num}` : '-',
         id: r.task,
-        text: `${r.url} · checks: not fetched`,
+        text: `${r.url} · ${unlisted.note}`,
         repo: pr ? pr.repo : '-',
         url: r.url,
       }),
@@ -790,16 +802,19 @@ export function snapshotLabel(facts) {
   return facts.snapshotError ? `snapshot ${age} ago (stale)` : `snapshot ${age} ago`;
 }
 
+// The Ready for review title's PR-data state. Like snapshotLabel, a failed
+// fetch keeps the age of the data still on screen and marks it stale.
+function checksLabel(facts) {
+  const prs = facts.prs || { enabled: false };
+  if (!prs.enabled) return 'checks off';
+  if (prs.fetchedAt) return `checks ${fmtAge(facts.now - prs.fetchedAt)} ago${prs.error ? ' (stale)' : ''}`;
+  return prs.error ? 'checks failed' : 'checks fetching';
+}
+
 function paneHeader(facts, pane, count, hiddenCount, showHidden) {
   const hiddenNote = hiddenCount > 0 ? `, ${hiddenCount} hidden${showHidden ? ' shown' : ''}` : '';
   const parts = [`${pane.title} (${count}${hiddenNote})`, snapshotLabel(facts), herdrLabel(facts.herdr)];
-  if (pane.id === 'review') {
-    const prs = facts.prs || { enabled: false };
-    if (!prs.enabled) parts.push('checks not fetched');
-    else if (prs.error) parts.push('checks failed');
-    else if (prs.fetchedAt) parts.push(`checks ${fmtAge(facts.now - prs.fetchedAt)} ago`);
-    else parts.push('checks pending');
-  }
+  if (pane.id === 'review') parts.push(checksLabel(facts));
   return parts.join(' · ');
 }
 

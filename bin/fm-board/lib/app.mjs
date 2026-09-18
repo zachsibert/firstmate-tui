@@ -5,12 +5,22 @@
 // shares them; this module supplies the I/O: herdr focus, the browser opener,
 // the report viewer, snapshots and the view-state file. The terminal is reached only through the adapter's screen contract.
 //
-// Cadence (scout report section 6.4): a full snapshot every --refresh seconds,
-// or sooner on any herdr event that touches a known task pane, debounced so no
-// more than one snapshot starts per 10 s and never two at once. Herdr pushes
-// redraw the frame immediately because the agents map is already updated.
-// The live GitHub PR fetch (--prs) rides along every 120 s, or at once when
-// the captain presses r; without --prs, r says why the PR pane did not change.
+// Cadence: every --refresh seconds (default 30) one tick runs the fleet
+// snapshot and, unless --no-prs, the live GitHub PR fetch, started together
+// and applied in one frame update, so nothing on screen is older than the
+// cadence plus the slower script. A herdr event touching a known task pane
+// brings a tick forward, debounced to one start per 10 s. Never two refreshes
+// at once: a tick or an event that lands while one is still running is
+// skipped, not queued, and the pane titles keep showing the age of the data
+// they have; r during a refresh queues exactly one follow-up so the key press
+// is honored. A failed PR fetch keeps the previous PR data and its age and is
+// named in the footer once. Herdr pushes redraw the frame immediately because
+// the agents map is already updated. With --no-prs, r says why the PR pane did
+// not change.
+//
+// --headless runs this schedule with no terminal (tests/fm-board.test.sh does,
+// against a stand-in home, and stops it with a signal): nothing is drawn, no
+// key is read and neo-blessed is never loaded, so the suite needs only Node.
 //
 // The report viewer takes the terminal over: the screen is suspended (normal
 // buffer, raw mode off, input paused), the viewer runs with inherited stdio,
@@ -21,7 +31,6 @@ import { buildModel, parseTarget } from './model.mjs';
 import { renderFrame } from './render.mjs';
 import { collectLedgers, discoverHomes, mtime, runBearingsPrs, runSnapshot } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
-import { createScreen } from './tui-blessed.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
 import { focusProblem, handleKey, moveSelection, viewProblem } from './controller.mjs';
 import { resolveViewer, runViewer } from './viewer.mjs';
@@ -30,8 +39,13 @@ import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.
 export { moveSelection } from './controller.mjs';
 
 const SNAPSHOT_DEBOUNCE_MS = 10000;
-const PRS_INTERVAL_MS = 120000;
 const CLOCK_TICK_MS = 5000;
+
+// The screen contract of lib/tui-blessed.mjs with no terminal behind it.
+function headlessScreen(opts) {
+  const size = { cols: opts.cols || 120, rows: opts.rows || 40 };
+  return { size: () => size, draw() {}, suspended: () => false, suspend() {}, resume() {}, destroy() {} };
+}
 
 export function knownPaneIds(snapshot, ledgers) {
   const ids = new Set();
@@ -59,8 +73,7 @@ export async function runApp(opts) {
     snapshotError: null,
     ledgers: [],
     prs: { enabled: opts.prs, fetchedAt: null, error: null, candidate_prs: [] },
-    lastPrsAt: 0,
-    prsNow: false,
+    prsErrorShown: null,
     herdr: null,
     model: null,
     view: {
@@ -146,17 +159,20 @@ export async function runApp(opts) {
     if (err) notice(`view state not saved: ${err}`, true, 15000);
   };
 
+  // One refresh: the snapshot and the PR fetch start together and land in one
+  // frame update. While one is running, a timer tick or a herdr event is
+  // skipped (the next one catches up) and only a key press queues a follow-up.
   const refresh = async (why) => {
     const manual = why === 'manual';
-    if (manual) state.prsNow = true;
     if (state.refreshing) {
-      state.refreshPending = true;
+      if (manual) state.refreshPending = true;
       return;
     }
     state.refreshing = true;
     state.lastSnapshotStart = Date.now();
     notice(`refreshing (${why})…`, false, 60000);
-    const snap = await runSnapshot(state.fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
+    const timeoutMs = opts.snapshotTimeout * 1000;
+    const [snap, prs] = await Promise.all([runSnapshot(state.fmHome, { timeoutMs }), state.prs.enabled ? runBearingsPrs(state.fmHome, { timeoutMs }) : null]);
     if (snap.value && !snap.error) {
       state.snapshot = snap.value;
       state.snapshotAt = Math.floor(Date.now() / 1000);
@@ -165,11 +181,14 @@ export async function runApp(opts) {
       state.snapshotError = snap.error || 'snapshot failed';
     }
     state.ledgers = collectLedgers(state.snapshot, state.homes);
-    if (state.prs.enabled && (state.prsNow || Date.now() - state.lastPrsAt >= PRS_INTERVAL_MS)) {
-      state.prsNow = false;
-      state.lastPrsAt = Date.now();
-      const prs = await runBearingsPrs(state.fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
-      state.prs = { enabled: true, fetchedAt: prs.error ? state.prs.fetchedAt : Math.floor(Date.now() / 1000), error: prs.error, candidate_prs: prs.error ? state.prs.candidate_prs : prs.candidate_prs };
+    let prsFailure = null;
+    if (prs && prs.error) {
+      // Keep the previous PR data and its age; the pane title marks them stale.
+      state.prs = { ...state.prs, error: prs.error };
+      if (prs.error !== state.prsErrorShown) prsFailure = prs.error;
+    } else if (prs) {
+      state.prs = { enabled: true, fetchedAt: Math.floor(Date.now() / 1000), error: null, candidate_prs: prs.candidate_prs };
+      state.prsErrorShown = null;
     }
     if (herdr) herdr.setPanes(knownPaneIds(state.snapshot, state.ledgers));
     state.refreshing = false;
@@ -177,7 +196,10 @@ export async function runApp(opts) {
     else {
       const errs = state.ledgers.filter((l) => l.error && !l.cached).map((l) => `${l.id}: ${l.error}`);
       if (errs.length) notice(`ledger ${errs.join('; ')}`, true, 15000);
-      else if (manual && !state.prs.enabled) notice('checks not fetched: start with --prs', false, 8000);
+      else if (prsFailure) {
+        state.prsErrorShown = prsFailure;
+        notice(`PR fetch: ${prsFailure}`, true, 15000);
+      } else if (manual && !state.prs.enabled) notice('PR checks off: start without --no-prs', false, 8000);
       else notice('', false, 1);
     }
     if (state.refreshPending) {
@@ -305,7 +327,11 @@ export async function runApp(opts) {
     draw();
   };
 
-  screen = await createScreen({ onKey, onResize: () => draw() });
+  if (opts.headless) screen = headlessScreen(opts);
+  else {
+    const { createScreen } = await import('./tui-blessed.mjs');
+    screen = await createScreen({ onKey, onResize: () => draw() });
+  }
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
   process.on('SIGHUP', quit);
@@ -324,11 +350,13 @@ export async function runApp(opts) {
       herdr.connect();
     });
   }
-  await refresh('start');
+  // The cadence counts from launch, so a slow first refresh only makes the
+  // ticks it overlaps skip. The screen's input stream keeps the process alive;
+  // headless, the refresh timer does.
   const interval = setInterval(() => refresh('timer'), opts.refresh * 1000);
-  interval.unref?.();
+  if (!opts.headless) interval.unref?.();
   const clock = setInterval(() => draw(), CLOCK_TICK_MS);
   clock.unref?.();
-  // Keep the process alive on the screen's input stream.
+  refresh('start');
   await new Promise(() => {});
 }

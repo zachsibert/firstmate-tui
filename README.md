@@ -7,7 +7,7 @@
 Panes, top to bottom by urgency:
 
 1. **Needs you** - what the main firstmate needs from you: blocked workers, keyed worker decisions, live captain holds and green PRs whose worker said done while the backlog row is still open. Main home only by default; a secondmate's own decisions (its ledger's open decisions, and the keyed decisions its task record relays into the main home) flag its In flight group instead (`--all-homes-needs` lists them here too)
-2. **Ready for review** - one row per recorded pull request of an unfinished task; a task whose backlog row is done, and a PR a secondmate record merely mentions, stay out. With `--prs` the live check, review and mergeable state from GitHub, and a PR GitHub reports merged or closed is dropped. `enter` opens the PR in your browser
+2. **Ready for review** - one row per recorded pull request of an unfinished task; a task whose backlog row is done, and a PR a secondmate record merely mentions, stay out. The live check, review and mergeable state come from GitHub on every refresh (`--no-prs` turns that off), and a PR GitHub reports merged or closed is dropped. `enter` opens the PR in your browser
 3. **In flight** - one row per main-home worker (a worker that said done while its PR is unmerged reads `awaiting merge`), and one group row per secondmate home: the worst state among the mate, its children and its relayed decisions, the live worker count, the child ids, the shared repo and the age of the newest child event, with a leading `!` when a child has an open decision or is blocked. Expand a group (`l`, `right` or `enter`) to see the mate's own agent row, each worker with the herdr agent state beside firstmate's own state, the home's live captain decisions and the mate's relayed decisions. A worker whose recorded pane is gone from herdr shows **pane lost** in red in the HERDR column (in Needs you, the whole row turns red); while herdr is disconnected the cell reads **unknown** in grey instead, because absence cannot be proved
 4. **Findings** - scout reports and other report files, newest first, from every home. `enter` opens the report in a terminal viewer and returns to the board when it exits
 5. **Landed** - done backlog rows and every secondmate home's landed work, newest first
@@ -26,7 +26,7 @@ The captain asked for one row per initiative the main firstmate delegated. The s
 
 ## Status
 
-M1, the read-only board, is implemented in this repository, plus the M1b follow-on (`enter` opens a PR in the browser, In flight groups secondmate work by home, and Needs you lists the main home only) and M2: `enter` on a Findings row opens the report in a terminal viewer, lost panes show in red, `x` / `X` / `H` hide and unhide rows, `1`-`5` / `0` hide and show panes (each title carries its key; with all five hidden a key page replaces the grid), and `r` refreshes the snapshot and, with `--prs`, the live PR checks at once. The scout report that grounds the plan is in [`docs/scout-report-2026-09-16.md`](docs/scout-report-2026-09-16.md): data availability per pane, herdr capabilities, what is reusable from yimbot as a pattern, stack choice, and the four-milestone plan. Answering decisions, toasts and the findings watermark are later milestones.
+M1, the read-only board, is implemented in this repository, plus the M1b follow-on (`enter` opens a PR in the browser, In flight groups secondmate work by home, and Needs you lists the main home only) and M2: `enter` on a Findings row opens the report in a terminal viewer, lost panes show in red, `x` / `X` / `H` hide and unhide rows, `1`-`5` / `0` hide and show panes (each title carries its key; with all five hidden a key page replaces the grid), and `r` refreshes the snapshot and the live PR checks at once. The scout report that grounds the plan is in [`docs/scout-report-2026-09-16.md`](docs/scout-report-2026-09-16.md): data availability per pane, herdr capabilities, what is reusable from yimbot as a pattern, stack choice, and the four-milestone plan. Answering decisions, toasts and the findings watermark are later milestones.
 
 ## Prerequisites
 
@@ -40,7 +40,7 @@ fm-board is a terminal program that reads a firstmate home and talks to herdr. P
 2. **herdr 0.8.x or newer** (socket API protocol 20). Hosts the board's pane and supplies live agent state; `--no-herdr` runs the board without it.
    Check: `herdr --version` prints `herdr 0.8.2` or higher.
    Install: macOS `brew install herdr`. Linux, or macOS without Homebrew: `curl -fsSL https://herdr.dev/install.sh | sh`. Both come from herdr's own install page, https://herdr.dev/install, which also covers mise, Nix, manual downloads and `herdr update`.
-3. **A firstmate home.** A checkout of https://github.com/kunchenguid/firstmate with `bin/fm-fleet-snapshot.sh` in it; the board runs that script for its data (and `bin/fm-bearings-snapshot.sh` for `--prs`). Secondmate homes are read from that home's `data/secondmates.md`.
+3. **A firstmate home.** A checkout of https://github.com/kunchenguid/firstmate with `bin/fm-fleet-snapshot.sh` in it; the board runs that script for its data (and `bin/fm-bearings-snapshot.sh` for the live PR data). Secondmate homes are read from that home's `data/secondmates.md`.
    Get one: `git clone https://github.com/kunchenguid/firstmate.git ~/firstmate` (any path works).
    Point the board at it: `export FM_HOME=/path/to/that/checkout`, and add the line to your shell profile so it is set in every terminal. The board never guesses this path.
    Check: `ls "$FM_HOME/bin/fm-fleet-snapshot.sh"` prints the path instead of an error.
@@ -56,7 +56,7 @@ fm-board is a terminal program that reads a firstmate home and talks to herdr. P
 
 - **glow** (optional). Renders a Findings report in the terminal when you press `enter` on it; without glow the viewer falls back to `$EDITOR`, then `vim`, then `less`.
   Check: `glow --version`. Install: macOS `brew install glow`. Linux: packages for apt, dnf and others are listed at https://github.com/charmbracelet/glow.
-- **gh, the GitHub CLI, logged in** (optional). Needed only for `--prs`, which asks GitHub for each pull request's checks, review and mergeable state.
+- **gh, the GitHub CLI, logged in** (optional). The board asks GitHub through it, on every refresh, for each pull request's checks, review and mergeable state. Without gh the Ready for review title reads `checks failed` and the footer says why once; `--no-prs` runs the board without the fetch.
   Check: `gh auth status` prints `Logged in to github.com`. Install: macOS `brew install gh`. Linux: https://github.com/cli/cli/blob/trunk/docs/install_linux.md. Then `gh auth login` once.
 
 ## Install
@@ -139,8 +139,8 @@ Options (also `bin/fm-board.sh --help`):
 | Flag | Meaning |
 | --- | --- |
 | `--home <path>` | add a secondmate home (repeatable). Default: `FM_HOME` plus every home listed in `FM_HOME/data/secondmates.md` |
-| `--refresh <seconds>` | full snapshot cadence, default 30. Herdr events on a known task pane also trigger a refresh, debounced to at most one snapshot per 10 s |
-| `--prs` | also run `fm-bearings-snapshot.sh --include-prs` (live GitHub, about 8 s) every 120 s so Ready for review shows checks, review and mergeable state. Off by default; recorded PR URLs then show "checks: not fetched" |
+| `--refresh <seconds>` | refresh cadence, default 30. Every tick runs the fleet snapshot and, unless `--no-prs`, the live GitHub PR fetch together, so nothing on screen is older than this plus the slower script. Herdr events on a known task pane bring a tick forward, debounced to at most one start per 10 s. A tick that lands while a refresh is still running is skipped, and each pane title keeps showing the age of the data it has |
+| `--no-prs` | skip `fm-bearings-snapshot.sh --include-prs` (live GitHub through gh, about 8 s). Ready for review then lists recorded PR URLs only, marked `checks: off (--no-prs)`, and `r` says `PR checks off: start without --no-prs`. `--prs` is still accepted and does nothing, since the live data is the default |
 | `--no-herdr` | skip the herdr overlay and the socket subscription |
 | `--all-homes-needs` | Needs you also lists every secondmate home's open decisions (default: main home only; secondmate decisions flag their In flight group) |
 | `--opener-cmd <argv>` | command that opens a URL in the browser, default `open` on macOS and `xdg-open` on Linux; the URL is appended as one argument |
@@ -150,6 +150,9 @@ Options (also `bin/fm-board.sh --help`):
 | `--keys <list>` / `--expand <all\|ids>` | with `--render-once`: press these keys (comma or space separated, e.g. `tab,j,enter`) and expand these In flight groups before rendering. A PR open runs `--opener-cmd` when given and is only reported in the footer otherwise; a Findings enter runs `--viewer-cmd` when given and otherwise reports the viewer the chain resolved to; a herdr focus is reported, never run; `r` against a fixture only reports that it cannot refresh |
 | `--tags` | with `--render-once`: print the frame with its color tags (`{red-fg}pane lost{/red-fg}`) instead of plain text |
 | `--herdr-cmd <argv>` / `--herdr-socket <path>` | how to reach herdr when the defaults (`HERDR_BIN_PATH`, `HERDR_SOCKET_PATH`, `herdr status`) do not apply, for example a lab session |
+| `--headless` | run the refresh schedule with no terminal: nothing is drawn, no key is read (test mode; the suite stops it with a signal) |
+
+What the live PR data costs: every refresh runs one `gh pr list` call per candidate repository (the repositories with recorded PR URLs and live worktrees, at most ten), so at the default 30 seconds that is two GitHub API calls per repository per minute, 1,200 an hour with ten repositories against the authenticated limit of 5,000. A larger `--refresh` or `--no-prs` reduces it. Until the first fetch of a session lands, Ready for review reads `checks fetching`; when a fetch fails, the previous PR data and its age stay on screen, marked stale, and the footer names the failure once.
 
 ## Keys
 
@@ -165,7 +168,7 @@ Options (also `bin/fm-board.sh --help`):
 | `H` | toggle showing hidden rows, greyed and marked `(hidden)` |
 | `1` .. `5` | show or hide a pane: 1 Needs you, 2 Ready for review, 3 In flight, 4 Findings, 5 Landed; each pane title shows its key (`[1] Needs you`). With all five hidden the board shows a page listing these keys instead of the grid |
 | `0` | show every pane |
-| `r` | refresh now: the fleet snapshot, and the live GitHub PR fetch when `--prs` is on (without it the footer says `checks not fetched: start with --prs`) |
+| `r` | refresh now: the fleet snapshot and the live GitHub PR fetch, started together, the same as a timer tick (with `--no-prs` the footer says `PR checks off: start without --no-prs`). Pressed while a refresh is running, it queues one follow-up |
 | `?` | help overlay |
 | `q`, `ctrl-c` | quit |
 
@@ -180,7 +183,7 @@ tests/fm-board.test.sh
 tests/install.test.sh
 ```
 
-The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the `--prs` path, the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, the `[n]` key badge on every pane title in both layouts, pane toggles with one, four and all five panes hidden (the landing page, its restart from a saved all-hidden state, and `0` bringing the grid back), and the wrapper: `open` prints the same frame as `run`, `open --detached --no-herdr` refuses (against a fake `herdr` on `HERDR_BIN_PATH` and PATH that logs any call, so nothing reaches a live server), and its error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, so the suite asserts that `r` re-runs the snapshot, and the PR fetch only with `--prs`, without touching GitHub. `o` and `f` are asserted to be no-ops. No real firstmate home, herdr server or TTY is needed.
+The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the live PR data (the default, `--prs` as a no-op and `--no-prs`), the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, the `[n]` key badge on every pane title in both layouts, pane toggles with one, four and all five panes hidden (the landing page, its restart from a saved all-hidden state, and `0` bringing the grid back), and the wrapper: `open` prints the same frame as `run`, `open --detached --no-herdr` refuses (against a fake `herdr` on `HERDR_BIN_PATH` and PATH that logs any call, so nothing reaches a live server), and its error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, so the suite asserts that `r` re-runs the snapshot and the PR fetch together, only the snapshot with `--no-prs`, and that a fixture render runs neither, without touching GitHub. The refresh schedule runs with `--headless` (no terminal, no keys) against a second stand-in whose snapshot sleeps past a 5-second `--refresh`, proving that a tick landing during a running refresh starts no second fetch and the next tick does. `o` and `f` are asserted to be no-ops. No real firstmate home, herdr server or TTY is needed.
 
 `tests/install.test.sh` covers distribution without touching GitHub. It builds the release tarball with `scripts/package.sh` (the same script the release workflow runs) into a scratch directory, checks its layout and checksum file, refuses a tag that does not match `package.json`, flags a `-beta` tag as a prerelease, installs the tarball with `bin/install.sh --from-file` into a scratch prefix and bin dir (also from stdin, the way `curl | bash` runs it) and proves the installed `fm-board` command renders a fixture frame. It then upgrades in place, rejects a wrong checksum and a damaged tarball without touching the existing install, refuses a prefix holding unrelated files, and checks that the default paths under a scratch `HOME` leave nothing else behind. It needs `npm` for the vendoring step.
 
@@ -209,7 +212,7 @@ scripts/package.sh           build fm-board-<tag>.tar.gz and its .sha256; run by
 bin/fm-board.sh              bash wrapper: FM_HOME, node and herdr checks, open --detached/focus, view-state path, exec index.mjs
 bin/fm-board/index.mjs       entry: argument parsing, --render-once, interactive run
 bin/fm-board/lib/args.mjs    option definitions
-bin/fm-board/lib/sources.mjs every read against firstmate homes (snapshot, ledgers, mtimes, --prs)
+bin/fm-board/lib/sources.mjs every read against firstmate homes (snapshot, ledgers, mtimes, the PR fetch)
 bin/fm-board/lib/model.mjs   pure: firstmate facts -> five panes of rows (scout report section 1)
 bin/fm-board/lib/layout.mjs  pure: pane heights, columns, width breakpoints
 bin/fm-board/lib/render.mjs  pure: model + view state -> frame lines

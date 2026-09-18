@@ -10,9 +10,13 @@ export const USAGE = `usage: fm-board.sh [run] [options]
 options:
   --home <path>          add a secondmate home (repeatable). Default: FM_HOME plus
                          every home listed in FM_HOME/data/secondmates.md
-  --refresh <seconds>    full snapshot cadence (default 30)
-  --prs                  also run fm-bearings-snapshot.sh --include-prs (about 8 s,
-                         live GitHub) so Ready for review shows checks and review state
+  --refresh <seconds>    refresh cadence (default 30): every tick runs the fleet snapshot
+                         and, unless --no-prs, the live GitHub PR fetch together, so
+                         nothing on screen is older than this plus the slower script;
+                         a tick that lands while a refresh is still running is skipped
+  --no-prs               skip fm-bearings-snapshot.sh --include-prs (about 8 s, live
+                         GitHub through gh) so Ready for review shows recorded PR URLs
+                         only; --prs is accepted and does nothing (it is the default)
   --no-herdr             skip the herdr overlay and the socket subscription
   --all-homes-needs      Needs you also lists every secondmate home's open decisions
                          (default: main home only; secondmate decisions flag their
@@ -36,6 +40,8 @@ options:
                          ids, or all) before rendering
   --tags                 with --render-once: print the frame with its color tags
                          ({red-fg}...{/red-fg}) instead of plain text
+  --headless             run the interactive refresh schedule with no terminal: nothing
+                         is drawn and no key is read (test mode; stop it with a signal)
   --herdr-cmd <argv>     command prefix for herdr calls (default: $HERDR_BIN_PATH or herdr);
                          quoted string, split on whitespace
   --herdr-socket <path>  herdr control socket (default: HERDR_SOCKET_PATH or herdr status)
@@ -50,9 +56,10 @@ export function parseArgs(argv, env = {}) {
     fmHome: env.FM_HOME || null,
     homes: [],
     refresh: 30,
-    prs: false,
+    prs: true,
     herdr: true,
     renderOnce: false,
+    headless: false,
     fixture: null,
     cols: null,
     rows: null,
@@ -93,14 +100,20 @@ export function parseArgs(argv, env = {}) {
       case '--refresh':
         opts.refresh = num(a, need(a), 5);
         break;
-      case '--prs':
+      case '--prs': // the default since the single refresh cadence; kept so old launch lines still work
         opts.prs = true;
+        break;
+      case '--no-prs':
+        opts.prs = false;
         break;
       case '--no-herdr':
         opts.herdr = false;
         break;
       case '--render-once':
         opts.renderOnce = true;
+        break;
+      case '--headless':
+        opts.headless = true;
         break;
       case '--fixture':
         opts.fixture = need(a);

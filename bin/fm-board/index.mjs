@@ -10,8 +10,8 @@
 //                  the frame is rendered (a PR open runs --opener-cmd when
 //                  given, and is only reported in the footer otherwise; a herdr
 //                  focus is reported, never run; r against a live home re-runs
-//                  the snapshot (and the PR fetch with --prs) and against a
-//                  fixture only reports that it cannot; enter on a
+//                  the snapshot and the PR fetch (unless --no-prs) and against
+//                  a fixture only reports that it cannot; enter on a
 //                  Findings row runs --viewer-cmd when given and otherwise only
 //                  reports the viewer the chain resolved to, naming the binary
 //                  found on PATH, so a test can shadow glow with a fake without
@@ -102,14 +102,12 @@ async function factsLive(opts) {
   if (!opts.fmHome) fail('FM_HOME is not set and --fm-home was not given', 2);
   const fmHome = opts.fmHome.replace(/\/+$/, '');
   const now = () => Math.floor(Date.now() / 1000);
-  const snap = await runSnapshot(fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
+  const timeoutMs = opts.snapshotTimeout * 1000;
+  // Both scripts start together, as one tick of the app does.
+  const [snap, r] = await Promise.all([runSnapshot(fmHome, { timeoutMs }), opts.prs ? runBearingsPrs(fmHome, { timeoutMs }) : null]);
   const snapshot = snap.error ? null : snap.value;
   const ledgers = collectLedgers(snapshot, discoverHomes(fmHome, opts.homes));
-  let prs = { enabled: false };
-  if (opts.prs) {
-    const r = await runBearingsPrs(fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
-    prs = { enabled: true, fetchedAt: r.error ? null : now(), error: r.error, candidate_prs: r.candidate_prs };
-  }
+  const prs = r ? { enabled: true, fetchedAt: r.error ? null : now(), error: r.error, candidate_prs: r.candidate_prs } : { enabled: false };
   let herdr = { state: 'off', detail: '', agents: {} };
   if (opts.herdr) {
     const client = new HerdrClient({ cmd: opts.herdrCmd, socketPath: opts.herdrSocket });
@@ -221,20 +219,20 @@ async function driveOnce(facts, opts) {
   return { model, view };
 }
 
-// The r key against a live home: the same full refresh the app runs, snapshot
-// plus, with --prs, an immediate PR fetch. Mutates facts in place and resolves
-// to the footer text.
+// The r key against a live home: the same refresh a tick of the app runs, the
+// snapshot and, unless --no-prs, the PR fetch, started together. Mutates facts
+// in place and resolves to the footer text.
 async function refreshLive(facts, opts) {
   facts.now = Math.floor(Date.now() / 1000);
-  const snap = await runSnapshot(facts.fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
+  const timeoutMs = opts.snapshotTimeout * 1000;
+  const [snap, r] = await Promise.all([runSnapshot(facts.fmHome, { timeoutMs }), opts.prs ? runBearingsPrs(facts.fmHome, { timeoutMs }) : null]);
   if (snap.value && !snap.error) {
     facts.snapshot = snap.value;
     facts.snapshotAt = Math.floor(Date.now() / 1000);
     facts.snapshotError = null;
   } else facts.snapshotError = snap.error || 'snapshot failed';
   facts.ledgers = collectLedgers(facts.snapshot, discoverHomes(facts.fmHome, opts.homes));
-  if (!opts.prs) return 'checks not fetched: start with --prs';
-  const r = await runBearingsPrs(facts.fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
+  if (!r) return 'PR checks off: start without --no-prs';
   facts.prs = { enabled: true, fetchedAt: r.error ? facts.prs.fetchedAt : Math.floor(Date.now() / 1000), error: r.error, candidate_prs: r.error ? facts.prs.candidate_prs : r.candidate_prs };
   return r.error ? `PR fetch: ${r.error}` : 'refreshed: snapshot and PR checks';
 }
@@ -263,7 +261,7 @@ async function main() {
     return;
   }
   if (!opts.fmHome) fail('FM_HOME is not set and --fm-home was not given', 2);
-  if (!process.stdout.isTTY) fail('interactive mode needs a terminal; use --render-once for a one-shot frame', 2);
+  if (!process.stdout.isTTY && !opts.headless) fail('interactive mode needs a terminal; use --render-once for a one-shot frame', 2);
   const { runApp } = await import('./lib/app.mjs');
   await runApp({ ...opts, fmHome: opts.fmHome.replace(/\/+$/, '') });
 }

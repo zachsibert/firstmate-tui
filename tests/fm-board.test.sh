@@ -19,6 +19,10 @@
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
 # that they ran and print canned JSON, so a live --render-once with --keys r
 # shows exactly which fetches a refresh triggers without GitHub or a real home.
+# The refresh schedule itself (one tick runs both scripts; a tick during a
+# running refresh is skipped) is checked by running the app with --headless
+# against a second stand-in whose snapshot sleeps, then stopping it with a
+# signal; --headless draws nothing, reads no key and never loads neo-blessed.
 # The wrapper checks that touch the detached routes run with a fake `herdr` on
 # HERDR_BIN_PATH and PATH (herdr sets HERDR_BIN_PATH inside its panes, so PATH
 # alone would still reach the captain's live server); the fake logs its argv
@@ -167,8 +171,10 @@ render_live() {
   rm -f "$FETCH_LOG"
   FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" "$BOARD" --render-once --no-herdr "$@"
 }
-assert_fetch_log() { # <expected lines> <label>
-  if [ -f "$FETCH_LOG" ] && [ "$(cat "$FETCH_LOG")" = "$1" ]; then pass; else fail "$2: fetch log is '$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')', expected '$1'"; fi
+# assert_fetch_log <expected lines, sorted> <label>: the snapshot and the PR fetch of one refresh start
+# together, so their two log lines land in either order; the log is compared sorted.
+assert_fetch_log() {
+  if [ -f "$FETCH_LOG" ] && [ "$(sort "$FETCH_LOG")" = "$1" ]; then pass; else fail "$2: fetch log is '$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')', expected (sorted) '$1'"; fi
 }
 
 # ------------------------------------------------------------- populated
@@ -176,19 +182,19 @@ frame=$(render populated.json) || fail "populated: render exited non-zero"
 
 # Pane order and counts (falsify: reorder PANES in lib/layout.mjs, or delete a row source in the fixture).
 assert_contains "$frame" "Needs you (4)" "populated needs-you count (main home only)"
-assert_contains "$frame" "Ready for review (2)" "populated review count"
+assert_contains "$frame" "Ready for review (3)" "populated review count (two recorded PRs plus the live candidate; live PR data is the default)"
 assert_contains "$frame" "In flight (7)" "populated in-flight count (five main rows, two home groups)"
 assert_contains "$frame" "Findings (3)" "populated findings count"
 assert_contains "$frame" "Landed (4)" "populated landed count"
-assert_before "$frame" "Needs you \(4\)" "Ready for review \(2\)" "pane order 1"
-assert_before "$frame" "Ready for review \(2\)" "In flight \(7\)" "pane order 2"
+assert_before "$frame" "Needs you \(4\)" "Ready for review \(3\)" "pane order 1"
+assert_before "$frame" "Ready for review \(3\)" "In flight \(7\)" "pane order 2"
 assert_before "$frame" "In flight \(7\)" "Findings \(3\)" "pane order 3"
 assert_before "$frame" "Findings \(3\)" "Landed \(4\)" "pane order 4"
 
 # Every pane title leads with its toggle key, btop-style (falsify: drop the badge segment from the
 # top border in renderPanes, or change paneBadge).
 assert_contains "$frame" "┌─ [1] Needs you (4) · snapshot 12s ago" "badge on Needs you"
-assert_contains "$frame" "┌─ [2] Ready for review (2) · snapshot 12s ago" "badge on Ready for review"
+assert_contains "$frame" "┌─ [2] Ready for review (3) · snapshot 12s ago" "badge on Ready for review"
 assert_contains "$frame" "┌─ [3] In flight (7) · snapshot 12s ago" "badge on In flight"
 assert_contains "$frame" "┌─ [4] Findings (3) · snapshot 12s ago" "badge on Findings"
 assert_contains "$frame" "┌─ [5] Landed (4) · snapshot 12s ago" "badge on Landed"
@@ -196,12 +202,12 @@ assert_count "$frame" "┌─ [" 5 "exactly five badges, one per pane"
 # With --tags the badge is its own grey segment between the border segments (falsify: give the badge the
 # border style, or drop `badge` from STYLE_TAGS).
 tags=$(render populated.json --tags) || fail "populated --tags: render exited non-zero"
-assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[2\]\{/grey-fg\}\{blue-fg\} Ready for review \(2\)' "--tags: the badge is grey and the title keeps the border color"
+assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[2\]\{/grey-fg\}\{blue-fg\} Ready for review \(3\)' "--tags: the badge is grey and the title keeps the border color"
 assert_count "$tags" "{grey-fg}[" 5 "--tags: five grey badges"
 
 # Freshness header on every pane (falsify: drop herdrLabel() from paneHeader in lib/model.mjs).
 assert_count "$frame" "snapshot 12s ago · herdr fixture" 6 "title plus five pane headers carry snapshot age and herdr state"
-assert_contains "$frame" "checks not fetched" "review header says checks not fetched without --prs"
+assert_contains "$frame" "checks 30s ago" "review header carries the PR data age by default (falsify: flip the prs default in parseArgs)"
 assert_contains "$frame" "fm-board · /fixture/firstmate · 3 homes" "title counts the main home plus two secondmate homes"
 
 # Needs you rows (falsify: remove scout-beta's blocked_event, ship-alpha's open_decisions entry,
@@ -225,13 +231,18 @@ assert_row "$frame_all" '^│ hold +- +etl-cutover +Cut over the nightly ETL on 
 assert_row "$frame_all" '^│ decide +etl-wind… +hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record"
 assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ merge\?' "--all-homes-needs: hold sorts before merge?"
 
-# Ready for review without --prs (falsify: drop the "checks: not fetched" suffix in reviewRows).
-assert_row "$frame" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: not fetched +acme/widgets +main +- │$' "recorded PR 41 row"
-assert_row "$frame" '^│ PR +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched' "recorded PR 7 row"
-assert_not_contains "$frame" "passing" "no live check state without --prs"
+# Ready for review with --no-prs: the recorded PRs only, tagged PR and marked off (falsify: drop the
+# --no-prs case in parseArgs, or the !prs.enabled branch in unlistedChecks).
+frame_noprs=$(render populated.json --no-prs) || fail "populated --no-prs: render exited non-zero"
+assert_contains "$frame_noprs" "Ready for review (2)" "--no-prs lists the two recorded PRs only"
+assert_contains "$frame_noprs" "· checks off" "--no-prs: the review header says checks off"
+assert_row "$frame_noprs" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: off' "recorded PR 41 row"
+assert_row "$frame_noprs" '^│ PR +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +acme/api +main +- │$' "recorded PR 7 row names the flag"
+assert_not_contains "$frame_noprs" "passing" "no live check state with --no-prs"
+assert_not_contains "$frame_noprs" "fetching" "--no-prs never says fetching"
 # Finished work stays out (falsify: drop the taskBacklogState or the secondmate check in recordedPrs).
-assert_no_row "$frame" '^│ PR +#30 ' "a task whose backlog row is done does not list its PR"
-assert_no_row "$frame" '^│ PR +#12 ' "a PR mentioned on a secondmate record is not ready for review"
+assert_no_row "$frame_noprs" '^│ PR +#30 ' "a task whose backlog row is done does not list its PR"
+assert_no_row "$frame_noprs" '^│ PR +#12 ' "a PR mentioned on a secondmate record is not ready for review"
 
 # In flight rows: state, herdr join, tmux (falsify: remove the herdr agents block, or change
 # tmux-task's endpoint target).
@@ -322,8 +333,11 @@ assert_contains "$frame_k" "0            show every pane (with all five hidden t
 # landedRows, drop 'landed' from OPEN_PANES, or drop the 'open' case in keyAction). The opener
 # receives the exact URL as its only argument.
 frame_o=$(render_open populated.json "tab,enter") || fail "open review: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "enter on the first Ready for review row opens its PR"
-assert_contains "$frame_o" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "footer notice names the opened URL"
+assert_opened "https://github.com/acme/api/pull/8" "enter on the first Ready for review row (the failing live candidate) opens its PR"
+assert_contains "$frame_o" "opened https://github.com/acme/api/pull/8 (api#8)" "footer notice names the opened URL"
+frame_o=$(render_open populated.json "tab,j,enter") || fail "open review second row: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "enter on the second Ready for review row opens the recorded PR joined to its task"
+assert_contains "$frame_o" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "footer notice names the task, not the candidate"
 frame_o=$(render_open populated.json "j,j,j,enter") || fail "open needs enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on the Needs-you merge? row opens its PR"
 frame_o=$(render_open populated.json "tab,tab,tab,tab,enter") || fail "open landed enter: render exited non-zero"
@@ -336,12 +350,15 @@ frame_o=$(render_open populated.json "tab,tab,enter") || fail "enter inflight: r
 assert_not_opened "enter on an In flight worker calls no opener"
 rm -f "$OPENER_LOG"
 frame_o=$(render populated.json --keys "tab,enter") || fail "open without opener: render exited non-zero"
-assert_contains "$frame_o" "would open https://github.com/acme/widgets/pull/41" "without --opener-cmd, --render-once only reports the open"
+assert_contains "$frame_o" "would open https://github.com/acme/api/pull/8" "without --opener-cmd, --render-once only reports the open"
 assert_not_opened "without --opener-cmd nothing is launched"
 
-# --prs path (falsify: remove candidate_prs from the fixture or the enabled branch in reviewRows).
+# Live PR data (falsify: remove candidate_prs from the fixture or the enabled branch in reviewRows).
+# --prs is accepted and changes nothing, since it is the default (falsify: give --prs an effect in
+# parseArgs, or flip the default).
 frame_prs=$(render populated.json --prs) || fail "populated --prs: render exited non-zero"
-assert_contains "$frame_prs" "Ready for review (3)" "--prs adds the unrecorded candidate"
+if [ "$frame_prs" = "$frame" ]; then pass; else fail "--prs renders a different frame from the default: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_prs") | head -n 5)"; fi
+assert_contains "$frame_prs" "Ready for review (3)" "live PR data adds the unrecorded candidate"
 assert_contains "$frame_prs" "checks 30s ago" "review header shows the checks age"
 assert_row "$frame_prs" '^│ failing +changes +api#8 +https://github.com/acme/api/pull/8 · conflicting +acme/api +main +- │$' "failing candidate with review and mergeable"
 assert_row "$frame_prs" '^│ passing +review +ship-alpha +https://github.com/acme/widgets/pull/41 +acme/widgets +main +- │$' "passing candidate joined to its task"
@@ -401,6 +418,13 @@ assert_lines "$frame_narrow" 24 "narrow frame is 24 lines"
 
 # --------------------------------------------------------------- grouped
 frame_g=$(render grouped.json) || fail "grouped: render exited non-zero"
+
+# No prs block in the fixture is the state before the first fetch of a session lands: the title and
+# the recorded PR say fetching, never "not fetched" (falsify: drop the fetching branch in
+# unlistedChecks or checksLabel).
+assert_contains "$frame_g" "Ready for review (1) · snapshot 12s ago · herdr fixture · checks fetching" "grouped: review header says checks fetching before the first fetch"
+assert_row "$frame_g" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +acme/widgets +main +- │$' "grouped: recorded PR row says checks fetching before the first fetch"
+assert_not_contains "$frame_g" "not fetched" "grouped: nothing reads not fetched before the first fetch"
 
 # Needs you is main-home only (falsify: remove the opts.allHomesNeeds guard in needsRows).
 assert_contains "$frame_g" "Needs you (0)" "grouped: no main-home needs"
@@ -498,7 +522,7 @@ frame_v=$(render lost.json --keys "?") || fail "help: render exited non-zero"
 assert_contains "$frame_v" "Findings row: open the report in the viewer (glow, \$EDITOR, vim, less)" "help overlay documents the viewer"
 assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
 assert_contains "$frame_v" "1 - 5        show or hide a pane" "help overlay documents 1-5"
-assert_contains "$frame_v" "r            refresh now: the snapshot, and the PR checks when --prs is on" "help overlay documents r"
+assert_contains "$frame_v" "r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)" "help overlay documents r"
 # The board never moves the firstmate pane; the captain splits panes himself (falsify: add an f line to HELP_LINES).
 assert_not_contains "$frame_v" "firstmate pane" "help overlay does not mention the firstmate pane"
 assert_not_contains "$frame_v" "  f  " "help overlay has no f key"
@@ -687,7 +711,7 @@ assert_lines "$frame_p" 24 "narrow landing page: 24 lines"
 # Hiding the selected pane moves the selection to the next shown pane (falsify: drop the shown() clamp in
 # moveSelection): 1 hides Needs you, then enter opens the first Ready for review PR.
 frame_o=$(render_open populated.json "1,enter") || fail "panes selection: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "after hiding the selected pane, enter acts on the next shown pane"
+assert_opened "https://github.com/acme/api/pull/8" "after hiding the selected pane, enter acts on the next shown pane"
 frame_p=$(render narrow.json --keys "5") || fail "panes narrow: render exited non-zero"
 assert_not_contains "$frame_p" "── Landed" "list mode: the hidden pane's section is gone (falsify: drop the hidden skip in flattenRows)"
 assert_contains "$frame_p" "panes hidden: 5" "list mode: the title lists the hidden pane"
@@ -711,20 +735,55 @@ assert_not_contains "$frame" " f " "footer offers no f key"
 if grep -Fq -- "-firstmate" "$ROOT/bin/fm-board/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
 
 # --------------------------------------------------------------- r refresh
-# r is a full refresh: the snapshot, and with --prs an immediate PR fetch instead of waiting for the
-# 120 s PR cadence. Both scripts log to FETCH_LOG; the start-up read is the first pair of lines.
-frame_r=$(render_live --keys "r" --prs) || fail "refresh --prs: render exited non-zero"
-assert_fetch_log "snapshot
+# r is the same refresh a timer tick runs: the fleet snapshot and the PR fetch, started together.
+# Both scripts log to FETCH_LOG; the start-up read is one pair of lines and r adds the second.
+frame_r=$(render_live --keys "r") || fail "refresh default: render exited non-zero"
+assert_fetch_log "prs --json --include-prs
 prs --json --include-prs
 snapshot
-prs --json --include-prs" "r with --prs runs the snapshot and the PR fetch again (falsify: drop the prsNow / opts.prs branch from the refresh)"
-assert_contains "$frame_r" "refreshed: snapshot and PR checks" "r with --prs reports both fetches"
-frame_r=$(render_live --keys "r") || fail "refresh without --prs: render exited non-zero"
+snapshot" "r by default runs the snapshot and the PR fetch again (falsify: flip the prs default in parseArgs, or drop runBearingsPrs from refreshLive)"
+assert_contains "$frame_r" "refreshed: snapshot and PR checks" "r reports both fetches"
+frame_r=$(render_live --keys "r" --prs) || fail "refresh --prs: render exited non-zero"
+assert_fetch_log "prs --json --include-prs
+prs --json --include-prs
+snapshot
+snapshot" "--prs is a no-op: the same two pairs (falsify: make --prs disable or double the fetch)"
+frame_r=$(render_live --keys "r" --no-prs) || fail "refresh --no-prs: render exited non-zero"
 assert_fetch_log "snapshot
-snapshot" "r without --prs runs only the snapshot again (falsify: call runBearingsPrs unconditionally)"
-assert_contains "$frame_r" "checks not fetched: start with --prs" "r without --prs says why the PR pane did not change (falsify: drop the notice)"
+snapshot" "r with --no-prs runs only the snapshot again (falsify: call runBearingsPrs unconditionally)"
+assert_contains "$frame_r" "PR checks off: start without --no-prs" "r with --no-prs says why the PR pane did not change (falsify: drop the notice)"
+assert_not_contains "$frame_r" "fetching" "--no-prs: nothing reads fetching after r"
 frame_r=$(render populated.json --keys "r") || fail "refresh fixture: render exited non-zero"
 assert_contains "$frame_r" "refresh is not available with --fixture" "r on a fixture render only reports"
+# A fixture render runs no script at all, whatever the prs default: with the stand-in home and the log
+# in the environment, nothing is logged (falsify: call factsLive or refreshLive when a fixture is given).
+rm -f "$FETCH_LOG"
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" render populated.json --keys "r" >/dev/null || fail "fixture with FM_HOME: render exited non-zero"
+if [ -f "$FETCH_LOG" ]; then fail "a fixture render ran a snapshot script: $(cat "$FETCH_LOG")"; else pass; fi
+
+# ------------------------------------------------------------ refresh schedule
+# The interactive schedule, run with --headless against a stand-in whose snapshot sleeps 7 s, with
+# --refresh 5 (the minimum). From launch: the start refresh runs both scripts at once; the tick at
+# 5 s lands while it is still running and is skipped; it finishes at 7 s; the tick at 10 s runs both
+# again. Stopped at 12 s, the log holds two of each line (falsify: drop the `state.refreshing` skip
+# in refresh, three PR fetches; never clear the flag, or start the interval only after the first
+# refresh, one).
+SLOW_HOME="$SCRATCH/firstmate-slow"
+mkdir -p "$SLOW_HOME/bin"
+# shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
+printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\nsleep 7\ncat "%s"\n' "$FAKE_HOME/snapshot.json" > "$SLOW_HOME/bin/fm-fleet-snapshot.sh"
+cp "$FAKE_HOME/bin/fm-bearings-snapshot.sh" "$SLOW_HOME/bin/fm-bearings-snapshot.sh"
+chmod +x "$SLOW_HOME/bin/fm-fleet-snapshot.sh" "$SLOW_HOME/bin/fm-bearings-snapshot.sh"
+rm -f "$FETCH_LOG"
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$SLOW_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" "$BOARD" --headless --refresh 5 --no-herdr > "$SCRATCH/headless.log" 2>&1 &
+headless_pid=$!
+sleep 12
+kill "$headless_pid" 2>/dev/null
+wait "$headless_pid" 2>/dev/null
+headless_log=$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')
+if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 2 ]; then pass; else fail "headless schedule: expected two snapshot runs in 12 s, log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(grep -c '^prs --json --include-prs$' "$FETCH_LOG" 2>/dev/null)" = 2 ]; then pass; else fail "headless schedule: a tick during a running refresh must not start a second PR fetch, and the next tick must; log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ -s "$SCRATCH/headless.log" ]; then fail "headless run wrote to the terminal: $(head -c 300 "$SCRATCH/headless.log")"; else pass; fi
 
 # ----------------------------------------------------------- wrapper checks
 # A fake herdr for the checks below, on HERDR_BIN_PATH and PATH: it logs every call to
