@@ -32,8 +32,8 @@
 // mid-drag ends the drag first.
 //
 // Actions on a row:
-//   enter   group row: expand or collapse; My PRs, To review or Needs you
-//           row with a PR URL: open it; In flight worker or Needs you
+//   enter   group row: expand or collapse; My PRs, Teammates' PRs or Needs
+//           you row with a PR URL: open it; In flight worker or Needs you
 //           worker: herdr focus; Findings row: open its report in the viewer;
 //           Landed row: the first target it has (landedTarget): its PR, else
 //           its report on this host, else its worker pane while herdr lists
@@ -44,7 +44,8 @@
 //   X       unhide every row of the current pane
 // Board-wide:
 //   H       toggle showing hidden rows (greyed, marked "(hidden)")
-//   1-6     show or hide one pane (Needs you .. To review); 0 shows all six.
+//   1-6     show or hide one pane, in screen order (Needs you .. Landed;
+//           lib/layout.mjs PANES); 0 shows all six.
 //           Any pane may go, the last one too: with all six hidden the frame
 //           is the landing page (lib/render.mjs) and only 0-6, r, ? and q act
 //   r       refresh (the snapshot and the PR checks, unless --no-prs)
