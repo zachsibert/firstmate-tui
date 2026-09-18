@@ -65,9 +65,19 @@ the findings watermark belong to later milestones.
   `HERDR_BIN_PATH` at the fake as well as PATH, because herdr sets
   `HERDR_BIN_PATH` inside its panes and PATH alone still reaches the captain's
   live server.
-- Bash (`bin/fm-board.sh`, `tests/*.sh`) must pass ShellCheck 0.11.0, the
-  same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh tests/fm-board.test.sh`
-  when no local binary is installed).
+- Bash (`bin/*.sh`, `scripts/*.sh`, `tests/*.sh`) must pass ShellCheck
+  0.11.0, the same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh bin/install.sh scripts/package.sh tests/fm-board.test.sh tests/install.test.sh`
+  when no local binary is installed). Every `rm` on a variable path takes
+  the `${VAR:?}` guard so an empty variable fails instead of widening.
+- Distribution is GitHub Releases (README "Install" and "Releasing").
+  `scripts/package.sh` is the one place that builds the tarball: the release
+  workflow and `tests/install.test.sh` both run it, so a new file that must
+  ship, and the tag-equals-version check, are changes there. `bin/install.sh`
+  must stay runnable through `curl | bash`: everything inside `main()`, no
+  `BASH_SOURCE`, only curl, tar and sha256sum or shasum (grep and sed parse
+  the releases API), and it writes only under `--prefix` and `--bin-dir`.
+  No test creates a tag or a release; the captain cuts releases. Lint the
+  workflow with `actionlint` after changing it.
 - Live herdr behavior is verified only in an isolated named session through
   firstmate's `bin/fm-herdr-lab.sh` (provision, run, teardown). Never drive
   the captain's `default` session from a test. Verified on herdr 0.8.2,
