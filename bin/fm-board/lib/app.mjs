@@ -6,15 +6,17 @@
 // the report viewer, snapshots and the view-state file. The terminal is reached only through the adapter's screen contract.
 //
 // Cadence: every --refresh seconds (default 30) one tick runs the fleet
-// snapshot and, unless --no-prs, the live GitHub PR fetch, started together
-// and applied in one frame update, so nothing on screen is older than the
-// cadence plus the slower script. A herdr event touching a known task pane
+// snapshot and then, unless --no-prs, the live GitHub PR fetch (one gh pr list
+// per candidate repository named by that snapshot, all at once; the firstmate
+// script when gh is not on PATH), applied in one frame update, so nothing on
+// screen is older than the cadence plus the two steps. A herdr event touching a known task pane
 // brings a tick forward, debounced to one start per 10 s. Never two refreshes
 // at once: a tick or an event that lands while one is still running is
 // skipped, not queued, and the pane titles keep showing the age of the data
 // they have; r during a refresh queues exactly one follow-up so the key press
 // is honored. A failed PR fetch keeps the previous PR data and its age and is
-// named in the footer once. Herdr pushes redraw the frame immediately because
+// named in the footer once, as is a fetch note (the script fallback, a
+// repository that did not answer). Herdr pushes redraw the frame immediately because
 // the agents map is already updated. With --no-prs, r says why the PR pane did
 // not change.
 //
@@ -29,7 +31,7 @@
 
 import { buildModel, parseTarget } from './model.mjs';
 import { renderFrame } from './render.mjs';
-import { collectLedgers, discoverHomes, mtime, runBearingsPrs, runSnapshot } from './sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, mtime, runSnapshot } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
 import { focusProblem, handleKey, moveSelection, viewProblem } from './controller.mjs';
@@ -74,6 +76,7 @@ export async function runApp(opts) {
     ledgers: [],
     prs: { enabled: opts.prs, fetchedAt: null, error: null, candidate_prs: [] },
     prsErrorShown: null,
+    prsNoteShown: null,
     herdr: null,
     model: null,
     view: {
@@ -159,9 +162,10 @@ export async function runApp(opts) {
     if (err) notice(`view state not saved: ${err}`, true, 15000);
   };
 
-  // One refresh: the snapshot and the PR fetch start together and land in one
-  // frame update. While one is running, a timer tick or a herdr event is
-  // skipped (the next one catches up) and only a key press queues a follow-up.
+  // One refresh: the snapshot, then the PR fetch against the repositories that
+  // snapshot names, landing in one frame update. While one is running, a timer
+  // tick or a herdr event is skipped (the next one catches up) and only a key
+  // press queues a follow-up.
   const refresh = async (why) => {
     const manual = why === 'manual';
     if (state.refreshing) {
@@ -172,7 +176,7 @@ export async function runApp(opts) {
     state.lastSnapshotStart = Date.now();
     notice(`refreshing (${why})…`, false, 60000);
     const timeoutMs = opts.snapshotTimeout * 1000;
-    const [snap, prs] = await Promise.all([runSnapshot(state.fmHome, { timeoutMs }), state.prs.enabled ? runBearingsPrs(state.fmHome, { timeoutMs }) : null]);
+    const snap = await runSnapshot(state.fmHome, { timeoutMs });
     if (snap.value && !snap.error) {
       state.snapshot = snap.value;
       state.snapshotAt = Math.floor(Date.now() / 1000);
@@ -181,7 +185,9 @@ export async function runApp(opts) {
       state.snapshotError = snap.error || 'snapshot failed';
     }
     state.ledgers = collectLedgers(state.snapshot, state.homes);
+    const prs = state.prs.enabled ? await fetchPrs(state.fmHome, state.snapshot, { timeoutMs }) : null;
     let prsFailure = null;
+    let prsNote = null;
     if (prs && prs.error) {
       // Keep the previous PR data and its age; the pane title marks them stale.
       state.prs = { ...state.prs, error: prs.error };
@@ -189,6 +195,7 @@ export async function runApp(opts) {
     } else if (prs) {
       state.prs = { enabled: true, fetchedAt: Math.floor(Date.now() / 1000), error: null, candidate_prs: prs.candidate_prs };
       state.prsErrorShown = null;
+      if (prs.note && prs.note !== state.prsNoteShown) prsNote = prs.note;
     }
     if (herdr) herdr.setPanes(knownPaneIds(state.snapshot, state.ledgers));
     state.refreshing = false;
@@ -199,6 +206,9 @@ export async function runApp(opts) {
       else if (prsFailure) {
         state.prsErrorShown = prsFailure;
         notice(`PR fetch: ${prsFailure}`, true, 15000);
+      } else if (prsNote) {
+        state.prsNoteShown = prsNote;
+        notice(prsNote, false, 15000);
       } else if (manual && !state.prs.enabled) notice('PR checks off: start without --no-prs', false, 8000);
       else notice('', false, 1);
     }

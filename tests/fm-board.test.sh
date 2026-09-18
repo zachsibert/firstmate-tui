@@ -17,12 +17,17 @@
 # the fake on PATH and no real viewer ever runs. Hidden rows and panes go to
 # `--view-state <temp file>`. The r key is checked against a stand-in firstmate
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
-# that they ran and print canned JSON, so a live --render-once with --keys r
-# shows exactly which fetches a refresh triggers without GitHub or a real home.
-# The refresh schedule itself (one tick runs both scripts; a tick during a
-# running refresh is skipped) is checked by running the app with --headless
-# against a second stand-in whose snapshot sleeps, then stopping it with a
-# signal; --headless draws nothing, reads no key and never loads neo-blessed.
+# that they ran and print canned JSON, with tests/fake-gh.sh first on PATH as
+# `gh` (it logs its argv and answers canned open-PR lists with createdAt), so a
+# live --render-once with --keys r shows exactly which fetches a refresh
+# triggers without GitHub or a real home; a run under a PATH holding no gh
+# proves the fallback to the firstmate script. Every live render must put the
+# fake gh first on PATH, or the board's own fetch reaches the real GitHub CLI.
+# The refresh schedule itself (one tick runs the snapshot and then the gh
+# calls; a tick during a running refresh is skipped) is checked by running the
+# app with --headless against a second stand-in whose snapshot sleeps, then
+# stopping it with a signal; --headless draws nothing, reads no key and never
+# loads neo-blessed.
 # The wrapper checks that touch the detached routes run with a fake `herdr` on
 # HERDR_BIN_PATH and PATH (herdr sets HERDR_BIN_PATH inside its panes, so PATH
 # alone would still reach the captain's live server); the fake logs its argv
@@ -32,8 +37,13 @@
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
 #                   decision, a live captain hold, a secondmate hold and a
 #                   secondmate-relayed decision, a green-unmerged PR, a done
-#                   task with a merged PR, recorded PRs, herdr statuses, a
-#                   tmux task, a remote cached home, reports and landed rows
+#                   task with a merged PR, recorded PRs (one live candidate
+#                   with a creation time), herdr statuses, a tmux task, a
+#                   remote cached home, reports and landed rows
+#   pr-ages.json    160x40, Ready for review AGE sources: candidates with a
+#                   creation time, without one, with a future and a malformed
+#                   one, the camel-case alias, no-task candidates and a
+#                   recorded PR missing from the live list
 #   grouped.json    160x44, In flight grouping: two secondmate homes, one with
 #                   four children (a keyed decision, a blocked child with a hold
 #                   reason) plus live and dated captain holds, one quiet
@@ -61,6 +71,11 @@ FAKE_BIN="$SCRATCH/bin"
 mkdir -p "$FAKE_BIN"
 cp "$ROOT/tests/fake-viewer.sh" "$FAKE_BIN/glow"
 chmod +x "$FAKE_BIN/glow"
+# Fake on PATH: `gh` (the board's own PR fetch), logging its argv to FM_BOARD_TEST_FETCH_LOG and
+# answering canned open-PR lists. Every live render below puts FAKE_BIN first on PATH so that no
+# fetch reaches GitHub.
+cp "$ROOT/tests/fake-gh.sh" "$FAKE_BIN/gh"
+chmod +x "$FAKE_BIN/gh"
 # A stand-in firstmate home for the live-refresh checks: both snapshot scripts
 # append one line to FM_BOARD_TEST_FETCH_LOG and print canned JSON (the
 # populated fixture's snapshot; an empty PR list). Nothing reaches GitHub.
@@ -166,13 +181,14 @@ assert_file_contains() {
 assert_file_not_contains() {
   if [ -f "$1" ] && grep -Fq -- "$2" "$1"; then fail "$3: did not expect '$2' in $1"; else pass; fi
 }
-# render_live [flags]: a one-shot render of the stand-in home (no fixture), fetch log reset first
+# render_live [flags]: a one-shot render of the stand-in home (no fixture), fetch log reset first, the
+# fake gh first on PATH
 render_live() {
-  rm -f "$FETCH_LOG"
-  FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" "$BOARD" --render-once --no-herdr "$@"
+  rm -f "${FETCH_LOG:?}"
+  FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr "$@"
 }
-# assert_fetch_log <expected lines, sorted> <label>: the snapshot and the PR fetch of one refresh start
-# together, so their two log lines land in either order; the log is compared sorted.
+# assert_fetch_log <expected lines, sorted> <label>: the gh calls of one refresh start together, so
+# their log lines land in any order; the log is compared sorted.
 assert_fetch_log() {
   if [ -f "$FETCH_LOG" ] && [ "$(sort "$FETCH_LOG")" = "$1" ]; then pass; else fail "$2: fetch log is '$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')', expected (sorted) '$1'"; fi
 }
@@ -236,8 +252,8 @@ assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ merge\?' "--all-hom
 frame_noprs=$(render populated.json --no-prs) || fail "populated --no-prs: render exited non-zero"
 assert_contains "$frame_noprs" "Ready for review (2)" "--no-prs lists the two recorded PRs only"
 assert_contains "$frame_noprs" "· checks off" "--no-prs: the review header says checks off"
-assert_row "$frame_noprs" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: off' "recorded PR 41 row"
-assert_row "$frame_noprs" '^│ PR +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +acme/api +main +- │$' "recorded PR 7 row names the flag"
+assert_row "$frame_noprs" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: off[^│]* acme/widgets +main +5m~ │$' "recorded PR 41 row: with the fetch off the AGE is the status-log age marked ~ (falsify: keep the PR age without the fetch)"
+assert_row "$frame_noprs" '^│ PR +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +acme/api +main +1m~ │$' "recorded PR 7 row names the flag"
 assert_not_contains "$frame_noprs" "passing" "no live check state with --no-prs"
 assert_not_contains "$frame_noprs" "fetching" "--no-prs never says fetching"
 # Finished work stays out (falsify: drop the taskBacklogState or the secondmate check in recordedPrs).
@@ -361,8 +377,8 @@ if [ "$frame_prs" = "$frame" ]; then pass; else fail "--prs renders a different 
 assert_contains "$frame_prs" "Ready for review (3)" "live PR data adds the unrecorded candidate"
 assert_contains "$frame_prs" "checks 30s ago" "review header shows the checks age"
 assert_row "$frame_prs" '^│ failing +changes +api#8 +https://github.com/acme/api/pull/8 · conflicting +acme/api +main +- │$' "failing candidate with review and mergeable"
-assert_row "$frame_prs" '^│ passing +review +ship-alpha +https://github.com/acme/widgets/pull/41 +acme/widgets +main +- │$' "passing candidate joined to its task"
-assert_row "$frame_prs" '^│ unlisted +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched' "recorded PR missing from the live list"
+assert_row "$frame_prs" '^│ passing +review +ship-alpha +https://github.com/acme/widgets/pull/41 +acme/widgets +main +3h │$' "passing candidate joined to its task, AGE from its created_at (falsify: drop prCreatedAt from reviewRows)"
+assert_row "$frame_prs" '^│ unlisted +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +acme/api +main +1m~ │$' "recorded PR missing from the live list, AGE from the status log marked ~"
 assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^ ]+ +ship-old ' "a candidate GitHub reports MERGED is dropped (falsify: drop prClosed from reviewRows)"
 assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^ ]+ +[^ ]+ +https://github.com/acme/widgets/pull/30' "the merged PR appears nowhere in Ready for review"
 assert_before "$frame_prs" '^│ failing +changes' '^│ passing +review' "failing sorts before passing"
@@ -423,7 +439,7 @@ frame_g=$(render grouped.json) || fail "grouped: render exited non-zero"
 # the recorded PR say fetching, never "not fetched" (falsify: drop the fetching branch in
 # unlistedChecks or checksLabel).
 assert_contains "$frame_g" "Ready for review (1) · snapshot 12s ago · herdr fixture · checks fetching" "grouped: review header says checks fetching before the first fetch"
-assert_row "$frame_g" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +acme/widgets +main +- │$' "grouped: recorded PR row says checks fetching before the first fetch"
+assert_row "$frame_g" '^│ PR +#41 +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +acme/widgets +main +5m~ │$' "grouped: recorded PR row says checks fetching before the first fetch, AGE marked as the fallback"
 assert_not_contains "$frame_g" "not fetched" "grouped: nothing reads not fetched before the first fetch"
 
 # Needs you is main-home only (falsify: remove the opts.allHomesNeeds guard in needsRows).
@@ -734,25 +750,140 @@ assert_not_contains "$frame_f" "firstmate pane" "f leaves no firstmate-pane noti
 assert_not_contains "$frame" " f " "footer offers no f key"
 if grep -Fq -- "-firstmate" "$ROOT/bin/fm-board/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
 
+# ------------------------------------------------------------------ PR ages
+# Ready for review's AGE is the time since the PR was opened when the live fetch carries created_at,
+# else the task's status-log age with a trailing ~ (falsify: drop prCreatedAt or the ageFallback
+# marker in lib/model.mjs; the rows below then read 2d for 2d~, or 3h~ for 3h).
+frame_age=$(render pr-ages.json) || fail "pr-ages: render exited non-zero"
+assert_contains "$frame_age" "Ready for review (8)" "pr-ages: seven live candidates plus one unlisted recorded PR"
+assert_row "$frame_age" '^│ passing +review +pr-fresh +https://github.com/acme/api/pull/101 +acme/api +main +3h │$' "created_at 3h before now: AGE 3h with no marker (falsify: read the status-log age first)"
+assert_row "$frame_age" '^│ passing +review +pr-nodate +https://github.com/acme/api/pull/102 +acme/api +main +2d~ │$' "no creation time: the status-log age with ~ (falsify: drop ageFallback from reviewAge)"
+assert_row "$frame_age" '^│ passing +review +pr-future +https://github.com/acme/api/pull/103 +acme/api +main +4h~ │$' "a future created_at counts as absent (falsify: drop the created > now check in prCreatedAt)"
+assert_row "$frame_age" '^│ passing +review +pr-bad +https://github.com/acme/api/pull/104 +acme/api +main +30m~ │$' "a malformed created_at counts as absent (falsify: return 0 instead of null from parseTime)"
+assert_row "$frame_age" '^│ passing +approved +pr-camel +https://github.com/acme/api/pull/105 +acme/api +main +5d │$' "the camel-case createdAt is read too (falsify: drop the alias in prCreatedAt)"
+assert_row "$frame_age" '^│ passing +none +api#107 +https://github.com/acme/api/pull/107 +acme/api +main +2h │$' "a candidate with no task still shows its PR age"
+assert_row "$frame_age" '^│ passing +none +api#108 +https://github.com/acme/api/pull/108 +acme/api +main +- │$' "no creation time and no task: - with no marker (falsify: append ~ to a null age)"
+assert_row "$frame_age" '^│ unlisted +#106 +pr-unlisted +https://github.com/acme/api/pull/106 · checks: not fetched +acme/api +main +45m~ │$' "a recorded PR missing from the live list falls back with ~"
+assert_count "$frame_age" "~ │" 4 "exactly the four fallback rows carry the marker (falsify: mark every review row)"
+# Only the display text carries the marker: the In flight row of the same task shows the plain
+# file-time age (falsify: put the marker into ageSeconds or fmtAge).
+assert_row "$frame_age" '^│ working +- +pr-nodate +fixing the flaky test +acme/api +main +2d │$' "In flight shows the same status-log age unmarked"
+# --no-prs: every recorded row falls back (falsify: skip the marker when prs.enabled is false).
+frame_age_np=$(render pr-ages.json --no-prs) || fail "pr-ages --no-prs: render exited non-zero"
+assert_contains "$frame_age_np" "Ready for review (6)" "--no-prs: the six recorded PRs"
+assert_row "$frame_age_np" '^│ PR +#101 +pr-fresh +https://github.com/acme/api/pull/101 · checks: off \(--no-prs\) +acme/api +main +10m~ │$' "--no-prs: the PR that had a live creation time shows its status-log age with ~ instead"
+assert_count "$frame_age_np" "~ │" 6 "--no-prs: every Ready for review row carries the marker"
+assert_no_row "$frame_age_np" '^│ PR .* (3h|5d|2h) │$' "--no-prs: no PR age survives without the fetch"
+# The marker fits the AGE column at every breakpoint: at the wide breakpoint (100 columns) the column
+# still holds 30m~ whole; below it AGE is dropped and no marker shows anywhere (falsify: narrow the
+# AGE column in lib/layout.mjs, or render the age into another column).
+frame_age_100=$(render pr-ages.json --cols 100 --rows 30) || fail "pr-ages 100: render exited non-zero"
+assert_row "$frame_age_100" '^│ passing +review +pr-bad +[^│]* main +30m~ │$' "100 columns: the widest fallback age fits the AGE column"
+assert_row "$frame_age_100" '^│ passing +review +pr-fresh +[^│]* main +3h │$' "100 columns: the PR age fits"
+assert_widths "$frame_age_100" 100 "100-column frame lines are 100 columns"
+frame_age_90=$(render pr-ages.json --cols 90 --rows 30) || fail "pr-ages 90: render exited non-zero"
+assert_not_contains "$frame_age_90" "~" "medium width: AGE is dropped, so no marker shows"
+assert_widths "$frame_age_90" 90 "medium PR-ages frame lines are 90 columns"
+frame_age_70=$(render pr-ages.json --cols 70 --rows 30) || fail "pr-ages 70: render exited non-zero"
+assert_not_contains "$frame_age_70" "~" "narrow width: no marker in list mode"
+assert_widths "$frame_age_70" 70 "narrow PR-ages frame lines are 70 columns"
+
+# The fetch's pure pieces, straight from lib/sources.mjs, copy fm-bearings-snapshot.sh's rules: the
+# repository slug, the statusCheckRollup mapping, the fm/<task> branch rule with the script's
+# defaults, the field list with createdAt, and the candidate rule (PR URLs of every task including a
+# secondmate's, then the origin remote of live non-secondmate worktrees only, capped at ten). Two
+# scratch git repositories stand in for worktrees (falsify: change any branch of checksState, drop
+# the .git strip in repoSlug, the kind check in candidateRepos, or createdAt from GH_PR_FIELDS).
+WT_DIR="$SCRATCH/wt"
+WT_SM_DIR="$SCRATCH/wt-secondmate"
+git init -q "$WT_DIR" && git -C "$WT_DIR" remote add origin git@github.com:acme/wt.git
+git init -q "$WT_SM_DIR" && git -C "$WT_SM_DIR" remote add origin https://github.com/acme/mate-only.git
+unit_out=$(node --input-type=module -e "
+  import { checksState, projectPr, repoSlug, candidateRepos, GH_PR_FIELDS } from '$ROOT/bin/fm-board/lib/sources.mjs';
+  const out = [];
+  out.push(['none', checksState([])], ['none-null', checksState(null)]);
+  out.push(['passing', checksState([{ status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
+  out.push(['passing-state', checksState([{ state: 'SUCCESS' }])]);
+  out.push(['pending', checksState([{ status: 'IN_PROGRESS' }, { status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
+  out.push(['failing', checksState([{ status: 'COMPLETED', conclusion: 'FAILURE' }, { status: 'IN_PROGRESS' }])]);
+  out.push(['failing-state', checksState([{ state: 'ERROR' }])]);
+  out.push(['slug-pull', repoSlug('https://github.com/acme/widgets/pull/41')]);
+  out.push(['slug-ssh', repoSlug('git@github.com:acme/widgets.git')]);
+  out.push(['slug-other', String(repoSlug('https://gitlab.com/acme/widgets'))]);
+  const p = projectPr({ number: 41, title: 't', url: 'https://github.com/acme/widgets/pull/41', headRefName: 'fm/ship-alpha', reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }], createdAt: '2026-09-16T09:00:00Z' }, 'acme/widgets');
+  out.push(['project', [p.num, p.repo, p.task, p.review, p.mergeable, p.checks, p.created_at].join(' ')]);
+  const q = projectPr({ number: 8, url: 'u', headRefName: 'retry-429' }, 'acme/api');
+  out.push(['project-defaults', [q.task, q.review, q.mergeable, q.checks, String(q.created_at)].join(' ')]);
+  out.push(['fields', GH_PR_FIELDS.join(',')]);
+  const tasks = [
+    { kind: 'ship', pr: { url: 'https://github.com/acme/widgets/pull/41' }, paths: { worktree: { path: '$WT_DIR' } } },
+    { kind: 'secondmate', pr: { url: 'https://github.com/acme/etl/pull/12' }, paths: { worktree: { path: '$WT_SM_DIR' } } },
+    { kind: 'ship', pr: { url: 'https://github.com/acme/widgets/pull/30' }, paths: { worktree: { path: '/nonexistent/worktree' } } },
+  ];
+  out.push(['repos', (await candidateRepos({ tasks }, { timeoutMs: 10000 })).join(' ')]);
+  const many = { tasks: Array.from({ length: 12 }, (_, i) => ({ kind: 'ship', pr: { url: 'https://github.com/acme/r' + i + '/pull/1' } })) };
+  out.push(['cap', (await candidateRepos(many, { timeoutMs: 10000 })).join(' ')]);
+  process.stdout.write(out.map(([k, v]) => k + '=' + v).join('\n'));
+") || fail "sources unit checks: node exited non-zero: $unit_out"
+for expected in "none=none" "none-null=none" "passing=passing" "passing-state=passing" "pending=pending" "failing=failing" "failing-state=failing" \
+  "slug-pull=acme/widgets" "slug-ssh=acme/widgets" "slug-other=null" \
+  "project=41 acme/widgets ship-alpha REVIEW_REQUIRED MERGEABLE passing 2026-09-16T09:00:00Z" \
+  "project-defaults=- none UNKNOWN none null" \
+  "fields=number,title,url,headRefName,reviewDecision,mergeable,statusCheckRollup,createdAt" \
+  "repos=acme/widgets acme/etl acme/wt" \
+  "cap=acme/r0 acme/r1 acme/r2 acme/r3 acme/r4 acme/r5 acme/r6 acme/r7 acme/r8 acme/r9"; do
+  if printf '%s\n' "$unit_out" | grep -Fxq -- "$expected"; then pass; else fail "sources: expected line '$expected' in: $unit_out"; fi
+done
+
 # --------------------------------------------------------------- r refresh
-# r is the same refresh a timer tick runs: the fleet snapshot and the PR fetch, started together.
-# Both scripts log to FETCH_LOG; the start-up read is one pair of lines and r adds the second.
-frame_r=$(render_live --keys "r") || fail "refresh default: render exited non-zero"
-assert_fetch_log "prs --json --include-prs
-prs --json --include-prs
+# r is the same refresh a timer tick runs: the fleet snapshot, then the PR fetch against the
+# repositories that snapshot names. The board asks GitHub itself, so the fake gh on PATH logs one
+# call per candidate repository (acme/widgets, acme/api and acme/etl carry PR URLs in the stand-in
+# snapshot), createdAt in the field list; the start-up read is one set and r adds the second. The
+# stand-in's fm-bearings-snapshot.sh must not run at all (falsify: keep runBearingsPrs as the
+# default source, drop createdAt from GH_PR_FIELDS, or drop fetchPrs from refreshLive).
+gh_line() { printf 'gh pr list --repo %s --state open --limit 21 --json number,title,url,headRefName,reviewDecision,mergeable,statusCheckRollup,createdAt' "$1"; }
+expected_live="$(gh_line acme/api)
+$(gh_line acme/api)
+$(gh_line acme/etl)
+$(gh_line acme/etl)
+$(gh_line acme/widgets)
+$(gh_line acme/widgets)
 snapshot
-snapshot" "r by default runs the snapshot and the PR fetch again (falsify: flip the prs default in parseArgs, or drop runBearingsPrs from refreshLive)"
-assert_contains "$frame_r" "refreshed: snapshot and PR checks" "r reports both fetches"
+snapshot"
+frame_r=$(render_live --keys "r" --cols 160 --rows 40) || fail "refresh default: render exited non-zero"
+assert_fetch_log "$expected_live" "r by default runs the snapshot and then one gh pr list per candidate repository, never the firstmate PR script (falsify: flip the prs default in parseArgs, or call runBearingsPrs with gh on PATH)"
+assert_contains "$frame_r" "refreshed: snapshot and PR checks" "r reports the refresh"
+# The rows come from the fake gh's answers: ship-alpha's PR, opened in 2020, shows a day count with no
+# marker; the failing PR nobody recorded shows the mapped checks state; ship-gamma's recorded PR 7 is
+# not in the fake's list and, with no status file on this host, has no age to fall back to
+# (falsify: drop created_at from projectPr, or the FAILURE branch of checksState).
+assert_row "$frame_r" '^│ passing +review +ship-alpha +https://github.com/acme/widgets/pull/41 +acme/widgets +main +[0-9]+d │$' "live: the PR age comes from gh's createdAt"
+assert_row "$frame_r" '^│ failing +changes +api#8 +https://github.com/acme/api/pull/8 · conflicting +acme/api +main +[0-9]+d │$' "live: a FAILURE conclusion maps to failing"
+assert_row "$frame_r" '^│ unlisted +#7 +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +acme/api +main +- │$' "live: a recorded PR the fetch did not list stays unlisted"
 frame_r=$(render_live --keys "r" --prs) || fail "refresh --prs: render exited non-zero"
-assert_fetch_log "prs --json --include-prs
-prs --json --include-prs
-snapshot
-snapshot" "--prs is a no-op: the same two pairs (falsify: make --prs disable or double the fetch)"
+assert_fetch_log "$expected_live" "--prs is a no-op: the same calls (falsify: make --prs disable or double the fetch)"
 frame_r=$(render_live --keys "r" --no-prs) || fail "refresh --no-prs: render exited non-zero"
 assert_fetch_log "snapshot
-snapshot" "r with --no-prs runs only the snapshot again (falsify: call runBearingsPrs unconditionally)"
+snapshot" "r with --no-prs runs only the snapshot again (falsify: call fetchPrs unconditionally)"
 assert_contains "$frame_r" "PR checks off: start without --no-prs" "r with --no-prs says why the PR pane did not change (falsify: drop the notice)"
 assert_not_contains "$frame_r" "fetching" "--no-prs: nothing reads fetching after r"
+# Without gh on PATH the firstmate script is the fallback and the footer says so. The board runs here
+# as node index.mjs under a PATH holding only node, bash and cat (the stand-in scripts need the last
+# two), so the PATH lookup finds no gh (falsify: drop the whichOnPath check in fetchPrs, and the gh
+# spawn fails instead of the script running; or drop the note from fetchPrs).
+NOGH_BIN="$SCRATCH/nogh"
+mkdir -p "$NOGH_BIN"
+ln -s "$(command -v node)" "$NOGH_BIN/node"
+ln -s "$(command -v bash)" "$NOGH_BIN/bash"
+ln -s "$(command -v cat)" "$NOGH_BIN/cat"
+rm -f "${FETCH_LOG:?}"
+frame_r=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$NOGH_BIN" "$NOGH_BIN/node" "$ROOT/bin/fm-board/index.mjs" --render-once --no-herdr --keys "r") || fail "refresh without gh: render exited non-zero"
+assert_fetch_log "prs --json --include-prs
+prs --json --include-prs
+snapshot
+snapshot" "without gh on PATH, r runs the snapshot and fm-bearings-snapshot.sh --include-prs, and no gh (falsify: spawn gh without the PATH check)"
+assert_contains "$frame_r" "gh not on PATH: PR data from fm-bearings-snapshot.sh" "without gh the footer names the fallback (falsify: drop the note)"
 frame_r=$(render populated.json --keys "r") || fail "refresh fixture: render exited non-zero"
 assert_contains "$frame_r" "refresh is not available with --fixture" "r on a fixture render only reports"
 # A fixture render runs no script at all, whatever the prs default: with the stand-in home and the log
@@ -763,26 +894,31 @@ if [ -f "$FETCH_LOG" ]; then fail "a fixture render ran a snapshot script: $(cat
 
 # ------------------------------------------------------------ refresh schedule
 # The interactive schedule, run with --headless against a stand-in whose snapshot sleeps 7 s, with
-# --refresh 5 (the minimum). From launch: the start refresh runs both scripts at once; the tick at
-# 5 s lands while it is still running and is skipped; it finishes at 7 s; the tick at 10 s runs both
-# again. Stopped at 12 s, the log holds two of each line (falsify: drop the `state.refreshing` skip
-# in refresh, three PR fetches; never clear the flag, or start the interval only after the first
-# refresh, one).
+# --refresh 5 (the minimum) and the fake gh on PATH. From launch: the start refresh runs the
+# snapshot (0-7 s) and then the three gh calls; the tick at 5 s lands while it is running and is
+# skipped; the tick at 10 s runs the snapshot (10-17 s) and the gh calls again; the tick at 15 s is
+# skipped. Stopped at 19 s, the log holds two snapshot lines, each followed by its three gh lines,
+# and no script fallback (falsify: drop the `state.refreshing` skip in refresh, three snapshots;
+# never clear the flag, or start the interval only after the first refresh, one; start the fetch
+# with the snapshot instead of after it, and gh lines land before the snapshot line).
 SLOW_HOME="$SCRATCH/firstmate-slow"
 mkdir -p "$SLOW_HOME/bin"
 # shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
 printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\nsleep 7\ncat "%s"\n' "$FAKE_HOME/snapshot.json" > "$SLOW_HOME/bin/fm-fleet-snapshot.sh"
 cp "$FAKE_HOME/bin/fm-bearings-snapshot.sh" "$SLOW_HOME/bin/fm-bearings-snapshot.sh"
 chmod +x "$SLOW_HOME/bin/fm-fleet-snapshot.sh" "$SLOW_HOME/bin/fm-bearings-snapshot.sh"
-rm -f "$FETCH_LOG"
-FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$SLOW_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" "$BOARD" --headless --refresh 5 --no-herdr > "$SCRATCH/headless.log" 2>&1 &
+rm -f "${FETCH_LOG:?}"
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$SLOW_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --headless --refresh 5 --no-herdr > "$SCRATCH/headless.log" 2>&1 &
 headless_pid=$!
-sleep 12
+sleep 19
 kill "$headless_pid" 2>/dev/null
 wait "$headless_pid" 2>/dev/null
 headless_log=$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')
-if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 2 ]; then pass; else fail "headless schedule: expected two snapshot runs in 12 s, log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
-if [ "$(grep -c '^prs --json --include-prs$' "$FETCH_LOG" 2>/dev/null)" = 2 ]; then pass; else fail "headless schedule: a tick during a running refresh must not start a second PR fetch, and the next tick must; log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 2 ]; then pass; else fail "headless schedule: expected two snapshot runs in 19 s, log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(grep -c '^gh pr list ' "$FETCH_LOG" 2>/dev/null)" = 6 ]; then pass; else fail "headless schedule: a tick during a running refresh must not start a second PR fetch, and the next tick must (two refreshes, three repositories each); log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(sed -n '1p;5p' "$FETCH_LOG" 2>/dev/null)" = "snapshot
+snapshot" ]; then pass; else fail "headless schedule: each refresh runs the snapshot before its gh calls; log is '$headless_log'"; fi
+if grep -q '^prs ' "$FETCH_LOG" 2>/dev/null; then fail "headless schedule: the firstmate PR script ran although gh is on PATH; log is '$headless_log'"; else pass; fi
 if [ -s "$SCRATCH/headless.log" ]; then fail "headless run wrote to the terminal: $(head -c 300 "$SCRATCH/headless.log")"; else pass; fi
 
 # ----------------------------------------------------------- wrapper checks
