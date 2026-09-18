@@ -11,14 +11,26 @@ pane; `focus`, `upgrade`, `version`, `help`; `run` is a hidden synonym of the
 default); `fm-board`, the name up to 0.1.0, is written by the installer as an
 alias for the 0.2.x release only. The release asset `fm-board-<tag>.tar.gz`,
 the default prefix `~/.local/share/fm-board`, and `bin/fm-board.sh` and
-`bin/fm-board/` inside the tarball are frozen under the old name because a
-0.1.0 install upgrades by running its own `bin/install.sh`, which downloads
-and checks exactly those; the launcher then writes `firstmate-tui` beside
-`fm-board` (`ensure_new_command`). Rename them only once no 0.1.0 install
-remains, and keep `tests/install.test.sh`'s 0.1.0 upgrade walk (built from
-the `v0.1.0` tag) green until then. The herdr plugin id `firstmate.board`
-stays for the same reason: linked plugins and the view-state directory are
-keyed by it. The
+`bin/fm-board/` inside the tarball still carry the old name because an
+install upgrades by running the `bin/install.sh` that shipped in its own
+tarball, and every installer before step 1 below downloads and checks
+exactly those; the launcher then writes `firstmate-tui` beside `fm-board`
+(`ensure_new_command`). The rename is two steps. Step 1, in `bin/install.sh`:
+it asks for `firstmate-tui-<tag>.tar.gz` before `fm-board-<tag>.tar.gz`,
+accepts either layout inside the tarball (`bin/firstmate-tui.sh` with
+`bin/firstmate-tui/`, or the old pair, never a mix), points both commands at
+whichever launcher the tree has, and writes `layout=` into the install
+record; `tests/install.test.sh` checks it against a stand-in 0.3.0 tarball
+it builds. Step 2, not before every install has upgraded to a release that
+carries that installer (an install upgrading with an older installer still
+asks for the old asset name): flip the asset name in `scripts/package.sh`,
+the paths in the tarball and the launcher (`BOARD_DIR`, the relaunch and
+`open --detached` paths, `write_command`), the workflow, the README, both
+test suites and this note, as 0.3.0, and keep the `fm-board` alias one more
+release. Keep the 0.1.0 upgrade walk in `tests/install.test.sh` (built from
+the `v0.1.0` tag) green until step 2 lands. The herdr plugin id
+`firstmate.board` stays regardless: linked plugins and the view-state
+directory are keyed by it. The
 scout report at `docs/scout-report-2026-09-16.md` is the design record: its
 section 1 table is the pane-to-data mapping that `bin/fm-board/lib/model.mjs`
 implements row for row, and its section 7 table is the milestone plan. Check

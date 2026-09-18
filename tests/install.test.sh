@@ -11,12 +11,15 @@
 # beta in both directions through `firstmate-tui upgrade`, with
 # tests/fake-curl.sh standing in for GitHub: it serves the releases API and
 # the download URLs from a local directory, so the real channel logic in
-# install.sh (--stable, --pre, --version) runs offline. Last it walks the
-# upgrade from a 0.1.0 install (built from the v0.1.0 tag) to the current
-# tarball through the 0.1.0 installer, which is why the asset name and the
-# paths inside the tarball are frozen (AGENTS.md). Nothing reaches GitHub: no
-# tag, no release, no download. Each check's comment names what would make it
-# fail.
+# install.sh (--stable, --pre, --version) runs offline. Then it covers step 1
+# of the asset rename (AGENTS.md): the installer asks for
+# firstmate-tui-<tag>.tar.gz before fm-board-<tag>.tar.gz and installs a
+# tarball of either layout, checked against a stand-in for the 0.3.0 tarball
+# built here. Last it walks the upgrade from a 0.1.0 install (built from the
+# v0.1.0 tag) to the current tarball through the 0.1.0 installer, which is
+# why the asset name and the paths inside the tarball still carry the old
+# name. Nothing reaches GitHub: no tag, no release, no download. Each check's
+# comment names what would make it fail.
 #
 # Needs node and npm (scripts/package.sh runs `npm ci --omit=dev` to vendor
 # neo-blessed), plus tar and shasum or sha256sum, which the installer needs
@@ -400,11 +403,16 @@ mkdir -p "$FAKEBIN"
 cp "$ROOT/tests/fake-curl.sh" "$FAKEBIN/curl"
 chmod +x "$FAKEBIN/curl"
 CURL_LOG="$SCRATCH/curl.log"
-# offline <command...>: run with the fake curl first on PATH and a fresh URL log
-offline() {
+# offline_from <mirror root> <command...>: run with the fake curl first on
+# PATH, serving <mirror root>, and a fresh URL log; offline <command...> is
+# the same against $MIRROR.
+offline_from() {
+  local root=$1
+  shift
   : > "$CURL_LOG"
-  env PATH="$FAKEBIN:$PATH" FAKE_CURL_ROOT="$MIRROR" FAKE_CURL_LOG="$CURL_LOG" "$@"
+  env PATH="$FAKEBIN:$PATH" FAKE_CURL_ROOT="$root" FAKE_CURL_LOG="$CURL_LOG" "$@"
 }
+offline() { offline_from "$MIRROR" "$@"; }
 SWAP="$SCRATCH/swap"
 SWAP_PREFIX="$SWAP/prefix"
 SWAP_BIN="$SWAP/bin"
@@ -544,6 +552,185 @@ if out=$(cd / && offline bash "$SWAP/moved/bin/fm-board.sh" upgrade 2>&1); then 
 assert_contains "$out" "no install record" "a missing record is named"
 assert_contains "$out" "install.sh | bash" "a missing record points at the installer"
 assert_contains "$(bash "$SWAP/moved/bin/fm-board.sh" version 2>&1)" "not an installed copy" "version without a record says so"
+
+# ------------------------------------------- asset name and tarball layout
+# Step 1 of the rename (AGENTS.md, the header of bin/install.sh): this
+# installer asks for firstmate-tui-<tag>.tar.gz before fm-board-<tag>.tar.gz
+# and installs a tarball of either layout; the asset and the paths inside it
+# flip in 0.3.0 once every install carries this installer. The 0.3.0 tarball
+# is stood in for by a copy of the one package.sh built, with bin/fm-board.sh
+# renamed to bin/firstmate-tui.sh and bin/fm-board/ to bin/firstmate-tui/.
+# Its launcher gets the one-line change the 0.3.0 launcher will carry
+# (BOARD_DIR under the renamed directory) and nothing else, so `version` and
+# a render can prove the installer handed it a working tree.
+NEW_ASSET="firstmate-tui-$TAG.tar.gz"
+OLD_ASSET="fm-board-$TAG.tar.gz"
+FUTURE="$SCRATCH/future"
+mkdir -p "$FUTURE/tree"
+tar -xzf "$TARBALL" -C "$FUTURE/tree"
+mv "$FUTURE/tree/$DIRNAME/bin/fm-board.sh" "$FUTURE/tree/$DIRNAME/bin/firstmate-tui.sh"
+mv "$FUTURE/tree/$DIRNAME/bin/fm-board" "$FUTURE/tree/$DIRNAME/bin/firstmate-tui"
+# shellcheck disable=SC2016 # the $ROOT is the launcher's own, matched and written literally
+sed -i.bak 's#^BOARD_DIR="\$ROOT/fm-board"$#BOARD_DIR="$ROOT/firstmate-tui"#' "$FUTURE/tree/$DIRNAME/bin/firstmate-tui.sh" && rm -f -- "${FUTURE:?}/tree/$DIRNAME/bin/firstmate-tui.sh.bak"
+# shellcheck disable=SC2016 # same: the launcher's $ROOT, looked for literally
+grep -Fq 'BOARD_DIR="$ROOT/firstmate-tui"' "$FUTURE/tree/$DIRNAME/bin/firstmate-tui.sh" || fail "test setup: the stand-in launcher does not point BOARD_DIR at bin/firstmate-tui (did the BOARD_DIR line in bin/fm-board.sh change?)"
+FUTURE_TARBALL="$FUTURE/$NEW_ASSET"
+tar -czf "$FUTURE_TARBALL" -C "$FUTURE/tree" "$DIRNAME"
+printf '%s  %s\n' "$(file_sha "$FUTURE_TARBALL")" "$NEW_ASSET" > "$FUTURE_TARBALL.sha256"
+future_listing=$(tar -tzf "$FUTURE_TARBALL")
+assert_contains "$future_listing" "$DIRNAME/bin/firstmate-tui.sh" "test setup: the stand-in tarball carries bin/firstmate-tui.sh"
+assert_contains "$future_listing" "$DIRNAME/bin/firstmate-tui/node_modules/neo-blessed/package.json" "test setup: the stand-in tarball carries the package under bin/firstmate-tui/"
+assert_not_contains "$future_listing" "$DIRNAME/bin/fm-board" "test setup: the stand-in tarball carries no fm-board path"
+
+# 1. --from-file with the future layout: the tree is accepted, both commands
+# run bin/firstmate-tui.sh, the record notes the layout, and version and a
+# render work from it (falsify: look for bin/fm-board.sh alone after the
+# unpack, read the version from bin/fm-board/package.json alone, or write the
+# shim's exec line with a fixed launcher name).
+FUT_PREFIX="$FUTURE/prefix"
+FUT_BIN="$FUTURE/bin"
+if out=$("$INSTALL" --from-file "$FUTURE_TARBALL" --prefix "$FUT_PREFIX" --bin-dir "$FUT_BIN" 2>&1); then pass; else fail "install.sh --from-file with the future layout exited non-zero: $out"; fi
+assert_contains "$out" "checksum verified" "the stand-in tarball's checksum is verified"
+assert_contains "$out" "firstmate-tui $VERSION installed" "the version is read from bin/firstmate-tui/package.json"
+assert_exec "$FUT_PREFIX/bin/firstmate-tui.sh" "the future launcher is installed and executable (falsify: chmod bin/fm-board.sh by name)"
+assert_absent "$FUT_PREFIX/bin/fm-board.sh" "the future layout is installed as is, with no bin/fm-board.sh"
+assert_file "$FUT_PREFIX/bin/firstmate-tui/node_modules/neo-blessed/package.json" "the vendored dependency is installed under the renamed directory"
+assert_contains "$(cat "$FUT_BIN/firstmate-tui")" "$FUT_PREFIX/bin/firstmate-tui.sh" "the firstmate-tui command runs the launcher the tree has"
+assert_not_contains "$(cat "$FUT_BIN/firstmate-tui")" "fm-board.sh" "the firstmate-tui command names no launcher that is not there"
+assert_contains "$(cat "$FUT_BIN/fm-board")" "$FUT_PREFIX/bin/firstmate-tui.sh" "the fm-board alias runs the same launcher"
+assert_contains "$(cat "$FUT_PREFIX/install-record")" "layout=firstmate-tui" "the record notes the future layout (falsify: leave layout= out of the record)"
+assert_contains "$(cat "$PREFIX/install-record")" "layout=fm-board" "the record of a current-layout install says layout=fm-board"
+if out=$(cd / && "$FUT_BIN/firstmate-tui" version 2>&1); then pass; else fail "firstmate-tui version from the future layout exited non-zero: $out"; fi
+assert_contains "$out" "firstmate-tui $VERSION (stable release)" "firstmate-tui version works from the future layout"
+assert_contains "$out" "installed at $FUT_PREFIX" "version names the future install's prefix"
+assert_equal "$(cd / && "$FUT_BIN/fm-board" version 2>&1)" "$out" "the fm-board alias answers version the same way from the future layout"
+if frame=$(cd / && "$FUT_BIN/firstmate-tui" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "the future layout does not render: $frame"; fi
+assert_contains "$frame" "Needs you (0)" "the future layout renders a frame"
+assert_no_leftovers "$FUTURE" "the future-layout install leaves no staging directory"
+
+# 2. `firstmate-tui upgrade` from the future layout reads its record and runs
+# the installed installer; swapping to the current layout and back re-points
+# both commands at whichever launcher lands, and each report names the
+# version it replaced, read from the other layout's package.json (falsify:
+# read the old version from bin/fm-board/package.json alone, or write the
+# shims only on a first install).
+if out=$(cd / && offline "$FUT_BIN/firstmate-tui" upgrade --from-file "$FUTURE_TARBALL" 2>&1); then pass; else fail "firstmate-tui upgrade from the future layout exited non-zero: $out"; fi
+assert_contains "$out" "firstmate-tui $VERSION installed (replaced $VERSION)" "upgrade from the future layout runs the installer against its record"
+if [ -s "$CURL_LOG" ]; then fail "upgrade --from-file from the future layout must not touch the network: $(cat "$CURL_LOG")"; else pass; fi
+if out=$(cd / && offline "$FUT_BIN/firstmate-tui" upgrade --from-file "$TARBALL" 2>&1); then pass; else fail "upgrade from the future layout to the current one exited non-zero: $out"; fi
+assert_contains "$out" "installed (replaced $VERSION)" "the swap to the current layout names the version it replaced, read from bin/firstmate-tui/package.json"
+assert_exec "$FUT_PREFIX/bin/fm-board.sh" "the current layout is in place after the swap"
+assert_absent "$FUT_PREFIX/bin/firstmate-tui.sh" "the future launcher went with the previous install (falsify: extract over the prefix)"
+assert_contains "$(cat "$FUT_BIN/firstmate-tui")" "$FUT_PREFIX/bin/fm-board.sh" "the firstmate-tui command now runs bin/fm-board.sh"
+assert_contains "$(cat "$FUT_PREFIX/install-record")" "layout=fm-board" "the record now says layout=fm-board"
+assert_contains "$(cd / && "$FUT_BIN/firstmate-tui" version 2>&1)" "firstmate-tui $VERSION (stable release)" "version works after the swap to the current layout"
+if out=$(cd / && offline "$FUT_BIN/firstmate-tui" upgrade --from-file "$FUTURE_TARBALL" 2>&1); then pass; else fail "upgrade from the current layout to the future one exited non-zero: $out"; fi
+assert_contains "$out" "installed (replaced $VERSION)" "the swap to the future layout names the version it replaced, read from bin/fm-board/package.json"
+assert_exec "$FUT_PREFIX/bin/firstmate-tui.sh" "the future layout is back"
+assert_contains "$(cat "$FUT_BIN/fm-board")" "$FUT_PREFIX/bin/firstmate-tui.sh" "the alias follows the launcher on every swap"
+assert_contains "$(cd / && "$FUT_BIN/fm-board" version 2>&1)" "firstmate-tui $VERSION (stable release)" "version works after the swap back"
+assert_no_leftovers "$FUTURE" "the layout swaps leave no staging or previous directory"
+
+# 3. A tree that is neither layout is refused untouched: bin/firstmate-tui.sh
+# beside bin/fm-board/ (falsify: accept a launcher without checking the
+# package directory of the same name beside it).
+mv "$FUTURE/tree/$DIRNAME/bin/firstmate-tui" "$FUTURE/tree/$DIRNAME/bin/fm-board"
+MIXED_TARBALL="$FUTURE/mixed-$TAG.tar.gz"
+tar -czf "$MIXED_TARBALL" -C "$FUTURE/tree" "$DIRNAME"
+if out=$("$INSTALL" --from-file "$MIXED_TARBALL" --prefix "$FUTURE/prefix-mixed" --bin-dir "$FUTURE/bin-mixed" 2>&1); then fail "a tarball with bin/firstmate-tui.sh but bin/fm-board/ should be refused"; else pass; fi
+assert_contains "$out" "not a firstmate-tui release" "the mixed tree is refused as not a release"
+assert_absent "$FUTURE/prefix-mixed" "a refused tarball installs nothing"
+assert_no_leftovers "$FUTURE" "a refused tarball leaves no staging directory"
+
+# 4. Through the fake network, three releases: the old asset name only
+# ($MIRROR, what every release looks like before 0.3.0), the new name only (a
+# copy of the current tarball under it), and both (the stand-in under the new
+# name, the current tarball under the old, so the launcher that lands tells
+# which one was taken).
+MIRROR_NEW="$SCRATCH/mirror-new"
+MIRROR_BOTH="$SCRATCH/mirror-both"
+mkdir -p "$MIRROR_NEW/api" "$MIRROR_NEW/download/$TAG" "$MIRROR_BOTH/api" "$MIRROR_BOTH/download/$TAG"
+cp "$MIRROR/api/latest.json" "$MIRROR_NEW/api/latest.json"
+cp "$MIRROR/api/latest.json" "$MIRROR_BOTH/api/latest.json"
+cp "$TARBALL" "$MIRROR_NEW/download/$TAG/$NEW_ASSET"
+printf '%s  %s\n' "$(file_sha "$TARBALL")" "$NEW_ASSET" > "$MIRROR_NEW/download/$TAG/$NEW_ASSET.sha256"
+cp "$FUTURE_TARBALL" "$FUTURE_TARBALL.sha256" "$MIRROR_BOTH/download/$TAG/"
+cp "$TARBALL" "$CHECKSUM" "$MIRROR_BOTH/download/$TAG/"
+NET="$SCRATCH/net"
+
+# Old name only: the new name is asked for first and is not there, the old
+# name is downloaded with its own checksum, the log says so, and the install
+# completes (falsify: ask for the old name only or first, or stay silent
+# about the fallback).
+if out=$(offline "$INSTALL" --prefix "$NET/old/prefix" --bin-dir "$NET/old/bin" 2>&1); then pass; else fail "install from a release holding the old asset name exited non-zero: $out"; fi
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$NEW_ASSET" "the new asset name is asked for"
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$OLD_ASSET" "the old asset name is downloaded when the new one is missing"
+new_line=$(grep -nF -- "/$NEW_ASSET" "$CURL_LOG" | head -n 1 | cut -d: -f1)
+old_line=$(grep -nF -- "/$OLD_ASSET" "$CURL_LOG" | head -n 1 | cut -d: -f1)
+if [ -n "$new_line" ] && [ -n "$old_line" ] && [ "$new_line" -lt "$old_line" ]; then pass; else fail "the new asset name is asked for before the old one (falsify: try the old name first): $(cat "$CURL_LOG" | tr '\n' ' ')"; fi
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$OLD_ASSET.sha256" "the checksum is fetched under the name that was found"
+assert_not_contains "$(cat "$CURL_LOG")" "$NEW_ASSET.sha256" "no checksum is fetched under a name the release does not have"
+assert_contains "$out" "downloading $NEW_ASSET" "the log names the asset asked for first"
+assert_contains "$out" "has no $NEW_ASSET" "the log says the new name was missing"
+assert_contains "$out" "downloaded $OLD_ASSET" "the log names the asset that was used"
+assert_contains "$out" "checksum verified" "the fallback download is verified"
+assert_contains "$out" "firstmate-tui $VERSION installed" "the fallback installs"
+assert_exec "$NET/old/prefix/bin/fm-board.sh" "the fallback installed the current layout"
+
+# New name only: downloaded and verified under it, the old name never asked
+# for, no fallback line (falsify: fetch both names regardless).
+if out=$(offline_from "$MIRROR_NEW" "$INSTALL" --prefix "$NET/new/prefix" --bin-dir "$NET/new/bin" 2>&1); then pass; else fail "install from a release holding the new asset name only exited non-zero: $out"; fi
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$NEW_ASSET" "the new asset is downloaded"
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$NEW_ASSET.sha256" "its checksum is downloaded under the new name"
+assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "the old name is never asked for when the new one is there"
+assert_contains "$out" "downloading $NEW_ASSET" "the log names the new asset"
+assert_not_contains "$out" "has no $NEW_ASSET" "no fallback is reported when none happened"
+assert_not_contains "$out" "downloaded $OLD_ASSET" "the old asset is not named as used when it was not"
+assert_contains "$out" "checksum verified" "the new-name download is verified (falsify: skip the checksum under the new name)"
+assert_contains "$out" "firstmate-tui $VERSION installed" "a release under the new name installs"
+assert_contains "$(cat "$NET/new/prefix/install-record")" "installed_from=release $TAG" "the record names the release either way"
+if out=$(cd / && "$NET/new/bin/firstmate-tui" version 2>&1); then pass; else fail "version after a new-name install exited non-zero: $out"; fi
+assert_contains "$out" "firstmate-tui $VERSION (stable release)" "the new-name install works"
+
+# Both names: the new one wins, and it is the stand-in tarball that lands
+# (falsify: prefer the old name, or download both and unpack the old).
+if out=$(offline_from "$MIRROR_BOTH" "$INSTALL" --prefix "$NET/both/prefix" --bin-dir "$NET/both/bin" 2>&1); then pass; else fail "install from a release holding both asset names exited non-zero: $out"; fi
+assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "with both names present the old one is never asked for"
+assert_exec "$NET/both/prefix/bin/firstmate-tui.sh" "the tarball under the new name is the one installed"
+assert_contains "$(cd / && "$NET/both/bin/firstmate-tui" version 2>&1)" "firstmate-tui $VERSION (stable release)" "the stand-in tarball from the network works"
+assert_contains "$(cat "$NET/both/prefix/install-record")" "layout=firstmate-tui" "the record notes the future layout of a network install"
+
+# A missing checksum is an error under either name, never a reason to try the
+# other name (falsify: fall back on any failed download).
+rm -f -- "${MIRROR_NEW:?}/download/$TAG/$NEW_ASSET.sha256"
+if out=$(offline_from "$MIRROR_NEW" "$INSTALL" --prefix "$NET/nosum/prefix" --bin-dir "$NET/nosum/bin" 2>&1); then fail "a release with the tarball but no checksum should stop the install"; else pass; fi
+assert_contains "$out" "download failed" "the missing checksum is a failed download"
+assert_contains "$out" "$NEW_ASSET.sha256" "the error names the checksum file"
+assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "a missing checksum does not send the installer to the old name"
+assert_absent "$NET/nosum/prefix" "nothing is installed without the checksum"
+
+# A failure that is not a missing asset stays an error: a curl that cannot
+# connect (exit 7) on the new name stops the install instead of trying the
+# old one (falsify: fall back on every non-zero curl status).
+FLAKY="$SCRATCH/flakybin"
+mkdir -p "$FLAKY"
+# shellcheck disable=SC2016 # the "$*" and "$@" are for the fake curl's own shell
+printf '#!/usr/bin/env bash\ncase "$*" in *%s*) exit 7 ;; esac\nexec bash %q "$@"\n' "$NEW_ASSET" "$ROOT/tests/fake-curl.sh" > "$FLAKY/curl"
+chmod +x "$FLAKY/curl"
+: > "$CURL_LOG"
+if out=$(env PATH="$FLAKY:$PATH" FAKE_CURL_ROOT="$MIRROR" FAKE_CURL_LOG="$CURL_LOG" "$INSTALL" --prefix "$NET/flaky/prefix" --bin-dir "$NET/flaky/bin" 2>&1); then fail "a connection failure on the new asset name should stop the install"; else pass; fi
+assert_contains "$out" "download failed" "the connection failure is reported as a failed download"
+assert_contains "$out" "curl exit 7" "the error carries curl's status"
+assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "a connection failure never falls back to the old name"
+assert_absent "$NET/flaky/prefix" "nothing is installed after a connection failure"
+
+# A release with neither name fails before the swap and the error names both
+# (falsify: report only the last name tried).
+if out=$(cd / && offline "$NET/old/bin/firstmate-tui" upgrade --version 0.9.9-abcdef0 2>&1); then fail "upgrade to a version with no release should exit non-zero"; else pass; fi
+assert_contains "$out" "download failed" "the missing release is a failed download"
+assert_contains "$out" "neither firstmate-tui-v0.9.9-abcdef0.tar.gz nor fm-board-v0.9.9-abcdef0.tar.gz" "the error names both asset names it tried"
+assert_contains "$(cd / && "$NET/old/bin/firstmate-tui" version 2>&1)" "firstmate-tui $VERSION (stable release)" "the install is unchanged after the failed upgrade"
+assert_no_leftovers "$NET/old" "the failed upgrade leaves no staging directory"
 
 # --------------------------------------------- upgrade from a 0.1.0 install
 # The path that pins the frozen names. A 0.1.0 install runs the 0.1.0
