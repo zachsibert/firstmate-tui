@@ -25,7 +25,11 @@
 //                 null: the identity's own latest review) and pane ('mine' or
 //                 'toreview'; absent means 'mine'). identity is { login,
 //                 source, reason } (lib/identity.mjs; unknown when login is
-//                 null). mine and toreview each carry that pane's own
+//                 null) once resolved, and null while the app is still
+//                 resolving it (its first refresh, after the snapshot, and r
+//                 asking again for an unknown one): the two PR panes spin on
+//                 a null identity and show their identity row only for a
+//                 resolved unknown one. mine and toreview each carry that pane's own
 //                 { fetchedAt, error } (falling back to the top-level pair
 //                 when absent), toreview also `scope` (the repositories
 //                 searched) and `unavailable` (why it cannot fetch at all)
@@ -73,7 +77,7 @@
 
 import { PANES } from './layout.mjs';
 import { basename, clean, fmtAge, parseTime, relativeTo, repoFromUrl } from './text.mjs';
-import { identityKnown } from './identity.mjs';
+import { identityPending, identityUnknown } from './identity.mjs';
 
 const MAIN_HOME_LABEL = 'main';
 
@@ -551,7 +555,9 @@ function reviewRow(facts, fetched, { id, url, title, ageSeconds, herdr, focusabl
 // latest review says so, else the same words as My PRs.
 //
 // With the identity unknown neither pane can be built: each shows one row
-// pointing at the Settings page.
+// pointing at the Settings page. While it is still being resolved (null)
+// each lists nothing and spins on it instead (paneLoading), so the row never
+// shows before every rung has failed.
 
 export const TERMINAL_WINDOW_SECONDS = 12 * 3600;
 
@@ -672,11 +678,22 @@ function identityRow() {
 }
 
 // Whether a PR pane's rows come from a fetch that needs the identity: the
-// fetch is on, gh is there to run it (without gh My PRs lists the recorded
+// fetch is on and gh is there to run it (without gh My PRs lists the recorded
 // PRs through the script fallback, which needs no login, and To review says
-// why it is empty) and the identity is unknown.
+// why it is empty). Then a pending identity (null: the first refresh has not
+// reached the rungs yet, or r is asking them again) puts the resolving
+// spinner in both panes with no rows, and a resolved unknown one (every rung
+// failed) puts the identity row there.
+function identityNeeded(prs) {
+  return Boolean(prs && prs.enabled) && !paneFetch(prs, 'toreview').unavailable;
+}
+
+function identityResolving(prs) {
+  return identityNeeded(prs) && identityPending(prs.identity);
+}
+
 function identityMissing(prs) {
-  return Boolean(prs && prs.enabled) && !paneFetch(prs, 'toreview').unavailable && !identityKnown(prs.identity);
+  return identityNeeded(prs) && identityUnknown(prs.identity);
 }
 
 // When the PR was opened, as epoch seconds, from a candidate's created_at
@@ -740,6 +757,7 @@ function fetchedPrRow(facts, taskById, c, rec, status) {
 
 function mineRows(facts) {
   const prs = facts.prs || { enabled: false };
+  if (identityResolving(prs)) return [];
   if (identityMissing(prs)) return [identityRow()];
   const rows = [];
   const recorded = recordedPrs(facts);
@@ -789,6 +807,7 @@ export function toReviewStatus(c) {
 
 function toReviewRows(facts) {
   const prs = facts.prs || { enabled: false };
+  if (identityResolving(prs)) return [];
   if (identityMissing(prs)) return [identityRow()];
   const rows = [];
   const snap = facts.snapshot || {};
@@ -1269,15 +1288,19 @@ export function initialPrs(enabled, identity = null) {
 
 // Fold one fetch (lib/sources.mjs fetchPrs: { mine, toreview, note }) into the
 // previous PR facts at `at`: a pane whose searches failed keeps its previous
-// rows and records the failure, a pane that answered replaces them. The
-// top-level error names the first failing pane for the title line; the
-// per-pane errors mark the pane titles stale.
+// rows and records the failure, a pane that answered replaces them, and a
+// pane the fetch skipped (`skipped`: the identity was unknown, so nothing
+// was asked) lists nothing and keeps its fetch state, above all a null
+// fetchedAt, so the first-fetch spinner still follows once r resolves the
+// login. The top-level error names the first failing pane for the title
+// line; the per-pane errors mark the pane titles stale.
 export function mergePrs(prev, fetched, at, identity) {
   const keep = (paneId) => (Array.isArray(prev.candidate_prs) ? prev.candidate_prs : []).filter((c) => c && (c.pane || 'mine') === paneId);
   const pane = (paneId) => {
     const r = fetched[paneId] || { rows: [], error: null };
     const before = prev[paneId] || {};
     if (r.error) return { rows: keep(paneId), state: { ...before, error: r.error, scope: r.scope ?? before.scope ?? null, unavailable: r.unavailable ?? null } };
+    if (r.skipped) return { rows: [], state: { ...before, fetchedAt: before.fetchedAt ?? null, error: null, scope: r.scope ?? before.scope ?? null, unavailable: null } };
     return { rows: r.rows || [], state: { fetchedAt: at, error: null, scope: r.scope ?? null, unavailable: r.unavailable ?? null } };
   };
   const mine = pane('mine');
@@ -1364,32 +1387,38 @@ export function spinnerGlyph(frame) {
 // What a pane is still waiting for, or null: a pane is loading only while a
 // refresh is in flight and the source it draws from has never landed in this
 // session. Needs you, In flight, Findings and Landed wait on the fleet
-// snapshot; My PRs waits on the GitHub checks and To review on the GitHub
-// review requests (with --no-prs neither is ever loading: the panes show the
-// off state, and with the identity unknown they show its row); In flight's
-// HERDR column comes from herdr, which its spinner names only once the
-// snapshot has landed while the herdr link is still connecting. A source that
-// landed once never loads again (an empty pane reads its empty text, a
-// refreshing pane keeps its rows), and a source whose first fetch failed
-// shows the failure text, not the spinner, until a later refresh lands it.
+// snapshot; My PRs and To review wait first on the GitHub identity, while it
+// is still being resolved (`resolving GitHub identity`, the one line whose
+// verb is not `loading`; the resolution follows the snapshot, so on a cold
+// start it is what both panes show until the login is known, and r shows it
+// again while asking for an unknown one), then My PRs on the GitHub checks
+// and To review on the GitHub review requests (with --no-prs neither is ever
+// loading: the panes show the off state, and with the identity resolved
+// unknown they show its row); In flight's HERDR column comes from herdr,
+// which its spinner names only once the snapshot has landed while the herdr
+// link is still connecting. A source that landed once never loads again (an
+// empty pane reads its empty text, a refreshing pane keeps its rows), and a
+// source whose first fetch failed shows the failure text, not the spinner,
+// until a later refresh lands it.
 function paneLoadingSource(facts, pane) {
   if (!facts.refresh || !facts.refresh.refreshing) return null;
   if (PR_PANE_IDS.has(pane.id)) {
     const prs = facts.prs;
     if (!prs || !prs.enabled || identityMissing(prs)) return null;
+    if (identityResolving(prs)) return { verb: 'resolving', source: 'GitHub identity' };
     const own = paneFetch(prs, pane.id);
     if (own.fetchedAt || own.error || own.unavailable) return null;
-    return pane.id === 'mine' ? 'GitHub checks' : 'GitHub review requests';
+    return { verb: 'loading', source: pane.id === 'mine' ? 'GitHub checks' : 'GitHub review requests' };
   }
-  if (!facts.snapshot && !facts.snapshotError) return 'fleet snapshot';
-  if (pane.id === 'inflight' && facts.herdr && facts.herdr.state === 'connecting') return 'herdr';
+  if (!facts.snapshot && !facts.snapshotError) return { verb: 'loading', source: 'fleet snapshot' };
+  if (pane.id === 'inflight' && facts.herdr && facts.herdr.state === 'connecting') return { verb: 'loading', source: 'herdr' };
   return null;
 }
 
 function paneLoading(facts, pane) {
-  const source = paneLoadingSource(facts, pane);
-  if (!source) return null;
-  return { source, text: `${spinnerGlyph(facts.refresh.loadingFrame)} loading ${source}…` };
+  const waiting = paneLoadingSource(facts, pane);
+  if (!waiting) return null;
+  return { source: waiting.source, text: `${spinnerGlyph(facts.refresh.loadingFrame)} ${waiting.verb} ${waiting.source}…` };
 }
 
 function asSet(value) {

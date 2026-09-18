@@ -12,6 +12,13 @@
 // login. The result is { login, source, reason } with source one of the four
 // words above; an unknown identity carries each rung's failure in `reason`
 // so the Settings page can say what was tried.
+//
+// Before the rungs have answered the identity is null: the app starts that
+// way and resolves it on its first refresh, after the snapshot, and sets it
+// back to null while r asks the rungs again for an unknown one. The three
+// states are told apart by identityPending (null), identityKnown (a login)
+// and identityUnknown (resolved, no login), so the PR panes can spin on a
+// pending identity and show their identity row only for a resolved one.
 
 export const IDENTITY_SOURCES = ['config', 'gh', 'git', 'unknown'];
 
@@ -57,8 +64,21 @@ export function identityKnown(identity) {
   return Boolean(identity && identity.login);
 }
 
+// Not resolved yet: the rungs have not been asked, or are being asked now.
+export function identityPending(identity) {
+  return identity === null || identity === undefined;
+}
+
+// Resolved and every rung failed: the { login: null, source: 'unknown' } result.
+export function identityUnknown(identity) {
+  return !identityPending(identity) && !identityKnown(identity);
+}
+
 // The one line the Settings page shows for the identity.
+export const IDENTITY_RESOLVING_TEXT = 'resolving: the config file, then gh api user, then git config github.user';
+
 export function describeIdentity(identity, configPath) {
+  if (identityPending(identity)) return IDENTITY_RESOLVING_TEXT;
   if (identityKnown(identity)) return `${identity.login}  (from ${SOURCE_WORDS[identity.source] || identity.source})`;
   return `identity unknown: set identity.github_login in ${configPath || 'the config file'}, or run gh auth login`;
 }

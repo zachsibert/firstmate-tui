@@ -72,8 +72,13 @@
 // render.
 // A candidate row's "pane" is 'mine' (the default) or 'toreview'. prs.identity
 // is the { login, source } the panes are built around: absent, a fixture
-// stands for a known login (`captain`, source `fixture`); null, or a login of
-// null, is the unknown identity, which puts its row in both PR panes. prs.mine
+// stands for a known login (`captain`, source `fixture`); null is the
+// identity the app has not resolved yet, which with {"refreshing": true}
+// puts `⠋ resolving GitHub identity…` in both PR panes and lists nothing
+// there; an object with no login ({ "login": null, "source": "unknown",
+// "reason": text }) is the identity every rung failed to resolve, which puts
+// `identity unknown: see Settings (.)` in both. The identity reaches the
+// Settings page under --no-prs as well. prs.mine
 // and prs.toreview carry a pane's own { error, fetched, scope, unavailable }
 // (fetched: false keeps that pane before its first fetch; scope: [] is an
 // empty To review scope), the top-level "error" standing for both when a pane
@@ -147,9 +152,22 @@ function factsFromFixture(path, opts) {
   }
   const refresh = refreshFromFixture(fx.refresh, now);
   return {
-    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs: prsFromFixture(fx.prs, opts, now), refresh, mtime: fixtureMtime, statusVerbs: fixtureVerbs },
+    // `identity` beside `prs` is what the Settings page reads when the fetch is off.
+    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs: prsFromFixture(fx.prs, opts, now), identity: identityFromFixture(fx.prs), refresh, mtime: fixtureMtime, statusVerbs: fixtureVerbs },
     size: { cols: opts.cols || fx.cols || 120, rows: opts.rows || fx.rows || 40 },
   };
+}
+
+// The fixture's prs.identity -> the identity the panes and the Settings page
+// read: absent, a known login; null, the app's not-yet-resolved state; an
+// object, its login when it has one, else the resolved unknown identity with
+// the object's reason.
+export function identityFromFixture(block) {
+  if (!block || !Object.prototype.hasOwnProperty.call(block, 'identity')) return { login: 'captain', source: 'fixture', reason: null };
+  const given = block.identity;
+  if (given === null || given === undefined) return null;
+  if (typeof given === 'object' && given.login) return { login: String(given.login), source: given.source || 'fixture', reason: null };
+  return { login: null, source: 'unknown', reason: (given && typeof given === 'object' && given.reason) || 'fixture: no login' };
 }
 
 // The fixture's prs block -> the facts the two PR panes read (lib/model.mjs).
@@ -166,12 +184,7 @@ export function prsFromFixture(block, opts, now) {
       unavailable: typeof own.unavailable === 'string' ? own.unavailable : null,
     };
   };
-  let identity = { login: 'captain', source: 'fixture', reason: null };
-  if (block && Object.prototype.hasOwnProperty.call(block, 'identity')) {
-    const given = block.identity;
-    identity = given && typeof given === 'object' && given.login ? { login: String(given.login), source: given.source || 'fixture', reason: null } : { login: null, source: 'unknown', reason: (given && given.reason) || 'fixture: no login' };
-  }
-  return { enabled: true, fetchedAt: fetched, error: topError, candidate_prs: block && Array.isArray(block.candidate_prs) ? block.candidate_prs : [], identity, mine: pane('mine'), toreview: pane('toreview') };
+  return { enabled: true, fetchedAt: fetched, error: topError, candidate_prs: block && Array.isArray(block.candidate_prs) ? block.candidate_prs : [], identity: identityFromFixture(block), mine: pane('mine'), toreview: pane('toreview') };
 }
 
 // The fixture's refresh block -> the facts the title line reads (lib/model.mjs
