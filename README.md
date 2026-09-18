@@ -2,6 +2,8 @@
 
 `fm-board`: a live, herdr-hosted terminal board over the [firstmate](https://github.com/kunchenguid/firstmate) fleet snapshot, so all parallel work is visible at a glance instead of buried in a scrolling chat thread.
 
+![The live fm-board filling a dark terminal: five bordered panes stacked top to bottom, each titled with its key badge, a count, the snapshot age and "herdr connected". Pane 1, Needs you, holds three hold rows with their due dates. Pane 2, Ready for review, reads "no recorded pull requests". Pane 3, In flight, shows a working row, a decide row flagged with an exclamation mark and a done row, each with its live herdr worker count. Pane 4, Findings, lists scout and report files by home and age. Pane 5, Landed, lists merged and done work by date. The footer line names the keys, ending with q quit, and "refreshing (timer)" at the right.](docs/fm-board.png)
+
 Panes, top to bottom by urgency:
 
 1. **Needs you** - what the main firstmate needs from you: blocked workers, keyed worker decisions, live captain holds and green PRs whose worker said done while the backlog row is still open. Main home only by default; a secondmate's own decisions (its ledger's open decisions, and the keyed decisions its task record relays into the main home) flag its In flight group instead (`--all-homes-needs` lists them here too)
@@ -26,13 +28,36 @@ The captain asked for one row per initiative the main firstmate delegated. The s
 
 M1, the read-only board, is implemented in this repository, plus the M1b follow-on (`enter` opens a PR in the browser, In flight groups secondmate work by home, and Needs you lists the main home only) and M2: `enter` on a Findings row opens the report in a terminal viewer, lost panes show in red, `x` / `X` / `H` hide and unhide rows, `1`-`5` / `0` hide and show panes (each title carries its key; with all five hidden a key page replaces the grid), and `r` refreshes the snapshot and, with `--prs`, the live PR checks at once. The scout report that grounds the plan is in [`docs/scout-report-2026-09-16.md`](docs/scout-report-2026-09-16.md): data availability per pane, herdr capabilities, what is reusable from yimbot as a pattern, stack choice, and the four-milestone plan. Answering decisions, toasts and the findings watermark are later milestones.
 
-## Requirements
+## Prerequisites
 
-- a firstmate home with `bin/fm-fleet-snapshot.sh` (and `bin/fm-bearings-snapshot.sh` for `--prs`)
-- herdr 0.8.x or newer (socket API protocol 20); `--no-herdr` runs without it
-- Node 20 or newer (already a firstmate dependency); npm only for the development install, since a release tarball carries the one dependency
-- `jq` and `bash` (already firstmate dependencies)
-- for the Findings viewer: `glow` (`brew install glow`) is used first; otherwise `$EDITOR`, then `vim`, then `less`
+fm-board is a terminal program that reads a firstmate home and talks to herdr. Put each item below in place before installing; the check command shows what you have. On macOS the install commands use [Homebrew](https://brew.sh); Linux commands are given where they differ.
+
+**Required**
+
+1. **Node 20 or newer.** Runs the board. npm is needed only for the [development install](#development-install), since a release tarball carries the one dependency.
+   Check: `node --version` prints `v20` or higher.
+   Install: macOS `brew install node`. Linux: the distribution package when it is 20 or newer (`sudo apt install nodejs` on Debian and Ubuntu is often older), otherwise the packages or version managers listed at https://nodejs.org/en/download.
+2. **herdr 0.8.x or newer** (socket API protocol 20). Hosts the board's pane and supplies live agent state; `--no-herdr` runs the board without it.
+   Check: `herdr --version` prints `herdr 0.8.2` or higher.
+   Install: macOS `brew install herdr`. Linux, or macOS without Homebrew: `curl -fsSL https://herdr.dev/install.sh | sh`. Both come from herdr's own install page, https://herdr.dev/install, which also covers mise, Nix, manual downloads and `herdr update`.
+3. **A firstmate home.** A checkout of https://github.com/kunchenguid/firstmate with `bin/fm-fleet-snapshot.sh` in it; the board runs that script for its data (and `bin/fm-bearings-snapshot.sh` for `--prs`). Secondmate homes are read from that home's `data/secondmates.md`.
+   Get one: `git clone https://github.com/kunchenguid/firstmate.git ~/firstmate` (any path works).
+   Point the board at it: `export FM_HOME=/path/to/that/checkout`, and add the line to your shell profile so it is set in every terminal. The board never guesses this path.
+   Check: `ls "$FM_HOME/bin/fm-fleet-snapshot.sh"` prints the path instead of an error.
+4. **jq 1.5 or newer.** The launcher reads herdr's JSON replies with it (only `-r` and the `//` operator).
+   Check: `jq --version` prints `jq-1.5` or higher.
+   Install: macOS `brew install jq`. Linux `sudo apt install jq` or `sudo dnf install jq`.
+5. **bash 3.2 or newer.** The launcher and the installer are bash scripts. They use nothing beyond bash 3.1 features (arrays with `+=`, `printf %q`, `BASH_SOURCE`), and both were run under macOS's stock `/bin/bash` 3.2.57 as the check. macOS ships 3.2 and Linux ships 5.x, so there is nothing to install.
+   Check: `bash --version` prints the version on its first line.
+6. **curl and tar** for the installer, plus `shasum` or `sha256sum` for the checksum; all ship with macOS and with every Linux. If missing on Linux: `sudo apt install curl tar`.
+   Check: `curl --version` and `tar --version` each print a version line.
+
+**Optional**
+
+- **glow** (optional). Renders a Findings report in the terminal when you press `enter` on it; without glow the viewer falls back to `$EDITOR`, then `vim`, then `less`.
+  Check: `glow --version`. Install: macOS `brew install glow`. Linux: packages for apt, dnf and others are listed at https://github.com/charmbracelet/glow.
+- **gh, the GitHub CLI, logged in** (optional). Needed only for `--prs`, which asks GitHub for each pull request's checks, review and mergeable state.
+  Check: `gh auth status` prints `Logged in to github.com`. Install: macOS `brew install gh`. Linux: https://github.com/cli/cli/blob/trunk/docs/install_linux.md. Then `gh auth login` once.
 
 ## Install
 
@@ -57,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/i
 curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --prefix /opt/fm-board --bin-dir /usr/local/bin
 ```
 
-To upgrade, run the same command again: the installed tree is replaced as a whole and the command is rewritten, so moving between a beta and a release is the same step. To uninstall, delete the prefix directory and the `fm-board` command. `bin/install.sh --help` lists every flag, including `--from-file <tarball>` for a tarball you already have. The installer needs `curl`, `tar` and `shasum` or `sha256sum`; the board itself still needs the [Requirements](#requirements) above.
+To upgrade, run the same command again: the installed tree is replaced as a whole and the command is rewritten, so moving between a beta and a release is the same step. To uninstall, delete the prefix directory and the `fm-board` command. `bin/install.sh --help` lists every flag, including `--from-file <tarball>` for a tarball you already have. The installer needs `curl`, `tar` and `shasum` or `sha256sum`; the board itself still needs the [Prerequisites](#prerequisites) above.
 
 Once installed, `fm-board` stands for `bin/fm-board.sh` in every command below (`fm-board open`, `fm-board --help`), and the plugin directory to link is `~/.local/share/fm-board/bin/fm-board`.
 
@@ -69,6 +94,15 @@ cd firstmate-tui/bin/fm-board && npm ci
 ```
 
 `npm ci` installs the single pinned dependency, `neo-blessed` 0.2.0 (MIT), into `bin/fm-board/node_modules`. The terminal library sits behind one adapter module (`bin/fm-board/lib/tui-blessed.mjs`) so it can be swapped without touching the model, layout or renderer. From a checkout the command is `bin/fm-board.sh`.
+
+## First run
+
+```sh
+export FM_HOME=/path/to/your/firstmate/checkout   # the home from Prerequisites, step 3
+fm-board                                          # from a checkout: bin/fm-board.sh
+```
+
+The board fills the terminal with five bordered panes, top to bottom: `[1] Needs you`, `[2] Ready for review`, `[3] In flight`, `[4] Findings` and `[5] Landed`. Each title carries its key badge, the row count, the snapshot age and the herdr connection state (`[1] Needs you (3) · snapshot 15s ago · herdr connected`), as in the screenshot at the top. The bottom line lists the keys. Move with `j` and `k`, switch panes with `tab`, press `enter` on a row to open or focus it, `?` for the help overlay, and `q` to quit. `fm-board --help` lists every flag; [Launch](#launch) covers running the board inside herdr, and [Keys](#keys) has every key.
 
 ## Launch
 
