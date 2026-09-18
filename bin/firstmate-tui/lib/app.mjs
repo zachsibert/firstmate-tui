@@ -45,8 +45,8 @@
 // ledgers, the PR data with its identity, the herdr agents) are written to
 // state-cache.json beside the view-state file. At launch a cache younger than
 // --cache-max-age (default an hour) is drawn at once, each pane's title marked
-// `(cached 12m ago)`, the title line reading `refreshing…` while the launch
-// refresh runs exactly as it would without a cache, never skipped or delayed;
+// `(cached 12m ago)`, the title line reading its refreshing label while the
+// launch refresh runs exactly as it would without a cache, never skipped or delayed;
 // the snapshot landing clears the four fleet panes' markers and each PR pane's
 // fetch landing clears its own, so a pane whose live fetch failed keeps its
 // cached rows, its marker and the (stale) word. The cached herdr agents stand
@@ -310,10 +310,12 @@ export async function runApp(opts) {
     hiddenPanes: state.view.hiddenPanes,
     columns: state.view.columns,
     // A saved selection not yet put back (its pane still loading) is kept as
-    // it was, so a quick quit loses nothing.
-    focus: state.pendingView && state.pendingView.focus ? state.pendingView.focus : state.model ? savedFocus(state.model, state.view) : null,
+    // it was, so a quick quit loses nothing; and a board that never had data
+    // to select from (no cache, no snapshot landed) keeps the file's selection
+    // rather than recording an empty one.
+    focus: !state.snapshot ? loaded.state.focus : state.pendingView && state.pendingView.focus ? state.pendingView.focus : state.model ? savedFocus(state.model, state.view) : null,
     expanded: state.view.expanded,
-    scroll: { ...savedScroll(state.view.scroll), ...(state.pendingView ? state.pendingView.scroll : {}) },
+    scroll: !state.snapshot ? loaded.state.scroll : { ...savedScroll(state.view.scroll), ...(state.pendingView ? state.pendingView.scroll : {}) },
   });
   const persist = () => {
     if (state.persistTimer) {

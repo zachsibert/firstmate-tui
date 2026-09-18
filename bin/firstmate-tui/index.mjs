@@ -266,8 +266,10 @@ function cacheFor(opts, fmHome, viewStatePath) {
 }
 
 // A fresh cache into the facts, where they have not landed: the snapshot (and
-// its ledgers) when the fixture or the home gave none and no failure stands in
-// for it, the PR block when the fetch is on and has neither landed nor failed.
+// its ledgers) when the fixture or the home gave none, the PR block when the
+// fetch is on and has not landed. A failure the fixture carries (snapshot_error,
+// a prs error) stays beside the cached rows, as the app keeps the cached rows
+// under a failed launch refresh: the pane is stale and cached at once.
 // Mutates facts, sets facts.cached for the markers, and says whether anything
 // was taken.
 function restoreFromCache(facts, cache) {
@@ -275,7 +277,7 @@ function restoreFromCache(facts, cache) {
   if (!c) return false;
   const flags = { at: cache.fetchedAt, snapshot: false, prs: { mine: false, toreview: false } };
   let took = false;
-  if (!facts.snapshot && !facts.snapshotError) {
+  if (!facts.snapshot) {
     facts.snapshot = c.snapshot;
     facts.snapshotAt = c.snapshotAt;
     facts.ledgers = c.ledgers;
@@ -283,8 +285,9 @@ function restoreFromCache(facts, cache) {
     took = true;
   }
   const prs = facts.prs || { enabled: false };
-  if (prs.enabled && !prs.fetchedAt && !prs.error && c.prs && c.prs.enabled) {
-    facts.prs = { ...c.prs, enabled: true };
+  if (prs.enabled && !prs.fetchedAt && c.prs && c.prs.enabled) {
+    const paneError = (id) => (prs[id] && prs[id].error !== undefined ? prs[id].error : prs.error) ?? null;
+    facts.prs = { ...c.prs, enabled: true, error: prs.error ?? null, mine: { ...c.prs.mine, error: paneError('mine') }, toreview: { ...c.prs.toreview, error: paneError('toreview') } };
     flags.prs = cachedFlags(cache, { prsEnabled: true }).prs;
     took = true;
   }
