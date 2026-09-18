@@ -6,9 +6,10 @@
 
 import { spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
-import { basename } from './text.mjs';
+import { basename, parseTime } from './text.mjs';
 import { whichOnPath } from './viewer.mjs';
 import { parseReleases, RELEASES_PER_PAGE } from './settings.mjs';
+import { TERMINAL_WINDOW_SECONDS } from './model.mjs';
 
 // Run a command to completion, bounded by timeoutMs. Resolves to { out, error }:
 // stdout on exit 0, else the last stderr line (or the timeout / spawn failure).
@@ -123,19 +124,26 @@ export async function runSnapshot(fmHome, { timeoutMs }) {
 
 // ------------------------------------------------------------- live PR data
 //
-// Ready for review's live check, review and mergeable state, and since the PR
-// age landed, each PR's creation time. The board asks GitHub itself through
-// `gh pr list`, with the candidate rule and the checks mapping of firstmate's
-// bin/fm-bearings-snapshot.sh (its --include-prs block), so the list is the
-// one that script produced plus one field, created_at, which that script's
-// field list does not carry. Fetching here also stops the fleet snapshot
-// running twice per tick: the script runs its own before it asks GitHub. The
-// script stays as the fallback when gh is not on PATH.
+// Ready for review's live check state, status, title, base branch and, since
+// the PR age landed, each PR's creation time. The board asks GitHub itself
+// through `gh pr list`, with the candidate rule and the checks mapping of
+// firstmate's bin/fm-bearings-snapshot.sh (its --include-prs block). Since the
+// pane keeps a merged or closed PR on screen for TERMINAL_WINDOW_SECONDS after
+// it finished, the call asks for every state (`--state all`), newest-updated
+// first, so a PR that just merged is near the top whatever its age, and the
+// filter below drops the finished PRs outside that window before they reach
+// the model. `--search "sort:updated-desc"` is GitHub's search syntax, which
+// gh passes through: verified on gh 2.96.0 against a live repository, the list
+// comes back ordered by updatedAt descending with --state all. Fetching here
+// also stops the fleet snapshot running twice per tick: the script runs its
+// own before it asks GitHub. The script stays as the fallback when gh is not
+// on PATH; it lists open PRs only and carries none of the new fields.
 
 export const PR_REPOS = 10; // FM_BEARINGS_PR_REPOS: candidate repositories per fetch
-export const PR_LIMIT = 20; // FM_BEARINGS_PR_LIMIT: open PRs kept per repository; one more is requested to see the cap
+export const PR_LIMIT = 50; // PRs kept per repository (every state, newest-updated first); one more is requested to see the cap
 export const GH_TIMEOUT_MS = 20000; // FM_BEARINGS_PR_TIMEOUT: bound on one gh call
-export const GH_PR_FIELDS = ['number', 'title', 'url', 'headRefName', 'reviewDecision', 'mergeable', 'statusCheckRollup', 'createdAt'];
+export const GH_PR_FIELDS = ['number', 'title', 'url', 'headRefName', 'baseRefName', 'reviewDecision', 'mergeable', 'statusCheckRollup', 'createdAt', 'isDraft', 'state', 'mergedAt', 'closedAt'];
+export const GH_PR_SORT = 'sort:updated-desc';
 
 // owner/name from a GitHub URL or remote (https://github.com/o/r/pull/1,
 // git@github.com:o/r.git), or null, the way the script's repo_slug reads them.
@@ -159,18 +167,44 @@ export function checksState(rollup) {
 
 // One gh PR record -> the candidate_prs[] shape lib/model.mjs reads. `task` is
 // the worker id when the head branch follows firstmate's fm/<task> naming.
+// `state` is gh's OPEN, MERGED or CLOSED (null when the record carries none,
+// which the model reads as open); `merged_at` and `closed_at` are ISO 8601 or
+// null, and `title` and `base` are null rather than '' when absent so the
+// model can fall back to the recorded task's title and a '-' cell.
 export function projectPr(pr, repo) {
   const head = typeof pr.headRefName === 'string' ? pr.headRefName : '';
+  const text = (v) => (typeof v === 'string' && v.trim() ? v : null);
   return {
     num: pr.number === null || pr.number === undefined ? '-' : String(pr.number),
     repo,
     task: head.startsWith('fm/') ? head.slice(3) : '-',
     url: pr.url ?? '-',
+    title: text(pr.title),
+    base: text(pr.baseRefName),
     review: pr.reviewDecision ?? 'none',
     mergeable: pr.mergeable ?? 'UNKNOWN',
     checks: checksState(pr.statusCheckRollup),
-    created_at: typeof pr.createdAt === 'string' ? pr.createdAt : null,
+    created_at: text(pr.createdAt),
+    draft: pr.isDraft === true,
+    state: text(pr.state) ? String(pr.state).toUpperCase() : null,
+    merged_at: text(pr.mergedAt),
+    closed_at: text(pr.closedAt),
   };
+}
+
+// Whether a fetched PR is worth handing to the model at `now` (epoch seconds):
+// every open PR, and a merged or closed one that finished less than
+// TERMINAL_WINDOW_SECONDS ago (mergedAt for a merged PR, closedAt otherwise).
+// A finished PR with no usable time stamp is dropped, since nothing could
+// place it inside the window; lib/model.mjs applies the same window again
+// against the frame's own `now`, so a row leaves the pane on time between
+// fetches too.
+export function keepFetchedPr(pr, now) {
+  const state = String(pr.state || 'OPEN').toUpperCase();
+  if (state !== 'MERGED' && state !== 'CLOSED') return true;
+  const finished = parseTime(state === 'MERGED' ? pr.merged_at || pr.closed_at : pr.closed_at);
+  if (finished === null) return false;
+  return Math.max(0, now - finished) < TERMINAL_WINDOW_SECONDS;
 }
 
 // Candidate repositories in the script's order: the repository of every PR URL
@@ -196,12 +230,17 @@ export async function candidateRepos(snapshot, { timeoutMs, env = process.env } 
   return repos.slice(0, PR_REPOS);
 }
 
-async function ghPrList(repo, { timeoutMs, env }) {
-  const args = ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', String(PR_LIMIT + 1), '--json', GH_PR_FIELDS.join(',')];
+async function ghPrList(repo, { timeoutMs, env, now = () => Math.floor(Date.now() / 1000) }) {
+  const args = ['pr', 'list', '--repo', repo, '--state', 'all', '--search', GH_PR_SORT, '--limit', String(PR_LIMIT + 1), '--json', GH_PR_FIELDS.join(',')];
   const r = await runJson('gh', args, { env: { ...env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' }, timeoutMs: Math.min(timeoutMs, GH_TIMEOUT_MS) });
   if (r.error) return { repo, rows: [], capped: false, error: r.error };
   const list = Array.isArray(r.value) ? r.value : [];
-  return { repo, rows: list.slice(0, PR_LIMIT).map((p) => projectPr(p, repo)), capped: list.length > PR_LIMIT, error: null };
+  const at = now();
+  const rows = list
+    .slice(0, PR_LIMIT)
+    .map((p) => projectPr(p, repo))
+    .filter((p) => keepFetchedPr(p, at));
+  return { repo, rows, capped: list.length > PR_LIMIT, error: null };
 }
 
 // The board's own fetch: one gh pr list per candidate repository, all started
@@ -218,12 +257,14 @@ export async function runGhPrs(snapshot, { timeoutMs, env = process.env }) {
   const notes = [];
   if (failed.length) notes.push(`${failed.length} of ${repos.length} repositories unavailable (${failed[0].repo}: ${failed[0].error})`);
   const capped = results.filter((r) => r.capped).map((r) => r.repo);
-  if (capped.length) notes.push(`open PRs capped at ${PR_LIMIT} in ${capped.join(', ')}`);
+  if (capped.length) notes.push(`PR list capped at ${PR_LIMIT} newest-updated in ${capped.join(', ')}`);
   return { candidate_prs: results.flatMap((r) => r.rows), error: null, note: notes.length ? `PR fetch: ${notes.join('; ')}` : null };
 }
 
 // The fallback: fm-bearings-snapshot.sh --include-prs, which runs its own fleet
-// snapshot and then gh, and carries no creation time.
+// snapshot and then gh, lists open PRs only and carries no creation time,
+// title, base branch or draft flag (its rows read IN REVIEW or APPROVED from
+// the review decision alone, BASE '-', and the recorded task's title).
 export async function runBearingsPrs(fmHome, { timeoutMs }) {
   const script = `${fmHome}/bin/fm-bearings-snapshot.sh`;
   const r = await runJson('bash', [script, '--json', '--include-prs'], {
@@ -248,7 +289,7 @@ export async function runBearingsPrs(fmHome, { timeoutMs }) {
 export async function fetchPrs(fmHome, snapshot, { timeoutMs, env = process.env }) {
   if (!whichOnPath('gh', env)) {
     const r = await runBearingsPrs(fmHome, { timeoutMs });
-    return { ...r, note: r.error ? null : 'gh not on PATH: PR data from fm-bearings-snapshot.sh, without PR creation times' };
+    return { ...r, note: r.error ? null : 'gh not on PATH: PR data from fm-bearings-snapshot.sh, open PRs only, without titles, base branches or PR creation times' };
   }
   if (!snapshot) return { candidate_prs: [], error: 'no fleet snapshot to name the candidate repositories', note: null };
   return runGhPrs(snapshot, { timeoutMs, env });
