@@ -12,6 +12,16 @@
 #                                      when firstmate.board is linked, otherwise
 #                                      a hidden workspace; prints the pane id
 #   fm-board.sh focus [flags]          focus the pane `open --detached` recorded
+#   fm-board.sh version                print the installed version and whether it
+#                                      is a stable release or a beta (also -V,
+#                                      --version)
+#   fm-board.sh upgrade [--stable | --pre | --version <v> | --from-file <tar.gz>]
+#                                      replace this install with the latest stable
+#                                      release (default and --stable), the newest
+#                                      release betas included (--pre), or one exact
+#                                      version such as 0.1.0-d8b290e (--version);
+#                                      runs the bin/install.sh that shipped with
+#                                      this copy against the install record
 #   fm-board.sh --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
 #                             [--keys <list>] [--expand <all|ids>] [--opener-cmd <argv>]
 #                             [--viewer-cmd <argv>] [--view-state <file>] [--tags]
@@ -60,10 +70,106 @@ usage() {
   sed -n '2,/^set -u/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
 }
 
+# ------------------------------------------------------- version, upgrade
+# An install is <prefix>/bin/fm-board.sh plus <prefix>/install-record, the
+# key=value file bin/install.sh writes (prefix, bin_dir, repo, version,
+# installed_from). A checkout has no record. The version is the "version" in
+# bin/fm-board/package.json: X.Y.Z is a stable release, X.Y.Z-<7 hex> is a
+# per-commit beta (the release workflow stamps the short commit sha), and any
+# other -suffix is some other prerelease.
+PREFIX_DIR="$(dirname "$ROOT")"
+RECORD="$PREFIX_DIR/install-record"
+INSTALL_URL="https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh"
+
+package_version() { # <package.json>: the "version" field, no node needed
+  sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
+}
+
+version_kind() { # <version>: stable | beta | prerelease
+  case "$1" in
+    *-*)
+      case "${1##*-}" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) printf 'beta' ;;
+        *) printf 'prerelease' ;;
+      esac ;;
+    *) printf 'stable' ;;
+  esac
+}
+
+record_get() { # <key>: that key's value from the install record, or nothing
+  sed -n "s/^$1=//p" "$RECORD" | head -n 1
+}
+
+show_version() {
+  [ "$#" -eq 0 ] || die "version takes no arguments"
+  local v
+  v=$(package_version "$BOARD_DIR/package.json")
+  [ -n "$v" ] || die "could not read the version from $BOARD_DIR/package.json"
+  case "$(version_kind "$v")" in
+    stable) printf 'fm-board %s (stable release)\n' "$v" ;;
+    beta) printf 'fm-board %s (beta: %s at commit %s)\n' "$v" "${v%-*}" "${v##*-}" ;;
+    *) printf 'fm-board %s (prerelease)\n' "$v" ;;
+  esac
+  if [ -f "$RECORD" ]; then
+    printf 'installed at %s (from %s); fm-board upgrade replaces it\n' "$PREFIX_DIR" "$(record_get installed_from)"
+  else
+    printf 'running from %s (not an installed copy)\n' "$PREFIX_DIR"
+  fi
+}
+
+# fm-board upgrade: one implementation of download, verify and swap lives in
+# bin/install.sh, and the copy that shipped in this tarball is the one that
+# runs, against the prefix, bin dir and repository the record names. Channel
+# flags pass through unchanged; install.sh checks that they exclude each
+# other and never compares versions, so --stable from a beta is a plain swap.
+run_upgrade() {
+  local flags=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -h|--help)
+        printf 'usage: fm-board upgrade [--stable | --pre | --version <version> | --from-file <tarball>]\n\n'
+        printf '  --stable              the latest stable release (the default)\n'
+        printf '  --pre                 the newest release, betas included\n'
+        printf '  --version <version>   exactly this version: 0.2.0, or a beta such as 0.1.0-d8b290e\n'
+        printf '  --from-file <tar.gz>  a release tarball you already have\n\n'
+        printf 'The download is verified and unpacked beside the install before the swap;\n'
+        printf 'view state (hidden rows and panes) lives outside the install and is kept.\n'
+        exit 0 ;;
+      --stable|--pre) flags+=("$1") ;;
+      --version|--from-file) [ "$#" -ge 2 ] || die "upgrade $1 needs a value"; flags+=("$1" "$2"); shift ;;
+      *) die "unknown upgrade option $1: fm-board upgrade [--stable | --pre | --version <version> | --from-file <tarball>]" ;;
+    esac
+    shift
+  done
+  if [ ! -f "$RECORD" ]; then
+    if [ -e "$PREFIX_DIR/.git" ]; then
+      die "this fm-board is a git checkout at $PREFIX_DIR, not an installed copy; upgrade is for installs. Update the checkout with git:  git -C $(printf '%q' "$PREFIX_DIR") pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)"
+    fi
+    die "no install record at $RECORD, so this copy was not put here by install.sh; install one with:  curl -fsSL $INSTALL_URL | bash"
+  fi
+  local prefix bin_dir repo here
+  prefix=$(record_get prefix)
+  bin_dir=$(record_get bin_dir)
+  repo=$(record_get repo)
+  [ -n "$prefix" ] && [ -n "$bin_dir" ] && [ -n "$repo" ] \
+    || die "install record $RECORD is incomplete (needs prefix, bin_dir and repo); re-run the installer:  curl -fsSL $INSTALL_URL | bash"
+  here=$(cd "$prefix" 2>/dev/null && pwd -P) || here=
+  [ "$here" = "$PREFIX_DIR" ] \
+    || die "install record names prefix $prefix but this copy runs from $PREFIX_DIR (was the install moved?); re-run the installer with --prefix $(printf '%q' "$PREFIX_DIR")"
+  [ -f "$ROOT/install.sh" ] \
+    || die "no bin/install.sh beside this copy (an install from before upgrade existed?); re-run the installer once:  curl -fsSL $INSTALL_URL | bash"
+  exec bash "$ROOT/install.sh" --prefix "$prefix" --bin-dir "$bin_dir" --repo "$repo" "${flags[@]+"${flags[@]}"}"
+}
+
 # ---------------------------------------------------------------- arguments
 command=run
 case "${1:-}" in
-  run|open|focus) command=$1; shift ;;
+  run|open|focus|version|upgrade) command=$1; shift ;;
+  -V|--version) command=version; shift ;;
+esac
+case "$command" in
+  version) show_version "$@"; exit 0 ;;
+  upgrade) run_upgrade "$@" ;; # execs install.sh or dies
 esac
 
 want_herdr=1

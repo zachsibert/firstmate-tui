@@ -61,30 +61,39 @@ fm-board is a terminal program that reads a firstmate home and talks to herdr. P
 
 ## Install
 
-One command installs the latest release, or upgrades the one you have:
+One command installs the latest stable release:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash
 ```
 
-It downloads `fm-board-<tag>.tar.gz` and its `.sha256` from the [GitHub Release](https://github.com/zachsibert/firstmate-tui/releases), verifies the checksum, unpacks into `~/.local/share/fm-board` (`$XDG_DATA_HOME/fm-board` when that is set) and writes an `fm-board` command into `~/.local/bin`. The tarball carries the one dependency, so no npm step runs. It prints where everything went, plus a one-line note if `~/.local/bin` is not on your `PATH`. It writes nothing else: no shell rc file, no herdr config.
-
-Variants (arguments go after `bash -s --`):
-
-```sh
-# a beta: the newest release, prereleases included
-curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --pre
-
-# one exact version
-curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --version v0.2.0-beta.1
-
-# other locations
-curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --prefix /opt/fm-board --bin-dir /usr/local/bin
-```
-
-To upgrade, run the same command again: the installed tree is replaced as a whole and the command is rewritten, so moving between a beta and a release is the same step. To uninstall, delete the prefix directory and the `fm-board` command. `bin/install.sh --help` lists every flag, including `--from-file <tarball>` for a tarball you already have. The installer needs `curl`, `tar` and `shasum` or `sha256sum`; the board itself still needs the [Prerequisites](#prerequisites) above.
+It downloads `fm-board-<tag>.tar.gz` and its `.sha256` from the [GitHub Release](https://github.com/zachsibert/firstmate-tui/releases), verifies the checksum, unpacks into `~/.local/share/fm-board` (`$XDG_DATA_HOME/fm-board` when that is set) and writes an `fm-board` command into `~/.local/bin`. The tarball carries the one dependency, so no npm step runs. It prints where everything went, plus a one-line note if `~/.local/bin` is not on your `PATH`. It writes nothing else: no shell rc file, no herdr config. For other locations add `--prefix /opt/fm-board --bin-dir /usr/local/bin` after `bash -s --`. The installer needs `curl`, `tar` and `shasum` or `sha256sum`; the board itself still needs the [Prerequisites](#prerequisites) above.
 
 Once installed, `fm-board` stands for `bin/fm-board.sh` in every command below (`fm-board open`, `fm-board --help`), and the plugin directory to link is `~/.local/share/fm-board/bin/fm-board`.
+
+### Versions and betas
+
+`fm-board version` prints the installed version and what it is:
+
+```
+fm-board 0.1.0 (stable release)
+installed at /Users/you/.local/share/fm-board (from release v0.1.0); fm-board upgrade replaces it
+```
+
+A stable release is `X.Y.Z`, the `version` in `bin/fm-board/package.json` on `main`. A beta is that same version plus the short hash of the commit it was built from, `0.1.0-d8b290e`: every push to a branch other than `main` publishes one as a GitHub prerelease (see [Releasing](#releasing)), so a beta names one exact commit you can install. `fm-board version` on a beta prints `fm-board 0.1.0-d8b290e (beta: 0.1.0 at commit d8b290e)`. Betas are deleted when their pull request closes and at most 30 are kept at a time, so a beta is for trying a branch, not for staying on.
+
+### Upgrade and switch
+
+`fm-board upgrade` replaces the install with another version, in either direction. It runs the installer that shipped inside the install against the same prefix and bin dir (the installer records both, and the repository, in `install-record` under the prefix), downloads and verifies the new tarball, unpacks it beside the install and swaps it in as a whole, so a failed download or checksum leaves what you have. Hidden rows and panes live outside the install ([Hiding rows and panes](#hiding-rows-and-panes)) and come through unchanged. Versions are never compared, so going back is the same step as going forward:
+
+```sh
+fm-board upgrade                            # to the latest stable release
+fm-board upgrade --pre                      # to the newest release, betas included
+fm-board upgrade --version 0.1.0-d8b290e    # to one exact version, beta or release (v0.1.0-d8b290e works too)
+fm-board upgrade --stable                   # from a beta back to the latest stable release, although the beta sorts higher
+```
+
+The same three flags work on the install command after `bash -s --` (`--pre`, `--version 0.1.0-d8b290e`, `--stable`), which is how to start on a beta with nothing installed yet. `fm-board upgrade` from a git checkout refuses and prints the `git pull` that updates a checkout instead. To uninstall, delete the prefix directory and the `fm-board` command. `bin/install.sh --help` lists every flag, including `--from-file <tarball>` for a tarball you already have.
 
 ### Development install
 
@@ -185,31 +194,35 @@ tests/install.test.sh
 
 The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the live PR data (the default, `--prs` as a no-op and `--no-prs`), the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, the `[n]` key badge on every pane title in both layouts, pane toggles with one, four and all five panes hidden (the landing page, its restart from a saved all-hidden state, and `0` bringing the grid back), and the wrapper: `open` prints the same frame as `run`, `open --detached --no-herdr` refuses (against a fake `herdr` on `HERDR_BIN_PATH` and PATH that logs any call, so nothing reaches a live server), and its error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, so the suite asserts that `r` re-runs the snapshot and the PR fetch together, only the snapshot with `--no-prs`, and that a fixture render runs neither, without touching GitHub. The refresh schedule runs with `--headless` (no terminal, no keys) against a second stand-in whose snapshot sleeps past a 5-second `--refresh`, proving that a tick landing during a running refresh starts no second fetch and the next tick does. `o` and `f` are asserted to be no-ops. No real firstmate home, herdr server or TTY is needed.
 
-`tests/install.test.sh` covers distribution without touching GitHub. It builds the release tarball with `scripts/package.sh` (the same script the release workflow runs) into a scratch directory, checks its layout and checksum file, refuses a tag that does not match `package.json`, flags a `-beta` tag as a prerelease, installs the tarball with `bin/install.sh --from-file` into a scratch prefix and bin dir (also from stdin, the way `curl | bash` runs it) and proves the installed `fm-board` command renders a fixture frame. It then upgrades in place, rejects a wrong checksum and a damaged tarball without touching the existing install, refuses a prefix holding unrelated files, and checks that the default paths under a scratch `HOME` leave nothing else behind. It needs `npm` for the vendoring step.
+`tests/install.test.sh` covers distribution without touching GitHub. It builds the release tarball with `scripts/package.sh` (the same script the release workflow runs) into a scratch directory, checks its layout and checksum file, refuses a tag that does not match `package.json`, flags a `-beta` tag as a prerelease, builds a per-commit beta with `--commit` and checks that the staged `package.json` carries `<version>-<sha7>` while the source tree is unchanged, installs the tarball with `bin/install.sh --from-file` into a scratch prefix and bin dir (also from stdin, the way `curl | bash` runs it) and proves the installed `fm-board` command renders a fixture frame. It then upgrades in place, rejects a wrong checksum and a damaged tarball without touching the existing install, refuses a prefix holding unrelated files, and checks that the default paths under a scratch `HOME` leave nothing else behind. With `tests/fake-curl.sh` standing in for GitHub (it serves the releases API and the download URLs from a directory and logs each URL), it installs through the default channel, swaps to the beta with `fm-board upgrade --pre`, back with `--stable`, to an exact version with and without the `v`, and through `--from-file`, checks `fm-board version` after each step, that a view-state file outside the prefix is byte for byte unchanged, that a failed download leaves the install alone, that `upgrade` from a checkout refuses with the git command, and pins the workflow lines the installer and the README depend on. It needs `npm` for the vendoring step.
 
 ## Releasing
 
-Releases are GitHub Releases, published by `.github/workflows/release.yml` when a tag is pushed. To cut one:
+Releases are GitHub Releases, published by `.github/workflows/release.yml`, and nobody tags by hand. The one version source is `version` in `bin/fm-board/package.json`. The workflow publishes two kinds of release:
+
+- **A stable release** appears when a version bump reaches `main`. On every push to `main` the workflow reads the version and looks for the tag `v<version>`. When the tag does not exist, it builds `fm-board-v<version>.tar.gz` with `scripts/package.sh`, creates the tag at that commit and publishes the release with the tarball, its `.sha256`, the install command and auto-generated notes. When the tag exists, the job logs that the version is already released and exits 0, so a merge that does not bump the version publishes nothing.
+- **A beta** is published for every push to any other branch. `scripts/package.sh --commit <sha>` builds `fm-board-v<version>-<sha7>.tar.gz` with the full version `<version>-<sha7>` (`0.1.0-d8b290e`) stamped into the tarball's `package.json`, and a prerelease tagged `v<version>-<sha7>` is created at that commit, titled with the version. The default install skips prereleases; `--pre` or `--version` picks one up ([Upgrade and switch](#upgrade-and-switch)).
+
+To cut a release, bump the version in a PR and merge it:
 
 ```sh
-# 1. set the version in bin/fm-board/package.json and its lockfile, commit on main
-(cd bin/fm-board && npm version 0.2.0 --no-git-tag-version)    # 0.2.0-beta.1 for a beta
+git checkout -b release-0.2.0
+(cd bin/fm-board && npm version 0.2.0 --no-git-tag-version)   # sets package.json and the lockfile
 git commit -am "fm-board 0.2.0"
-
-# 2. tag v<version> and push the tag
-git tag v0.2.0
-git push origin main v0.2.0
+# push, open the PR, merge it: the Release run on main publishes v0.2.0
 ```
 
-The workflow runs `scripts/package.sh`, which refuses a tag that is not `v` plus the `version` in `package.json` (a mistyped tag fails the job and publishes nothing), builds `fm-board-<tag>.tar.gz` with the production `node_modules` vendored and `fm-board-<tag>.tar.gz.sha256` beside it, and creates the release with the built-in `GITHUB_TOKEN` (`contents: write`, nothing broader), the install command for that tag and auto-generated notes. A tag with a suffix, `v0.2.0-beta.1`, is published as a prerelease: the default install skips it and `--pre` picks it up, so teammates can try a beta while the plain install stays on the last release. A plain `vX.Y.Z` becomes the latest release. After editing the workflow, lint it with `actionlint` and run `tests/install.test.sh`, which builds the tarball the same way.
+Retention: when a pull request closes, merged or not, the workflow deletes the beta release and tag of every commit in it. After each new beta it also deletes hash betas beyond the newest 30, oldest first, which catches the betas of commits that were force-pushed away or pushed without a PR. Stable releases are never deleted.
+
+The workflow uses the built-in `GITHUB_TOKEN` with `contents: write` and nothing broader, pins each action to a major version, and runs one job per ref at a time so two pushes never race. `scripts/package.sh` refuses a release tag that is not `v` plus the source version, so nothing can publish under the wrong name. `workflow_dispatch` re-runs the job for whichever branch it is started on. After editing the workflow, lint it with `actionlint` and run `tests/install.test.sh`, which builds both kinds of tarball the same way and pins the workflow lines the installer and this section depend on.
 
 ## Layout of the code
 
 ```
-bin/install.sh               installer: download a release tarball (or --from-file), verify the checksum, unpack into --prefix, write the fm-board command into --bin-dir
-scripts/package.sh           build fm-board-<tag>.tar.gz and its .sha256; run by the release workflow and by tests/install.test.sh
-.github/workflows/release.yml  publish a GitHub Release from a pushed v* tag (prerelease when the tag has a suffix)
-bin/fm-board.sh              bash wrapper: FM_HOME, node and herdr checks, open --detached/focus, view-state path, exec index.mjs
+bin/install.sh               installer: download a release tarball (or --from-file), verify the checksum, unpack into --prefix, write the fm-board command into --bin-dir and the install record; ships in the tarball so fm-board upgrade runs it
+scripts/package.sh           build fm-board-<tag>.tar.gz and its .sha256 for a release (<tag>) or a per-commit beta (--commit <sha>, version <version>-<sha7>); run by the release workflow and by tests/install.test.sh
+.github/workflows/release.yml  the one release path: a prerelease per push to a branch, the v<version> release once when main carries a new version, beta cleanup when a PR closes
+bin/fm-board.sh              bash wrapper: FM_HOME, node and herdr checks, open --detached/focus, version/upgrade, view-state path, exec index.mjs
 bin/fm-board/index.mjs       entry: argument parsing, --render-once, interactive run
 bin/fm-board/lib/args.mjs    option definitions
 bin/fm-board/lib/sources.mjs every read against firstmate homes (snapshot, ledgers, mtimes, the PR fetch)
