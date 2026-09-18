@@ -16,6 +16,7 @@ export const HELP_LINES = [
   '  j / down     next row            k / up       previous row',
   '  tab          next pane           shift-tab    previous pane',
   '  enter        Ready for review, Landed or a Needs-you PR row: open the PR in the browser',
+  '               Landed row without a PR: view its report, else focus its worker pane',
   '               In flight group row: expand or collapse it',
   '               In flight worker or Needs-you worker: focus its herdr pane',
   '               Findings row: open the report in the viewer (glow, $EDITOR, vim, less)',

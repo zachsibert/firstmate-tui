@@ -49,8 +49,9 @@
 // the row wanted a better source and got the file-time age instead),
 // paneId (herdr pane id when the row has one), lost (that pane is absent from
 // a connected herdr), unknown (herdr is disconnected, so absence is unproved),
-// focusable, url (a PR URL the row can open, or null), reportPath (Findings:
-// the absolute report path on this host, or null) and, for In flight grouping,
+// focusable, url (a PR URL the row can open, or null), reportPath (Findings and
+// Landed: the absolute report path on this host, or null; reportRemote when a
+// remote home holds it) and, for In flight grouping,
 // group / expanded / flag on a group row and parent on its children. A row
 // listed under showHidden carries hidden: true. The mapping follows the scout
 // report's section 1 table.
@@ -813,23 +814,52 @@ function findingsRows(facts) {
 }
 
 // ------------------------------------------------------------------- Landed
+//
+// A Landed row carries every target its record has, so `enter` can fall back
+// from one to the next (lib/controller.mjs landedTarget): url (the PR), then
+// reportPath / reportRemote (the record's report_path resolved against the
+// home that owns it, as findingsRows does; a remote home's report stays
+// unreachable), then paneId / lost / unknown / focusable for a done task whose
+// worker pane herdr still lists (the main home's task record, or the ledger's
+// endpoint for that child, read as inflightRows reads them; a done task with
+// no record or no pane has none). The WHAT text names the first target that
+// exists, `<title> · <pr url>`, `<title> · <report path relative to its
+// home>` or `<title> · pane <id>`, else the bare title; a lost pane is no
+// target, so its row reads the bare title.
+function landedWhat(title, { url, reportText, paneId, lost }) {
+  if (url) return `${title} · ${url}`;
+  if (reportText) return `${title} · ${reportText}`;
+  if (paneId && !lost) return `${title} · pane ${paneId}`;
+  return title;
+}
+
 function landedRows(facts) {
   const rows = [];
   const snap = facts.snapshot || {};
   const backlog = snap.backlog && Array.isArray(snap.backlog.records) ? snap.backlog.records : [];
+  const taskById = new Map((Array.isArray(snap.tasks) ? snap.tasks : []).map((t) => [t.id, t]));
   for (const r of backlog) {
     if (r.state !== 'done') continue;
     const date = r.completion && r.completion.date ? r.completion.date : r.merged || r.done || r.reported || null;
+    const task = taskById.get(r.id);
+    const herdr = herdrColumn(facts, task && task.endpoint ? task.endpoint.target : null);
+    const url = r.pr_url || null;
+    const reportPath = absolutePath(r.report_path, facts.fmHome);
     rows.push(
       makeRow({
         tag: (r.completion && r.completion.verb) || 'done',
         extra: date ? String(date).slice(5) : '-',
         id: r.id,
-        text: r.pr_url ? `${r.title} · ${r.pr_url}` : r.title,
+        text: landedWhat(r.title, { url, reportText: r.report_path ? relativeTo(reportPath, facts.fmHome) : null, paneId: herdr.paneId, lost: herdr.lost }),
         repo: r.repo,
         hideKey: `landed:${MAIN_HOME_LABEL}:${r.id}:${date || '-'}`,
         ageSeconds: ageSince(facts.now, parseTime(date)),
-        url: r.pr_url || null,
+        url,
+        reportPath,
+        paneId: herdr.paneId,
+        lost: herdr.lost,
+        unknown: herdr.unknown,
+        focusable: Boolean(herdr.paneId),
       }),
     );
   }
@@ -849,18 +879,29 @@ function landedRows(facts) {
     const ledger = ledgerById.get(home) || { id, home };
     const date = rec.completion && rec.completion.date ? rec.completion.date : null;
     const pr = rec.pr_url ? repoFromUrl(rec.pr_url) : null;
+    const endpoints = Array.isArray(ledger.summary && ledger.summary.endpoints) ? ledger.summary.endpoints : [];
+    const ep = endpoints.find((e) => e.id === rec.id);
+    const herdr = herdrColumn(facts, ep && ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) });
+    const url = rec.pr_url || null;
+    const abs = absolutePath(rec.report_path, home);
     rows.push(
       makeRow({
         tag: (rec.completion && rec.completion.verb) || 'done',
         extra: date ? String(date).slice(5) : '-',
         id: rec.id,
-        text: rec.pr_url ? `${rec.title} · ${rec.pr_url}` : rec.title,
+        text: landedWhat(rec.title, { url, reportText: rec.report_path ? relativeTo(abs, home) : null, paneId: herdr.paneId, lost: herdr.lost }),
         repo: pr ? pr.repo : '-',
         home: homeLabel(ledger),
         homeId: homeIdOf(ledger),
         hideKey: `landed:${homeIdOf(ledger)}:${rec.id}:${date || '-'}`,
         ageSeconds: ageSince(facts.now, parseTime(date)),
-        url: rec.pr_url || null,
+        url,
+        reportPath: ledger.remote ? null : abs,
+        reportRemote: Boolean(rec.report_path && ledger.remote),
+        paneId: herdr.paneId,
+        lost: herdr.lost,
+        unknown: herdr.unknown,
+        focusable: Boolean(herdr.paneId) && !ledger.remote,
       }),
     );
   }
@@ -997,6 +1038,11 @@ export function buildModel(facts, options = {}) {
   const homes = 1 + f.ledgers.length;
   return {
     panes,
+    // Whether a herdr pane can be reached from this board: false under
+    // --no-herdr (state off, or the fixture overlay that stands in for a
+    // server); a connecting or dropped link still counts, as In flight's focus
+    // does, and the focus itself reports the failure.
+    herdrOn: f.herdr.state !== 'off' && f.herdr.state !== 'fixture',
     meta: {
       fmHome: f.fmHome,
       homes,
