@@ -38,6 +38,14 @@ options:
   --keys <list>          with --render-once: press these keys first (comma or space
                          separated, e.g. "tab,j,enter"); a PR open runs --opener-cmd
                          when given and is only reported in the footer otherwise
+  --no-mouse             ignore the mouse and leave the terminal's own text selection
+                         alone (default: click selects, double-click is enter, the
+                         wheel scrolls)
+  --mouse <list>         with --render-once: mouse events, applied in order with --keys
+                         (comma or space separated): click:X,Y  dblclick:X,Y
+                         wheel:up:X,Y  wheel:down:X,Y, X and Y the cell from 0 at the
+                         top-left; any other token is a key, so "click:12,5 x" selects
+                         a row and hides it
   --expand <all|ids>     with --render-once: expand these In flight groups (secondmate
                          ids, or all) before rendering
   --tags                 with --render-once: print the frame with its color tags
@@ -51,6 +59,30 @@ options:
   -h, --help             this text`;
 
 export const COMMANDS = ['run', 'open', 'focus'];
+
+// One --mouse token -> the mouse events it stands for (lib/controller.mjs
+// mouseAction shape, without `time`), or null when the token is a key name.
+// dblclick is two left clicks on the cell, which is what the pure double-click
+// detection needs to see; the driver stamps both with the same time.
+export function parseMouseToken(token) {
+  const m = /^(click|dblclick|wheel:(?:up|down)):(\d+),(\d+)$/.exec(token);
+  if (!m) {
+    // Something shaped like an event but not one of ours (rclick included: the
+    // board binds nothing to the right button) is an error, not a key name.
+    if (/^(click|dblclick|rclick|mclick|wheel)(:|$)/.test(token)) throw new Error(`--mouse: bad event "${token}" (want click:X,Y, dblclick:X,Y, wheel:up:X,Y or wheel:down:X,Y)`);
+    return null;
+  }
+  const x = Number(m[2]);
+  const y = Number(m[3]);
+  switch (m[1]) {
+    case 'click':
+      return [{ type: 'down', button: 'left', x, y }];
+    case 'dblclick':
+      return [{ type: 'down', button: 'left', x, y }, { type: 'down', button: 'left', x, y }];
+    default:
+      return [{ type: 'wheel', dir: m[1].slice(6), x, y }];
+  }
+}
 
 export function parseArgs(argv, env = {}) {
   const opts = {
@@ -74,6 +106,10 @@ export function parseArgs(argv, env = {}) {
     viewState: null,
     tags: false,
     keys: [],
+    mouse: true,
+    // --keys and --mouse tokens in command-line order: [{ kind: 'key', key }]
+    // and [{ kind: 'mouse', events }], so a test can click, then press.
+    inputs: [],
     expand: [],
     help: false,
   };
@@ -151,7 +187,27 @@ export function parseArgs(argv, env = {}) {
         opts.tags = true;
         break;
       case '--keys':
-        opts.keys.push(...need(a).split(/[\s,]+/).filter(Boolean));
+        for (const key of need(a).split(/[\s,]+/).filter(Boolean)) {
+          opts.keys.push(key);
+          opts.inputs.push({ kind: 'key', key });
+        }
+        break;
+      case '--no-mouse':
+        opts.mouse = false;
+        break;
+      case '--mouse':
+        // Tokens split on commas and spaces, except the comma inside an
+        // event's X,Y: "click:12,5,1,tab" is a click, then the keys 1 and tab.
+        // Anything shaped like an event keeps its X,Y so parseMouseToken can
+        // name an unsupported one whole ("rclick:12,5", not "rclick:12").
+        for (const token of need(a).match(/[a-z]+(?::[a-z]+)*:\d+,\d+|[^\s,]+/g) || []) {
+          const events = parseMouseToken(token);
+          if (events) opts.inputs.push({ kind: 'mouse', events });
+          else {
+            opts.keys.push(token);
+            opts.inputs.push({ kind: 'key', key: token });
+          }
+        }
         break;
       case '--expand':
         opts.expand.push(...need(a).split(/[\s,]+/).filter(Boolean));

@@ -6,7 +6,9 @@
 //   --render-once  print one frame to stdout and exit; with --fixture <json> the
 //                  frame comes from that facts file and no firstmate home or
 //                  herdr is touched, which is how tests/fm-board.test.sh works.
-//                  --keys <list> presses keys through lib/controller.mjs before
+//                  --keys <list> presses keys, and --mouse <list> clicks,
+//                  double-clicks and wheels (see lib/args.mjs),
+//                  through lib/controller.mjs before
 //                  the frame is rendered (a PR open runs --opener-cmd when
 //                  given, and is only reported in the footer otherwise; a herdr
 //                  focus is reported, never run; r against a live home re-runs
@@ -44,7 +46,7 @@ import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
 import { collectLedgers, discoverHomes, fetchPrs, mtime, runSnapshot } from './lib/sources.mjs';
-import { focusProblem, handleKey, viewProblem } from './lib/controller.mjs';
+import { focusProblem, handleKey, handleMouse, viewProblem } from './lib/controller.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer } from './lib/viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
@@ -131,16 +133,22 @@ function viewStateFor(opts, fmHome) {
   return resolveViewStatePath({ explicit: opts.viewState, fmHome, env: process.env });
 }
 
-// One-shot view: apply --expand and --keys through the shared key handler,
-// then hand back the model and view to render. Effects: an opened PR runs
-// --opener-cmd (awaited, so a fake opener has written its record before the
-// process exits) or, without one, only leaves a footer notice; a focus is
-// checked the same way the app checks it, then reported rather than run; a
-// viewed report runs the resolved viewer (awaited); r re-reads a live home.
-async function driveOnce(facts, opts) {
+// One-shot view: apply --expand, then --keys and --mouse in command-line order
+// through the shared handlers, then hand back the model and view to render.
+// Effects: an opened PR runs --opener-cmd (awaited, so a fake opener has
+// written its record before the process exits) or, without one, only leaves a
+// footer notice; a focus is checked the same way the app checks it, then
+// reported rather than run; a viewed report runs the resolved viewer
+// (awaited); r re-reads a live home. Before each mouse event the frame is
+// rendered at the final size, as the app redraws after every key, so the
+// pointer is measured against what would be on screen; the events of one
+// token share a time stamp and tokens are a second apart, so dblclick is a
+// double-click and two click tokens on one row are two single clicks. With
+// --no-mouse the mouse tokens are skipped, as the app would ignore the events.
+async function driveOnce(facts, opts, size) {
   const vs = viewStateFor(opts, facts.fmHome);
   const loaded = loadViewState(vs.path);
-  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, showHidden: false, help: false, notice: '', noticeBad: false };
+  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false };
   const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
   let model = build();
   if (opts.expand.length) {
@@ -217,7 +225,19 @@ async function driveOnce(facts, opts) {
   };
   if (loaded.error) ctx.notice(`view state: ${loaded.error}`, true);
   if (vs.problem) ctx.notice(vs.problem, true);
-  for (const key of opts.keys) handleKey(ctx, key);
+  opts.inputs.forEach((input, n) => {
+    if (input.kind === 'key') {
+      handleKey(ctx, input.key);
+      return;
+    }
+    if (!opts.mouse) return;
+    for (const ev of input.events) {
+      const frame = renderFrame(model, size, { ...view, stale: Boolean(facts.snapshotError) });
+      view.scroll = frame.scroll;
+      view.frame = { cols: frame.cols, rows: frame.rows, zones: frame.zones };
+      handleMouse(ctx, { ...ev, time: n * 1000 });
+    }
+  });
   await Promise.all(pending);
   return { model, view };
 }
@@ -257,7 +277,7 @@ async function main() {
   }
   if (opts.renderOnce) {
     const { facts, size } = opts.fixture ? factsFromFixture(opts.fixture, opts) : await factsLive(opts);
-    const { model, view } = await driveOnce(facts, opts);
+    const { model, view } = await driveOnce(facts, opts, size);
     const frame = renderFrame(model, size, { ...view, stale: Boolean(facts.snapshotError) });
     process.stdout.write(opts.tags ? `${toTags(frame.lines)}\n` : `${toPlain(frame.lines).join('\n')}\n`);
     if (facts.snapshotError && !opts.fixture) {
