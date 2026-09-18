@@ -76,7 +76,14 @@ the findings watermark belong to later milestones.
   terminal library must do goes through the screen contract at the top of
   that file. That includes the mouse: adding the screen's mouse listener is
   what switches terminal mouse reporting on, and the adapter only translates
-  events. What a click means is decided in `lib/controller.mjs`
+  events. The library reports one Enter press as two keypress events
+  (`enter`, then `return`); `normalizeKey` keeps the first and drops the
+  second, so the controller hears one key per press. `--render-once --keys`
+  feeds the controller directly and never loads the library, so a change to
+  how input reaches the app must also be checked on a real pseudo-terminal:
+  a private `tmux -L <name>` server with `send-keys` and `capture-pane`
+  (never the captain's session) shows the actual screen. What a click means
+  is decided in `lib/controller.mjs`
   (`mouseAction`, `handleMouse`; on the Settings page `settingsMouseAction`
   in `lib/settings.mjs`, over that page's own `kind: 'settings'` zones)
   against the `zones` the renderer returns with every frame, so gestures are

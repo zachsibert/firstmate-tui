@@ -48,6 +48,9 @@
 # from tests/fixtures/releases/api, so no upgrade, download or GitHub call is
 # ever real. The launcher's relaunch loop (exit 75 starts the board again) runs
 # against tests/fake-node.sh on PATH, which logs its calls and runs nothing.
+# The terminal adapter's key mapping (lib/tui-blessed.mjs normalizeKey) is
+# checked directly for the one case a one-shot render cannot reach: the two
+# keypress events the library emits for one Enter press must become one key.
 #
 # Fixtures (tests/fixtures/):
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
@@ -274,7 +277,7 @@ assert_count "$tags" "{grey-fg}[" 5 "--tags: five grey badges"
 # lib/model.mjs). The countdown and the herdr warning have their own section below.
 assert_no_row "$frame" '^┌─ \[[1-5]\] [^─]*(ago|snapshot|herdr|checks)' "no pane header carries an age, a snapshot, herdr or checks word"
 assert_count "$frame" " ago" 0 "nothing on the populated frame says N ago: no header age, and the title counts down instead"
-assert_contains "$frame" "fm-board · /fixture/firstmate · 3 homes" "title counts the main home plus two secondmate homes"
+assert_row "$frame" '^ firstmate-tui · /fixture/firstmate · 3 homes ' "the title line leads with firstmate-tui and counts the main home plus two secondmate homes (falsify: put fm-board back in titleLine)"
 
 # Needs you rows (falsify: remove scout-beta's blocked_event, ship-alpha's open_decisions entry,
 # decide-vendor's hold_bucket=live, or ship-gamma's pr.url).
@@ -462,9 +465,9 @@ assert_row "$frame_empty" '^│ nothing landed yet +│$' "empty landed message"
 # No herdr block under --no-herdr is the state "off" with the reason --no-herdr: the title line warns
 # once and no pane header says anything about herdr (falsify: drop the detail from factsFromFixture's
 # no-block branch, or the 'off' case from herdrWarning).
-assert_row "$frame_empty" '^ fm-board · /fixture/firstmate · 1 home +herdr disconnected \(--no-herdr\) $' "empty: the title line warns herdr disconnected with --no-herdr as the reason"
+assert_row "$frame_empty" '^ firstmate-tui · /fixture/firstmate · 1 home +herdr disconnected \(--no-herdr\) $' "empty: the title line warns herdr disconnected with --no-herdr as the reason"
 assert_count "$frame_empty" "herdr" 1 "empty: the title warning is the only herdr text; no pane header carries one"
-assert_no_row "$frame_empty" '^ fm-board .*refresh' "empty: no refresh block in the fixture, so the title line has no refresh label"
+assert_no_row "$frame_empty" '^ firstmate-tui .*refresh' "empty: no refresh block in the fixture, so the title line has no refresh label"
 assert_contains "$frame_empty" "· 1 home " "empty board counts one home"
 assert_widths "$frame_empty" 120 "empty frame lines are 120 columns"
 assert_lines "$frame_empty" 40 "empty frame is 40 lines"
@@ -486,7 +489,7 @@ assert_row "$frame_narrow" '^ working +ship-alpha +harness busy \(claude-… mai
 assert_row "$frame_narrow" '^ working +▸ notes +notes-child +notes \(cached\) *$' "narrow: cached home group row in list mode"
 frame_narrow_x=$(render narrow.json --expand all) || fail "narrow --expand all: render exited non-zero"
 assert_row "$frame_narrow_x" '^ working +↳ notes-child +summarizing Monday +notes \(cached\) *$' "narrow expanded: cached home label on a ledger child"
-assert_contains "$frame_narrow" "fm-board · firstmate · 2 homes" "narrow: title uses the home basename"
+assert_contains "$frame_narrow" "firstmate-tui · firstmate · 2 homes" "narrow: title uses the home basename"
 assert_widths "$frame_narrow" 70 "narrow frame lines are 70 columns"
 assert_lines "$frame_narrow" 24 "narrow frame is 24 lines"
 
@@ -622,7 +625,7 @@ assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost
 # the unknown branch in herdrColumn, or the grey style in rowSegments).
 frame_d=$(render lost-disconnected.json) || fail "disconnected: render exited non-zero"
 tags_d=$(render lost-disconnected.json --tags) || fail "disconnected --tags: render exited non-zero"
-assert_row "$frame_d" '^ fm-board · /fixture/firstmate · 1 home +herdr disconnected \(ECONNREFUSED\) $' "disconnected fixture: the title line warns with the socket error as the reason"
+assert_row "$frame_d" '^ firstmate-tui · /fixture/firstmate · 1 home +herdr disconnected \(ECONNREFUSED\) $' "disconnected fixture: the title line warns with the socket error as the reason"
 assert_row "$frame_d" '^│ working +unknown +ship-lost +adding the retry loop ' "disconnected: the missing pane reads unknown, not pane lost"
 assert_row "$tags_d" '\{grey-fg\}unknown +\{/grey-fg\}' "disconnected: the unknown cell is grey"
 assert_count "$tags_d" "{red-fg}" 1 "disconnected: the title warning is the only red text; no row is red"
@@ -707,6 +710,7 @@ assert_count "$frame_p" "┌─" 0 "all panes hidden: no pane frame is drawn"
 assert_not_contains "$frame_p" "Needs you (" "all panes hidden: no pane header"
 assert_not_contains "$frame_p" "In flight (" "all panes hidden: no pane header for the last one hidden"
 assert_row "$frame_p" '^ +all panes hidden +$' "landing page heading"
+assert_row "$frame_p" '^ firstmate-tui · /fixture/firstmate · 3 homes · all panes hidden ' "landing page: the title line leads with firstmate-tui (falsify: put fm-board back in titleLine)"
 assert_row "$frame_p" '^ +1  Needs you +$' "landing page: 1 brings Needs you back"
 assert_row "$frame_p" '^ +2  Ready for review +$' "landing page: 2 brings Ready for review back"
 assert_row "$frame_p" '^ +3  In flight +$' "landing page: 3 brings In flight back"
@@ -749,7 +753,7 @@ frame_p=$(render populated.json --view-state "$vs" --keys "x") || fail "landing 
 assert_contains "$frame_p" "all panes hidden · 1-5 shows a pane, 0 shows all" "x on the landing page only reminds"
 assert_file_contains "$vs" '"hidden": []' "x on the landing page hides no row"
 frame_p=$(render populated.json --view-state "$vs" --keys "?") || fail "landing ?: render exited non-zero"
-assert_contains "$frame_p" "fm-board keys" "? opens the help over the landing page"
+assert_contains "$frame_p" "firstmate-tui keys" "? opens the help over the landing page"
 frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "landing 3: render exited non-zero"
 assert_count "$frame_p" "┌─" 1 "3 on the landing page brings In flight back alone"
 assert_contains "$frame_p" "┌─ [3] In flight (7)" "the returned pane carries its badge"
@@ -1118,7 +1122,7 @@ assert_row "$frame_s" '^ PR data +on: live GitHub checks on every tick +$' "sett
 assert_row "$frame_s" '^ herdr overlay +off \(--no-herdr\) +$' "settings: the herdr line reflects --no-herdr"
 assert_row "$frame_s" '^ mouse +on: click selects, double-click acts, wheel scrolls +$' "settings: the mouse line, on by default (falsify: drop the mouse entry from settingsFlags)"
 assert_row "$frame_s" '^ j/k move  enter choose  r refetch  esc/\. back  \? help +$' "settings: the footer names the page's keys"
-assert_contains "$frame_s" "fm-board · /fixture/firstmate · 3 homes" "settings: the title line stays"
+assert_row "$frame_s" '^ firstmate-tui · /fixture/firstmate · 3 homes ' "settings: the title line stays and leads with firstmate-tui"
 assert_lines "$frame_s" 40 "settings: the frame is 40 lines"
 assert_widths "$frame_s" 160 "settings: lines are 160 columns"
 # Opening the page fetches once: the latest release and the list, for the record's repository
@@ -1255,6 +1259,53 @@ assert_upgrade_log "upgrade --stable" "Back to stable: y runs the launcher's --s
 assert_row "$frame_s" '^ Settings +$' "a success from the Betas menu returns to the main menu"
 assert_row "$frame_s" '^ ▸ Relaunch now ' "a success from the Betas menu offers the relaunch"
 
+# enter and a double-click on the same entry are one path: settingsKeyAction answers the same
+# { type: 'activate', cursor, action } object settingsMouseAction answers, so the confirm frame is byte
+# for byte the same whichever opened it, on Upgrade, on a beta row and on Back to stable (falsify:
+# return entry.action from the enter case instead of the activate object, or give the mouse activate
+# a prompt path of its own in applySettingsAction).
+assert_same_frame() { # <frame a> <frame b> <label>
+  if [ "$1" = "$2" ]; then pass; else fail "$3: the frames differ: $(diff <(printf '%s\n' "$1") <(printf '%s\n' "$2") | head -n 6)"; fi
+}
+frame_ke=$(render_settings "$REL" "$INSTALL" ".,enter") || fail "enter on Upgrade: render exited non-zero"
+frame_dc=$(render_settings "$REL" "$INSTALL" "." --mouse "dblclick:10,7") || fail "double-click on Upgrade: render exited non-zero"
+assert_row "$frame_ke" '^ install 0\.2\.0 \(firstmate-tui upgrade --version 0\.2\.0\)\? y to confirm, esc to cancel +$' "enter on Upgrade opens the confirm line with the version and the command"
+assert_row "$frame_ke" '^ y confirm  esc cancel' "enter on Upgrade: the footer waits for y or esc"
+assert_same_frame "$frame_ke" "$frame_dc" "Upgrade: enter and a double-click open the same frame"
+assert_no_upgrade "enter on Upgrade runs nothing before y"
+frame_ke=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,enter") || fail "enter on a beta: render exited non-zero"
+frame_dc=$(render_settings "$REL" "$INSTALL" ".,j,enter" --mouse "dblclick:10,8") || fail "double-click on a beta: render exited non-zero"
+assert_row "$frame_ke" '^ install 0\.1\.0-d8b290e \(firstmate-tui upgrade --version 0\.1\.0-d8b290e\)\? y to confirm, esc to cancel +$' "enter on a beta row opens the confirm line naming exactly that beta"
+assert_same_frame "$frame_ke" "$frame_dc" "a beta row: enter and a double-click open the same frame"
+assert_no_upgrade "enter on a beta runs nothing before y"
+frame_ke=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,j,j,enter") || fail "enter on Back to stable: render exited non-zero"
+frame_dc=$(render_settings "$REL" "$INSTALL" ".,j,enter" --mouse "dblclick:10,10") || fail "double-click on Back to stable: render exited non-zero"
+assert_row "$frame_ke" '^ back to stable 0\.2\.0 \(firstmate-tui upgrade --stable\)\? y to confirm, esc to cancel +$' "enter on Back to stable opens the confirm line with the release and --stable"
+assert_same_frame "$frame_ke" "$frame_dc" "Back to stable: enter and a double-click open the same frame"
+assert_no_upgrade "enter on Back to stable runs nothing before y"
+
+# The interactive path. neo-blessed 0.2.0 reports one Enter press as two keypress events, { name:
+# 'enter' } and then { name: 'return' } (lib/program.js re-emits every \r keypress under the second
+# name), and normalizeKey must keep exactly one of them, or every Enter acts twice: on this page the
+# second enter cancelled the confirmation the first had just opened, and the footer read "cancelled;
+# nothing was installed" instead of the prompt. --render-once never loads the library, so the adapter's
+# mapping is checked directly (falsify: map 'return' to 'enter' again in normalizeKey). The one-shot
+# picture of the old double delivery is ".,enter,enter", which does cancel, as any key pressed after the
+# prompt opened should.
+adapter_keys=$(node --input-type=module -e "
+  import { normalizeKey } from '$ROOT/bin/fm-board/lib/tui-blessed.mjs';
+  const press = [['\r', { name: 'enter', sequence: '\r' }], ['\r', { name: 'return', sequence: '\r' }]];
+  console.log(JSON.stringify(press.map(([ch, key]) => normalizeKey(ch, key)).filter((k) => k !== null)));
+  console.log(JSON.stringify(normalizeKey('\n', { name: 'linefeed', sequence: '\n' })));
+  console.log(JSON.stringify(normalizeKey('j', { name: 'j', sequence: 'j' })));
+")
+if [ "$(printf '%s\n' "$adapter_keys" | sed -n 1p)" = '["enter"]' ]; then pass; else fail "normalizeKey: the two events of one Enter press must give exactly one enter key, got $(printf '%s\n' "$adapter_keys" | sed -n 1p)"; fi
+if [ "$(printf '%s\n' "$adapter_keys" | sed -n 2p)" != '"enter"' ]; then pass; else fail "normalizeKey: a linefeed (ctrl-j) must not count as enter"; fi
+if [ "$(printf '%s\n' "$adapter_keys" | sed -n 3p)" = '"j"' ]; then pass; else fail "normalizeKey: a plain character key is itself, got $(printf '%s\n' "$adapter_keys" | sed -n 3p)"; fi
+frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,enter") || fail "enter twice: render exited non-zero"
+assert_contains "$frame_s" "cancelled; nothing was installed" "a second enter after the prompt opened cancels it (the old double delivery, through --keys)"
+assert_no_upgrade "enter twice runs nothing"
+
 # A checkout (no install record): the page says so with the git command the launcher prints, offers
 # no upgrade and no Back to stable, lists the betas read-only and asks the default repository
 # (falsify: drop the checkout guard from settingsEntries, or make readInstall default to a record).
@@ -1304,7 +1355,7 @@ frame_k=$(render populated.json --keys "?") || fail "help settings: render exite
 assert_contains "$frame_k" ".            settings page: installed version, latest release, upgrade or a beta" "help overlay documents ."
 assert_contains "$frame_k" "(each install asks y first; . or esc brings the board back)" "help overlay documents the confirm step"
 frame_s=$(render populated.json --install-root "$INSTALL" --keys ".,?") || fail "help over settings: render exited non-zero"
-assert_contains "$frame_s" "fm-board keys" "? opens the help over the settings page"
+assert_contains "$frame_s" "firstmate-tui keys" "? opens the help over the settings page"
 # Narrow: the page fits the list-mode frame (falsify: pick the layout mode before the page check).
 frame_s=$(SETTINGS_FIXTURE=narrow.json render_settings "$REL" "$INSTALL" ".") || fail "settings narrow: render exited non-zero"
 assert_row "$frame_s" '^ Settings +$' "narrow: the page renders"
@@ -1389,15 +1440,15 @@ if [ -s "$SCRATCH/headless.log" ]; then fail "headless run wrote to the terminal
 # The title line carries one refresh label, from the fixture's refresh block at the fixture's clock
 # (now = 12:00:00Z), and the pane headers carry none of the old ages (falsify: drop refreshLabel from
 # buildModel's meta, or the refresh segment from titleLine).
-assert_row "$frame" '^ fm-board · /fixture/firstmate · 3 homes +next refresh in 18s $' "countdown: the title line reads next refresh in 18s from {\"next_in\": 18}"
+assert_row "$frame" '^ firstmate-tui · /fixture/firstmate · 3 homes +next refresh in 18s $' "countdown: the title line reads next refresh in 18s from {\"next_in\": 18}"
 assert_count "$frame" "next refresh" 1 "countdown: the label is on the title line only"
 frame_c=$(render "$(variant populated.json due '{"refresh": {"next_in": 0}}')") || fail "countdown due: render exited non-zero"
-assert_row "$frame_c" '^ fm-board .* +next refresh in 0s $' "countdown: a due refresh reads 0s"
+assert_row "$frame_c" '^ firstmate-tui .* +next refresh in 0s $' "countdown: a due refresh reads 0s"
 frame_c=$(render "$(variant populated.json overdue '{"refresh": {"next_in": -5}}')") || fail "countdown overdue: render exited non-zero"
-assert_row "$frame_c" '^ fm-board .* +next refresh in 0s $' "countdown: never negative (falsify: drop Math.max from refreshLabel)"
+assert_row "$frame_c" '^ firstmate-tui .* +next refresh in 0s $' "countdown: never negative (falsify: drop Math.max from refreshLabel)"
 # While a refresh runs the label says so and counts nothing (falsify: drop the refreshing branch).
 frame_c=$(render "$(variant populated.json refreshing '{"refresh": {"refreshing": true, "next_in": 18}}')") || fail "refreshing: render exited non-zero"
-assert_row "$frame_c" '^ fm-board · /fixture/firstmate · 3 homes +refreshing… $' "refreshing: the title line reads refreshing…"
+assert_row "$frame_c" '^ firstmate-tui · /fixture/firstmate · 3 homes +refreshing… $' "refreshing: the title line reads refreshing…"
 assert_not_contains "$frame_c" "next refresh" "refreshing: no countdown beside it"
 # A failed PR fetch: the title line names the failure's age and the retry in red, the Ready for
 # review header alone is marked stale, and the previous PR rows stay (falsify: drop the failedAt
@@ -1405,7 +1456,7 @@ assert_not_contains "$frame_c" "next refresh" "refreshing: no countdown beside i
 fx_pf=$(variant populated.json pr-failed '{"prs": {"error": "exit 1"}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: exit 1"}}')
 frame_f=$(render "$fx_pf") || fail "PR fetch failed: render exited non-zero"
 tags_f=$(render "$fx_pf" --tags) || fail "PR fetch failed --tags: render exited non-zero"
-assert_row "$frame_f" '^ fm-board · /fixture/firstmate · 3 homes +refresh failed 40s ago, retrying in 20s $' "PR fetch failed: the title line reads refresh failed 40s ago, retrying in 20s"
+assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh failed 40s ago, retrying in 20s $' "PR fetch failed: the title line reads refresh failed 40s ago, retrying in 20s"
 assert_contains "$tags_f" "{red-fg}refresh failed 40s ago, retrying in 20s{/red-fg}" "PR fetch failed: the label is red"
 assert_contains "$frame_f" "┌─ [2] Ready for review (3) (stale) ─" "PR fetch failed: the review header is marked stale"
 assert_count "$frame_f" "(stale)" 1 "PR fetch failed: no other pane is marked stale"
@@ -1413,7 +1464,7 @@ assert_row "$frame_f" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache
 # A failed snapshot: the four snapshot panes are marked stale and Ready for review is not (falsify:
 # swap the pane test in paneStale).
 frame_f=$(render "$(variant populated.json snap-failed '{"snapshot_error": "exit 1", "refresh": {"failed_ago": 5, "next_in": 25, "failed": "snapshot: exit 1"}}')") || fail "snapshot failed: render exited non-zero"
-assert_row "$frame_f" '^ fm-board · /fixture/firstmate · 3 homes +refresh failed 5s ago, retrying in 25s $' "snapshot failed: the title line names the failure"
+assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh failed 5s ago, retrying in 25s $' "snapshot failed: the title line names the failure"
 assert_count "$frame_f" "(stale)" 4 "snapshot failed: four panes are marked stale"
 assert_contains "$frame_f" "┌─ [1] Needs you (4) (stale) ─" "snapshot failed: Needs you is stale"
 assert_contains "$frame_f" "┌─ [3] In flight (7) (stale) ─" "snapshot failed: In flight is stale"
@@ -1423,10 +1474,10 @@ assert_contains "$frame_f" "┌─ [2] Ready for review (3) ─" "snapshot faile
 # The failure text stays in the facts but the label keeps the spec's words: a failure with no age given
 # reads 0s ago (falsify: require failed_ago in refreshFromFixture).
 frame_f=$(render "$(variant populated.json failed-noage '{"refresh": {"failed": "snapshot: exit 1", "next_in": 30}}')") || fail "failed no age: render exited non-zero"
-assert_row "$frame_f" '^ fm-board .* +refresh failed 0s ago, retrying in 30s $' "failed without an age: reads 0s ago"
+assert_row "$frame_f" '^ firstmate-tui .* +refresh failed 0s ago, retrying in 30s $' "failed without an age: reads 0s ago"
 # Without a refresh block (lost.json) the title line carries no refresh label at all: a one-shot render
 # has no schedule (falsify: invent a label when facts.refresh is null).
-assert_no_row "$frame_l" '^ fm-board .*refresh' "no refresh block: no refresh label on the title line"
+assert_no_row "$frame_l" '^ firstmate-tui .*refresh' "no refresh block: no refresh label on the title line"
 # Herdr link. Connected: no herdr text anywhere on the frame (falsify: bring herdrLabel back into
 # the title or the headers). The populated fixture's block has no state, so under --no-herdr it is the
 # offline overlay "fixture", which also shows nothing; an explicit connected state is checked too.
@@ -1438,7 +1489,7 @@ assert_not_contains "$tags_h" "herdr disconnected" "connected --tags: no warning
 # Down for any reason: one red warning on the title line naming the reason; the reason is left out
 # when the client recorded none (falsify: print empty parentheses, or drop a state from herdrWarning).
 frame_h=$(render "$(variant populated.json connecting '{"herdr": {"state": "connecting"}}')") || fail "connecting: render exited non-zero"
-assert_row "$frame_h" '^ fm-board .* +next refresh in 18s · herdr disconnected \(connecting\) $' "never connected: the title line warns herdr disconnected (connecting) beside the countdown"
+assert_row "$frame_h" '^ firstmate-tui .* +next refresh in 18s · herdr disconnected \(connecting\) $' "never connected: the title line warns herdr disconnected (connecting) beside the countdown"
 assert_count "$frame_h" "herdr" 1 "never connected: the title warning is the only herdr text"
 frame_h=$(render "$(variant populated.json unavailable '{"herdr": {"state": "unavailable", "detail": "cannot run herdr: not found"}}')") || fail "unavailable: render exited non-zero"
 assert_contains "$frame_h" "herdr disconnected (cannot run herdr: not found) " "herdr not on PATH: the warning carries the client's reason"
@@ -1448,17 +1499,17 @@ assert_contains "$frame_h" "next refresh in 18s · herdr disconnected (closed) "
 assert_contains "$tags_h" "{red-fg}herdr disconnected (closed){/red-fg}" "dropped --tags: the warning is red"
 assert_row "$tags_h" '\{white-bg\}next refresh in 18s\{/white-bg\}' "dropped --tags: the countdown beside it keeps the plain title style"
 frame_h=$(render "$(variant populated.json noreason '{"herdr": {"state": "disconnected", "detail": ""}}')") || fail "no reason: render exited non-zero"
-assert_row "$frame_h" '^ fm-board .* · herdr disconnected $' "dropped with no recorded reason: the parentheses are left out"
+assert_row "$frame_h" '^ firstmate-tui .* · herdr disconnected $' "dropped with no recorded reason: the parentheses are left out"
 tags_e=$(render empty.json --tags) || fail "empty --tags: render exited non-zero"
 assert_contains "$tags_e" "{red-fg}herdr disconnected (--no-herdr){/red-fg}" "--no-herdr --tags: the warning is red"
 # Narrow: the left text gives way to the right-hand labels and the line keeps its width (falsify: pad
 # the title to cols before the labels, or drop the truncate in titleLine).
 frame_h=$(render "$(variant narrow.json narrow-both '{"refresh": {"next_in": 18}, "herdr": {"state": "disconnected", "detail": "ECONNREFUSED"}}')") || fail "narrow both labels: render exited non-zero"
-assert_row "$frame_h" '^ fm-board.* next refresh in 18s · herdr disconnected \(ECONNREFUSED\) $' "narrow: both labels fit and the home text is cut"
+assert_row "$frame_h" '^ firstmate-[^ ]*… next refresh in 18s · herdr disconnected \(ECONNREFUSED\) $' "narrow: both labels fit and the left text is cut (at 70 columns with both labels, the name itself)"
 assert_widths "$frame_h" 70 "narrow: the title line is still 70 columns"
 # The Settings page keeps the same title line (falsify: give renderSettings its own title).
 frame_h=$(render "$(variant populated.json settings-title '{"herdr": {"state": "disconnected", "detail": "closed"}}')" --install-root "$INSTALL" --keys ".") || fail "settings title: render exited non-zero"
-assert_row "$frame_h" '^ fm-board · /fixture/firstmate · 3 homes +next refresh in 18s · herdr disconnected \(closed\) $' "settings page: the title line carries the countdown and the warning"
+assert_row "$frame_h" '^ firstmate-tui · /fixture/firstmate · 3 homes +next refresh in 18s · herdr disconnected \(closed\) $' "settings page: the title line carries the countdown and the warning"
 assert_row "$frame_h" '^ Settings +$' "settings page: the page itself is drawn"
 
 # ------------------------------------------------------------------- mouse
@@ -1635,7 +1686,7 @@ frame_m=$(render populated.json --keys "1,2,3,4,5" --mouse "click:30,20 dblclick
 if [ "$frame_m" = "$frame_l" ]; then pass; else fail "mouse events changed the landing page: $(diff <(printf '%s\n' "$frame_l") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # A click while the help is up closes it (falsify: ignore mouse events under view.help).
 frame_m=$(render populated.json --keys "?" --mouse "click:30,29") || fail "mouse click on help: render exited non-zero"
-assert_not_contains "$frame_m" "fm-board keys" "a click closes the help overlay"
+assert_not_contains "$frame_m" "firstmate-tui keys" "a click closes the help overlay"
 
 # The help lists the gestures and binds nothing to the right button (falsify: drop the mouse block from
 # HELP_LINES, or bring a right-click line back).
