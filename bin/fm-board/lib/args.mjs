@@ -5,9 +5,6 @@
 export const USAGE = `usage: fm-board.sh [run] [options]
        fm-board.sh open  [options]      open the board in its own herdr pane
        fm-board.sh focus [options]      focus an already open board pane
-       fm-board.sh split-firstmate | unsplit-firstmate | toggle-firstmate [--board-pane <id>]
-                                        move the firstmate pane beside the board / back out
-                                        (the board's f key; run by the herdr plugin actions)
        fm-board.sh --render-once [--fixture <json>] [--cols N] [--rows N] [options]
 
 options:
@@ -39,16 +36,13 @@ options:
                          ids, or all) before rendering
   --tags                 with --render-once: print the frame with its color tags
                          ({red-fg}...{/red-fg}) instead of plain text
-  --board-pane <id>      the board's own herdr pane (default: $HERDR_PANE_ID, which herdr
-                         sets inside the board pane; the wrapper passes the recorded pane
-                         for the split/unsplit/toggle-firstmate subcommands)
   --herdr-cmd <argv>     command prefix for herdr calls (default: $HERDR_BIN_PATH or herdr);
                          quoted string, split on whitespace
   --herdr-socket <path>  herdr control socket (default: HERDR_SOCKET_PATH or herdr status)
   --snapshot-timeout <s> kill a snapshot run after this many seconds (default 60)
   -h, --help             this text`;
 
-export const COMMANDS = ['run', 'open', 'focus', 'split-firstmate', 'unsplit-firstmate', 'toggle-firstmate'];
+export const COMMANDS = ['run', 'open', 'focus'];
 
 export function parseArgs(argv, env = {}) {
   const opts = {
@@ -70,7 +64,6 @@ export function parseArgs(argv, env = {}) {
     viewerCmd: null,
     viewState: null,
     tags: false,
-    boardPane: env.HERDR_PANE_ID || null,
     keys: [],
     expand: [],
     help: false,
@@ -141,9 +134,6 @@ export function parseArgs(argv, env = {}) {
         break;
       case '--tags':
         opts.tags = true;
-        break;
-      case '--board-pane':
-        opts.boardPane = need(a);
         break;
       case '--keys':
         opts.keys.push(...need(a).split(/[\s,]+/).filter(Boolean));

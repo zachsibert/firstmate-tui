@@ -3,13 +3,14 @@
 // hidden rows and panes, help, notices) and the effects behind each key. Key
 // semantics live in lib/controller.mjs so the --render-once --keys test driver
 // shares them; this module supplies the I/O: herdr focus, the browser opener,
-// the report viewer, the firstmate pane move, snapshots and the view-state
-// file. The terminal is reached only through the adapter's screen contract.
+// the report viewer, snapshots and the view-state file. The terminal is reached only through the adapter's screen contract.
 //
 // Cadence (scout report section 6.4): a full snapshot every --refresh seconds,
 // or sooner on any herdr event that touches a known task pane, debounced so no
 // more than one snapshot starts per 10 s and never two at once. Herdr pushes
 // redraw the frame immediately because the agents map is already updated.
+// The live GitHub PR fetch (--prs) rides along every 120 s, or at once when
+// the captain presses r; without --prs, r says why the PR pane did not change.
 //
 // The report viewer takes the terminal over: the screen is suspended (normal
 // buffer, raw mode off, input paused), the viewer runs with inherited stdio,
@@ -25,7 +26,6 @@ import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
 import { focusProblem, handleKey, moveSelection, viewProblem } from './controller.mjs';
 import { resolveViewer, runViewer } from './viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.mjs';
-import { moveFirstmatePane } from './split.mjs';
 
 export { moveSelection } from './controller.mjs';
 
@@ -60,6 +60,7 @@ export async function runApp(opts) {
     ledgers: [],
     prs: { enabled: opts.prs, fetchedAt: null, error: null, candidate_prs: [] },
     lastPrsAt: 0,
+    prsNow: false,
     herdr: null,
     model: null,
     view: {
@@ -146,6 +147,8 @@ export async function runApp(opts) {
   };
 
   const refresh = async (why) => {
+    const manual = why === 'manual';
+    if (manual) state.prsNow = true;
     if (state.refreshing) {
       state.refreshPending = true;
       return;
@@ -162,7 +165,8 @@ export async function runApp(opts) {
       state.snapshotError = snap.error || 'snapshot failed';
     }
     state.ledgers = collectLedgers(state.snapshot, state.homes);
-    if (state.prs.enabled && Date.now() - state.lastPrsAt >= PRS_INTERVAL_MS) {
+    if (state.prs.enabled && (state.prsNow || Date.now() - state.lastPrsAt >= PRS_INTERVAL_MS)) {
+      state.prsNow = false;
       state.lastPrsAt = Date.now();
       const prs = await runBearingsPrs(state.fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
       state.prs = { enabled: true, fetchedAt: prs.error ? state.prs.fetchedAt : Math.floor(Date.now() / 1000), error: prs.error, candidate_prs: prs.error ? state.prs.candidate_prs : prs.candidate_prs };
@@ -173,6 +177,7 @@ export async function runApp(opts) {
     else {
       const errs = state.ledgers.filter((l) => l.error && !l.cached).map((l) => `${l.id}: ${l.error}`);
       if (errs.length) notice(`ledger ${errs.join('; ')}`, true, 15000);
+      else if (manual && !state.prs.enabled) notice('checks not fetched: start with --prs', false, 8000);
       else notice('', false, 1);
     }
     if (state.refreshPending) {
@@ -263,21 +268,6 @@ export async function runApp(opts) {
     draw();
   };
 
-  // The `f` key: put the firstmate pane beside the board or move it back out.
-  // The board's own pane id comes from herdr's HERDR_PANE_ID (injected into
-  // every process herdr spawns) or --board-pane.
-  const firstmate = async () => {
-    const boardPane = opts.boardPane || process.env.HERDR_PANE_ID || null;
-    notice('finding the firstmate pane…', false, 20000);
-    try {
-      const r = await moveFirstmatePane({ client: herdr, fmHome: state.fmHome, boardPane, mode: 'toggle' });
-      notice(r.message, false, 10000);
-      scheduleRefresh('pane move');
-    } catch (e) {
-      notice(e.message.slice(0, 120), true, 15000);
-    }
-  };
-
   const quit = () => {
     if (quitting) return;
     quitting = true;
@@ -301,9 +291,6 @@ export async function runApp(opts) {
     },
     viewReport: (row) => {
       viewRow(row);
-    },
-    firstmate: () => {
-      firstmate();
     },
     refresh: () => {
       refresh('manual');

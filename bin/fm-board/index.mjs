@@ -3,20 +3,15 @@
 //
 // Modes:
 //   run (default)  interactive board (neo-blessed through lib/tui-blessed.mjs)
-//   split-firstmate / unsplit-firstmate / toggle-firstmate
-//                  move the firstmate pane beside the board pane (--board-pane,
-//                  default $HERDR_PANE_ID) or back out to its own workspace,
-//                  through lib/split.mjs; prints one result line and exits 0,
-//                  or exits 1 with the reason (no firstmate pane found, herdr
-//                  failure). The herdr plugin actions firstmate.board.* run
-//                  these through the wrapper.
 //   --render-once  print one frame to stdout and exit; with --fixture <json> the
 //                  frame comes from that facts file and no firstmate home or
 //                  herdr is touched, which is how tests/fm-board.test.sh works.
 //                  --keys <list> presses keys through lib/controller.mjs before
 //                  the frame is rendered (a PR open runs --opener-cmd when
 //                  given, and is only reported in the footer otherwise; a herdr
-//                  focus and the f toggle are reported, never run; enter on a
+//                  focus is reported, never run; r against a live home re-runs
+//                  the snapshot (and the PR fetch with --prs) and against a
+//                  fixture only reports that it cannot; enter on a
 //                  Findings row runs --viewer-cmd when given and otherwise only
 //                  reports the viewer the chain resolved to, naming the binary
 //                  found on PATH, so a test can shadow glow with a fake without
@@ -52,7 +47,6 @@ import { focusProblem, handleKey, viewProblem } from './lib/controller.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer } from './lib/viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
-import { moveFirstmatePane } from './lib/split.mjs';
 
 function fail(msg, code = 1) {
   process.stderr.write(`fm-board: ${msg}\n`);
@@ -141,7 +135,7 @@ function viewStateFor(opts, fmHome) {
 // --opener-cmd (awaited, so a fake opener has written its record before the
 // process exits) or, without one, only leaves a footer notice; a focus is
 // checked the same way the app checks it, then reported rather than run; a
-// viewed report runs the resolved viewer (awaited); the f toggle is reported.
+// viewed report runs the resolved viewer (awaited); r re-reads a live home.
 async function driveOnce(facts, opts) {
   const vs = viewStateFor(opts, facts.fmHome);
   const loaded = loadViewState(vs.path);
@@ -206,8 +200,13 @@ async function driveOnce(facts, opts) {
           .catch((e) => ctx.notice(`viewer failed (${argv[0]}): ${e.message} · ${row.reportPath}`, true)),
       );
     },
-    firstmate: () => ctx.notice('would toggle the firstmate pane beside the board; --render-once never moves panes'),
-    refresh: () => ctx.notice('refresh is not available in --render-once', true),
+    refresh: () => {
+      if (opts.fixture) {
+        ctx.notice('refresh is not available with --fixture', true);
+        return;
+      }
+      pending.push(refreshLive(facts, opts).then((text) => ctx.notice(text)).then(() => ctx.rebuild()));
+    },
     persist: () => {
       if (!vs.path) return;
       const err = saveViewState(vs.path, { hidden: view.hidden, hiddenPanes: view.hiddenPanes });
@@ -222,19 +221,22 @@ async function driveOnce(facts, opts) {
   return { model, view };
 }
 
-// split-firstmate / unsplit-firstmate / toggle-firstmate: no TUI, one herdr
-// round trip through lib/split.mjs, one line of output.
-async function runPaneCommand(opts) {
-  if (!opts.herdr) fail('the firstmate pane toggle needs herdr; drop --no-herdr', 2);
-  if (!opts.fmHome) fail('FM_HOME is not set and --fm-home was not given', 2);
-  const mode = opts.command.replace(/-firstmate$/, '');
-  const client = new HerdrClient({ cmd: opts.herdrCmd, socketPath: opts.herdrSocket });
-  try {
-    const r = await moveFirstmatePane({ client, fmHome: opts.fmHome.replace(/\/+$/, ''), boardPane: opts.boardPane, mode });
-    process.stdout.write(`${r.action}: ${r.message}\n`);
-  } catch (e) {
-    fail(e.message, 1);
-  }
+// The r key against a live home: the same full refresh the app runs, snapshot
+// plus, with --prs, an immediate PR fetch. Mutates facts in place and resolves
+// to the footer text.
+async function refreshLive(facts, opts) {
+  facts.now = Math.floor(Date.now() / 1000);
+  const snap = await runSnapshot(facts.fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
+  if (snap.value && !snap.error) {
+    facts.snapshot = snap.value;
+    facts.snapshotAt = Math.floor(Date.now() / 1000);
+    facts.snapshotError = null;
+  } else facts.snapshotError = snap.error || 'snapshot failed';
+  facts.ledgers = collectLedgers(facts.snapshot, discoverHomes(facts.fmHome, opts.homes));
+  if (!opts.prs) return 'checks not fetched: start with --prs';
+  const r = await runBearingsPrs(facts.fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
+  facts.prs = { enabled: true, fetchedAt: r.error ? facts.prs.fetchedAt : Math.floor(Date.now() / 1000), error: r.error, candidate_prs: r.error ? facts.prs.candidate_prs : r.candidate_prs };
+  return r.error ? `PR fetch: ${r.error}` : 'refreshed: snapshot and PR checks';
 }
 
 async function main() {
@@ -247,10 +249,6 @@ async function main() {
   }
   if (opts.help) {
     process.stdout.write(`${USAGE}\n`);
-    return;
-  }
-  if (opts.command.endsWith('-firstmate')) {
-    await runPaneCommand(opts);
     return;
   }
   if (opts.renderOnce) {

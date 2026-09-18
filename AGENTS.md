@@ -25,9 +25,10 @@ the findings watermark belong to later milestones.
   PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
   `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
   report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended)
-  and moving the firstmate pane beside the board (`lib/split.mjs`: `herdr
-  pane move`, the pane found at press time, never `pane close`). Answers,
-  merges and dispatch stay with firstmate's own owners.
+  and refreshing its own data (`r`: the snapshot, plus the live PR fetch when
+  `--prs` is on). It never moves or closes a herdr pane; the captain splits
+  panes himself, so do not bring back an `f` toggle or a `pane move` action.
+  Answers, merges and dispatch stay with firstmate's own owners.
 - In flight groups secondmate work by home, not by delegated item, because
   the ledger carries no per-child parent field (the comment above
   `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it
@@ -52,9 +53,11 @@ the findings watermark belong to later milestones.
   tests/fake-opener.sh` and a report view to `--viewer-cmd bash
   tests/fake-viewer.sh`, never a real browser or editor (a one-shot render
   without `--viewer-cmd` only reports the resolved viewer for that reason).
-  Anything that calls herdr from a test must run against `tests/fake-herdr.sh`
-  with `HERDR_BIN_PATH` pointing at it as well as PATH: herdr sets
-  `HERDR_BIN_PATH` inside its panes, so PATH alone still reaches the captain's
+  The `r` key is tested against a stand-in home whose snapshot scripts only
+  log that they ran (see `render_live` in the test). Nothing in the suite may
+  call a real herdr: if a test ever needs one, fake it and point
+  `HERDR_BIN_PATH` at the fake as well as PATH, because herdr sets
+  `HERDR_BIN_PATH` inside its panes and PATH alone still reaches the captain's
   live server.
 - Bash (`bin/fm-board.sh`, `tests/*.sh`) must pass ShellCheck 0.11.0, the
   same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh tests/fm-board.test.sh`

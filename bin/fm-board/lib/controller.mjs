@@ -2,8 +2,8 @@
 // --render-once --keys test driver. keyAction() is pure: it maps a key on the
 // current selection to one action. handleKey() applies that action to the view
 // and calls back into the host for anything that touches the outside world
-// (herdr focus, the browser opener, the report viewer, the firstmate pane
-// move, a refresh, saving view state, quitting), so a test can drive the same
+// (herdr focus, the browser opener, the report viewer, a refresh, saving
+// view state, quitting), so a test can drive the same
 // code with fakes and read the resulting frame.
 //
 // Actions on a row:
@@ -18,8 +18,8 @@
 // Board-wide:
 //   H       toggle showing hidden rows (greyed, marked "(hidden)")
 //   1-5     show or hide one pane (Needs you .. Landed); 0 shows all five
-//   f       put the firstmate pane beside the board, or move it back out
-//   r       refresh    ?  help    q / ctrl-c  quit
+//   r       refresh (the snapshot, and the PR checks when --prs is on)
+//   ?       help       q / ctrl-c  quit
 
 import { PANES } from './layout.mjs';
 
@@ -141,8 +141,6 @@ export function keyAction(model, view, key) {
       return { type: 'help' };
     case 'r':
       return { type: 'refresh' };
-    case 'f':
-      return { type: 'firstmate' };
     case 'H':
       return { type: 'toggle-hidden' };
     case '0':
@@ -189,7 +187,7 @@ export function keyAction(model, view, key) {
 }
 
 // ctx: { view, model, rebuild(), notice(text, bad), open(row), focus(row),
-//        viewReport(row), firstmate(), refresh(), persist(), quit() }.
+//        viewReport(row), refresh(), persist(), quit() }.
 // rebuild() must replace ctx.model from the current view (the expanded set,
 // the hidden set and the hidden panes change which rows and panes exist);
 // persist() saves view.hidden and view.hiddenPanes.
@@ -215,9 +213,6 @@ export function handleKey(ctx, key) {
       return;
     case 'refresh':
       ctx.refresh();
-      return;
-    case 'firstmate':
-      ctx.firstmate();
       return;
     case 'open':
       ctx.open(action.row);
