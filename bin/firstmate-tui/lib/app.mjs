@@ -413,11 +413,14 @@ export async function runApp(opts) {
     state.ledgers = collectLedgers(state.snapshot, state.homes);
     // The identity: once per session, again on r only while it is unknown.
     // Pending (null) while the rungs are asked, so the PR panes spin on it
-    // instead of keeping the identity row; the draw starts the spinner.
+    // instead of keeping the identity row; the draw starts the spinner. PR
+    // rows restored from the state cache are drawn around the login they were
+    // fetched for, and keep it (and their cached marker) until the live answer
+    // replaces it: pending never blanks a pane that has a login to show.
     if (!state.identity || (manual && !identityKnown(state.identity))) {
       state.identity = null;
       state.view.settings.identity = null;
-      state.prs = { ...state.prs, identity: null };
+      if (!identityKnown(state.prs.identity)) state.prs = { ...state.prs, identity: null };
       draw();
       state.identity = await resolveIdentityLive({ config: state.config, askGh: state.prs.enabled && whichOnPath('gh', process.env), timeoutMs });
       state.view.settings.identity = state.identity;

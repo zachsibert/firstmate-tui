@@ -2551,6 +2551,13 @@ assert_count "$frame_c" "loading" 0 "cached launch: no spinner anywhere (falsify
 assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "cached launch: a cached PR row is on screen with its columns"
 assert_row "$frame_c" '^│ blocked +- +scout-beta +blocked: gh auth expired ' "cached launch: a cached Needs you row is on screen"
 assert_widths "$frame_c" 120 "cached launch: every line is still 120 columns"
+# A cached launch while the identity is still being resolved (prs.identity null): the PR panes keep
+# the cached rows, drawn around the login the cache was fetched for, and never spin on the identity
+# (falsify: restore the cache only over a known identity in restoreFromCache).
+frame_c=$(render "$(variant cold-start.json cached-pending '{"prs": {"identity": null}, "now": "2026-09-16T12:12:00Z"}')" --cache "$CACHE") || fail "cache identity pending: render exited non-zero"
+assert_contains "$frame_c" "┌─ [2] My PRs (3) (cached 12m ago) ─" "cached launch, identity pending: My PRs draws the cached PR rows"
+assert_not_contains "$frame_c" "resolving" "cached launch, identity pending: no resolving line over cached rows"
+assert_not_contains "$frame_c" "identity unknown" "cached launch, identity pending: no identity row either"
 # The cached rows are live for the cursor: j selects the second Needs you row (falsify: draw the
 # cached rows as the empty text).
 tags_c=$(render "$fx_cc" --cache "$CACHE" --tags --keys "j") || fail "cache select: render exited non-zero"
@@ -3411,7 +3418,7 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
     local name=$1 ghfail=$2
     shift 2
     rm -f "${FETCH_LOG:?}"
-    FM_HOME="$IDENT_HOME" XDG_CONFIG_HOME="$SCRATCH/ident-pty-$name" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_BOARD_TEST_GH_LOGIN_FAIL="$ghfail" PATH="$SCRATCH/slow-gh-bin:$IDENT_BIN:$FAKE_BIN:$PATH" \
+    FM_HOME="$IDENT_HOME" XDG_CONFIG_HOME="${PTY_XDG:-$SCRATCH/ident-pty-$name}" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_BOARD_TEST_GH_LOGIN_FAIL="$ghfail" PATH="$SCRATCH/slow-gh-bin:$IDENT_BIN:$FAKE_BIN:$PATH" \
       FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" \
       python3 "$PTY" --term xterm-256color --rows 60 --timeout 20 --capture "$SCRATCH/pty-$name.bin" "$@" -- \
       "$BOARD" run --no-herdr --opener-cmd "$FAKE_OPENER" \
@@ -3425,6 +3432,14 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   pty_ok ident-gh "pty identity known: the resolving line, then loading GitHub checks, then the rows gh answered"
   assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "pty identity known: one gh api user call"
   assert_count "$(cat "$FETCH_LOG")" "gh api graphql " 5 "pty identity known: the four searches and the lookup ran once the login was known"
+  # A warm launch: the previous run wrote the state cache on quit, so the next launch in the same
+  # config directory draws the cached PR rows around the login they were fetched for, marked cached,
+  # and never spins on the identity while the launch refresh resolves it again (falsify: set
+  # prs.identity to null for every first resolution in lib/app.mjs, and the cached rows give way
+  # to the resolving line).
+  PTY_XDG="$SCRATCH/ident-pty-ident-gh" run_pty_identity ident-gh-warm "" "wait:cached" "sleep:4.5" "absent:resolvingGitHub" "absent:identityunknown" "wait:Bumptheretrybudget" "sleep:0.4" "send:q" exit
+  pty_ok ident-gh-warm "pty warm launch: the cached rows stay on screen through the identity resolution"
+  assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "pty warm launch: the identity is still resolved once"
 else
   echo "note: the pseudo-terminal section was skipped; it needs python3 on PATH and bin/firstmate-tui/node_modules (npm ci in bin/firstmate-tui)"
 fi
