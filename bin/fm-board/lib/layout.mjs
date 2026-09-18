@@ -13,11 +13,11 @@ export const PANES = [
 export const MIN_ROWS = 20;
 export const MIN_COLS = 40;
 export const LIST_BREAKPOINT = 80; // below: one scrolling list with section headers
-export const WIDE_BREAKPOINT = 100; // below: drop REPO and AGE
+export const WIDE_BREAKPOINT = 100; // below: drop REPO and AGE (Ready for review: drop BASE, keep AGE)
 
 // Column labels per pane for the two narrow leading columns.
 const TAG_LABEL = { needs: 'STATE', review: 'CHECKS', inflight: 'STATE', findings: 'KIND', landed: 'VERB' };
-const EXTRA_LABEL = { needs: 'KEY', review: 'REVIEW', inflight: 'HERDR', findings: 'VERB', landed: 'DATE' };
+const EXTRA_LABEL = { needs: 'KEY', review: 'STATUS', inflight: 'HERDR', findings: 'VERB', landed: 'DATE' };
 
 export function layoutMode(cols) {
   return cols < LIST_BREAKPOINT ? 'list' : 'panes';
@@ -31,22 +31,43 @@ export const TAG_WIDTH_MAX = 14; // "awaiting merge"
 // keep the same width in every pane so the grid lines up across the board;
 // the renderer passes one `tagWidth` for the whole board (the widest STATE
 // word on it, between TAG_WIDTH_MIN and TAG_WIDTH_MAX).
+//
+// Two column sets share the leading STATE/INFO/ID columns:
+//   shared            ... WHAT (flex) REPO HOME AGE; below WIDE_BREAKPOINT
+//                     REPO and AGE go and HOME narrows
+//   Ready for review  ... TITLE (flex) BASE AGE: the PR's title, base branch
+//                     and age, no REPO or HOME (repo, home and url stay on the
+//                     row for enter and the notices); below WIDE_BREAKPOINT
+//                     BASE goes first and AGE stays, since the age is the
+//                     column the captain reads the pane by
+// BASE is as wide as HOME so the two trailing columns line up across panes.
+// In list mode (below LIST_BREAKPOINT) every pane shares one header and the
+// shared set, so the renderer only ever asks for the shared set there.
 export function columns(cols, innerWidth, paneId, tagWidth = TAG_WIDTH_MIN) {
   const mode = layoutMode(cols);
   const wide = cols >= WIDE_BREAKPOINT;
   const spec = [{ key: 'tag', label: mode === 'panes' ? TAG_LABEL[paneId] || 'STATE' : 'STATE', width: Math.min(TAG_WIDTH_MAX, Math.max(TAG_WIDTH_MIN, tagWidth | 0)) }];
   if (mode === 'panes') spec.push({ key: 'extra', label: EXTRA_LABEL[paneId] || 'INFO', width: 9 });
   spec.push({ key: 'id', label: 'ID', width: 22 });
-  spec.push({ key: 'text', label: paneId === 'findings' ? 'REPORT' : 'WHAT', width: 0, flex: true });
-  if (wide) spec.push({ key: 'repo', label: 'REPO', width: 18 });
-  spec.push({ key: 'home', label: 'HOME', width: wide ? 20 : 14 });
-  if (wide) spec.push({ key: 'age', label: 'AGE', width: 5, align: 'right' });
+  if (mode === 'panes' && paneId === 'review') {
+    spec.push({ key: 'text', label: 'TITLE', width: 0, flex: true });
+    if (wide) spec.push({ key: 'base', label: 'BASE', width: 20 });
+    spec.push({ key: 'age', label: 'AGE', width: 5, align: 'right' });
+  } else {
+    spec.push({ key: 'text', label: paneId === 'findings' ? 'REPORT' : 'WHAT', width: 0, flex: true });
+    if (wide) spec.push({ key: 'repo', label: 'REPO', width: 18 });
+    spec.push({ key: 'home', label: 'HOME', width: wide ? 20 : 14 });
+    if (wide) spec.push({ key: 'age', label: 'AGE', width: 5, align: 'right' });
+  }
   // Shrink fixed columns until the flex column has room to say something.
   const fixed = () => spec.filter((c) => !c.flex).reduce((n, c) => n + c.width, 0) + (spec.length - 1);
-  const idCol = spec.find((c) => c.key === 'id');
-  while (innerWidth - fixed() < 16 && idCol.width > 12) idCol.width -= 1;
-  const homeCol = spec.find((c) => c.key === 'home');
-  while (innerWidth - fixed() < 12 && homeCol.width > 8) homeCol.width -= 1;
+  const shrink = (key, min, need) => {
+    const col = spec.find((c) => c.key === key);
+    while (col && innerWidth - fixed() < need && col.width > min) col.width -= 1;
+  };
+  shrink('id', 12, 16);
+  shrink('home', 8, 12);
+  shrink('base', 8, 12);
   const flexWidth = Math.max(4, innerWidth - fixed());
   return spec.map((c) => (c.flex ? { ...c, width: flexWidth } : c));
 }
