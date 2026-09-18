@@ -58,7 +58,7 @@
 
 import { buildModel, initialPrs, mergePrs, parseTarget, prsFailureText } from './model.mjs';
 import { renderFrame } from './render.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot } from './sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
 import { focusProblem, handleKey, handleMouse, moveSelection, viewProblem } from './controller.mjs';
@@ -168,6 +168,7 @@ export async function runApp(opts) {
       loadingFrame: state.loadingFrame,
     },
     mtime,
+    statusVerbs,
   });
 
   const rebuild = () => {

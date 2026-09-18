@@ -15,7 +15,9 @@
 //                 unless --no-prs; fetchedAt is null until the first fetch of a
 //                 session lands). A candidate is {num, repo, task, url, review,
 //                 mergeable, checks} plus, from gh only (absent from the
-//                 fm-bearings-snapshot.sh fallback): created_at, merged_at,
+//                 fm-bearings-snapshot.sh fallback): merge_state (GitHub's
+//                 mergeStateStatus, CLEAN, DIRTY, BLOCKED, ... or null),
+//                 created_at, merged_at,
 //                 closed_at (ISO 8601), title, base (the base branch), draft
 //                 (boolean), state (OPEN, MERGED or CLOSED), author (a login or
 //                 null), labels (strings), requested (the identity was asked
@@ -35,6 +37,9 @@
 //                 app's 10 Hz tick count, a fixture's refresh.loading_frame;
 //                 never wall-clock, so a one-shot frame is deterministic)
 //   mtime(path)   epoch seconds of a file's last write, or null
+//   statusVerbs(path)  the verbs of a task's status log in file order
+//                 (['working', 'done', 'working']), or null when it cannot be
+//                 read; only isRepairing reads it
 //
 // Options (second argument of buildModel):
 //   expanded      Set of In flight group keys currently expanded
@@ -214,16 +219,142 @@ function taskBacklogState(task, backlogById) {
 // Green-unmerged: the worker said done with a PR and its backlog row is still
 // open, so the PR awaits the captain's merge. Secondmate agents answer many
 // requests with "done" lines and mention PRs they did not raise, so that kind
-// never qualifies (their work surfaces through their own ledger). Shared by
-// the Needs you merge? row and the In flight "awaiting merge" state.
+// never qualifies (their work surfaces through their own ledger). The In
+// flight "awaiting merge" state; the Needs you review row widens the same
+// test to a paused task (parkedForCaptain) and then asks GitHub whether the
+// PR is really ready.
 function awaitingMerge(task, backlogById) {
   const cs = task.current_state || {};
   if (task.kind === 'secondmate' || cs.state !== 'done' || !(task.pr && task.pr.url)) return false;
   return taskBacklogState(task, backlogById) !== 'done';
 }
 
+// Parked for the captain: the worker is finished (`done`) or firstmate parked
+// the task on the captain (`paused`, e.g. "paused: awaiting captain
+// approve-and-label"). A working, blocked, failed or unknown task is not.
+const PARKED_STATES = new Set(['done', 'paused']);
+
+function parkedForCaptain(state) {
+  return PARKED_STATES.has(String(state || ''));
+}
+
+// A main-home task whose PR is the captain's to look at: parked, a recorded PR
+// and an open backlog row (the same open-row test awaitingMerge uses).
+function parkedWithPr(task, backlogById) {
+  const cs = task.current_state || {};
+  if (task.kind === 'secondmate' || !parkedForCaptain(cs.state) || !(task.pr && task.pr.url)) return false;
+  return taskBacklogState(task, backlogById) !== 'done';
+}
+
+// Repairing: a task with a recorded PR that is working again after it once
+// said done (a merge-conflict repair, a re-resolve after review). The status
+// log is the one record of that history (the snapshot carries only the
+// current state and the last event), so this is the one place the board
+// reads a log's lines. Defined once for the main home (the task record's
+// status_log path) and for a secondmate child (`<home>/state/<id>.status`,
+// the file childStatusAge dates); an unreadable log (a remote home, no file)
+// is never repairing.
+function repairingFromLog(facts, state, url, path) {
+  if (!url || String(state || '') !== 'working' || !path) return false;
+  const verbs = facts.statusVerbs(path);
+  return Array.isArray(verbs) && verbs.includes('done');
+}
+
+function isRepairing(facts, task) {
+  const cs = task.current_state || {};
+  const path = task.paths && task.paths.status_log ? task.paths.status_log.path : null;
+  return repairingFromLog(facts, cs.state, task.pr && task.pr.url, path);
+}
+
+function childRepairing(facts, ledger, id, state, url) {
+  if (!ledger || !ledger.home || !id || ledger.remote) return false;
+  return repairingFromLog(facts, state, url, `${ledger.home}/state/${id}.status`);
+}
+
+// The PR of a secondmate child, from the one ledger field that names a
+// child's PR: contributions.captain[] (fm-contributions.sh, folded into the
+// home summary), each { task, url, kind: 'pr' | 'issue', reason, hold }, the
+// forge contributions whose next actor is the captain. active_children and
+// endpoints carry no PR field. null when the ledger has no such entry.
+function childPrUrl(ledger, id) {
+  const summary = ledger && ledger.summary ? ledger.summary : {};
+  const list = summary.contributions && Array.isArray(summary.contributions.captain) ? summary.contributions.captain : [];
+  const hit = list.find((c) => c && c.task === id && (c.kind === undefined || c.kind === 'pr') && typeof c.url === 'string' && /\/pull\/\d+/.test(c.url));
+  return hit ? hit.url : null;
+}
+
+// The state of every task record of one ledger, by id: endpoints carry every
+// record (done and paused ones included), active_children the working ones;
+// a child in both reads the endpoint's state.
+function ledgerChildStates(ledger) {
+  const summary = ledger && ledger.summary ? ledger.summary : {};
+  const out = new Map();
+  for (const c of Array.isArray(summary.active_children) ? summary.active_children : []) if (c && c.id) out.set(c.id, c.state || 'working');
+  for (const e of Array.isArray(summary.endpoints) ? summary.endpoints : []) if (e && e.id) out.set(e.id, e.state || out.get(e.id) || 'unknown');
+  return out;
+}
+
+// What GitHub says about a fetched PR, for the review row and the READY /
+// REPAIRING words:
+//   finished     merged or closed
+//   conflicting  mergeable CONFLICTING, or a DIRTY merge state
+//   ready        mergeable MERGEABLE and not DIRTY. BLOCKED (a required
+//                review missing) and UNSTABLE (checks failing) count as
+//                ready: the review is the captain's own step and CHECKS
+//                shows the checks. A draft is not excluded: a worker that
+//                parked on a draft still asks for the captain's eyes
+//   unknown      GitHub has not computed mergeability yet
+// null when no fetched record is at hand (fetch off, failed, or the PR not
+// in the fetched set): the caller falls back to the task state.
+function prReadiness(c) {
+  if (!c) return null;
+  const status = prStatus(c);
+  if (status === 'MERGED' || status === 'CLOSED') return 'finished';
+  const mergeable = String(c.mergeable || 'UNKNOWN').toUpperCase();
+  const mergeState = String(c.merge_state || c.mergeStateStatus || '').toUpperCase();
+  if (mergeable === 'CONFLICTING' || mergeState === 'DIRTY') return 'conflicting';
+  if (mergeable === 'MERGEABLE') return 'ready';
+  return 'unknown';
+}
+
+// The fetched candidates by URL, when the fetch is on and landed; a My PRs
+// record wins over a To review copy of the same PR.
+function fetchedByUrl(prs) {
+  const out = new Map();
+  if (!prs || !prs.enabled || !Array.isArray(prs.candidate_prs)) return out;
+  for (const c of prs.candidate_prs) {
+    if (!c || !c.url) continue;
+    const pane = c.pane || 'mine';
+    if (!out.has(c.url) || pane === 'mine') out.set(c.url, c);
+  }
+  return out;
+}
+
+// Every fleet task that recorded a PR, by URL, with what the READY /
+// REPAIRING words need: main-home task records (not the secondmate agents'
+// mentions) and secondmate children named by their ledger's contributions.
+// { id, parked, repairing }. (Whether the task's backlog row is still open is
+// mineRows' own test, through recordedPrs.)
+function fleetPrTasks(facts) {
+  const snap = facts.snapshot || {};
+  const out = new Map();
+  for (const task of Array.isArray(snap.tasks) ? snap.tasks : []) {
+    if (task.kind === 'secondmate' || !(task.pr && task.pr.url)) continue;
+    const cs = task.current_state || {};
+    out.set(task.pr.url, { id: task.id, parked: parkedForCaptain(cs.state), repairing: isRepairing(facts, task) });
+  }
+  for (const ledger of facts.ledgers || []) {
+    for (const [id, state] of ledgerChildStates(ledger)) {
+      const url = childPrUrl(ledger, id);
+      if (!url || out.has(url)) continue;
+      out.set(url, { id, parked: parkedForCaptain(state), repairing: childRepairing(facts, ledger, id, state, url) });
+    }
+  }
+  return out;
+}
+
 // The keyed decisions and the blocked event of one task record, as rows
-// (without the merge? row). Needs you lists them for main-home workers; a
+// (without the review row). Needs you lists them for main-home workers; a
 // secondmate record's rows go under its In flight group instead.
 function taskDecisionRows(facts, task, decisions = null) {
   const rows = [];
@@ -270,7 +401,11 @@ function taskDecisionRows(facts, task, decisions = null) {
 // firstmate needs from him. A secondmate's own decisions (its ledger's
 // decisions_open, and the keyed decisions its task record relays into the
 // main home's status log) flag its In flight group instead and list under it
-// when expanded; --all-homes-needs restores them here.
+// when expanded; --all-homes-needs restores them here. The `review` rows are
+// the exception: a PR parked for the captain is his to review whichever home
+// raised it, so they come from the main home's task records and from every
+// secondmate ledger, flag or not (reviewRow says when one lists). A task
+// yields at most one row of that kind; the old merge? row is gone.
 function needsRows(facts, opts) {
   const rows = [];
   const snap = facts.snapshot || {};
@@ -278,26 +413,50 @@ function needsRows(facts, opts) {
   const backlog = snap.backlog && Array.isArray(snap.backlog.records) ? snap.backlog.records : [];
   const backlogById = backlogIndex(snap);
 
+  const fetched = fetchedByUrl(facts.prs);
+
   for (const task of tasks) {
     if (task.kind !== 'secondmate' || opts.allHomesNeeds) rows.push(...taskDecisionRows(facts, task));
-    if (awaitingMerge(task, backlogById)) {
+    if (parkedWithPr(task, backlogById)) {
+      const row = backlogById.get(task.id);
       const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
-      const pr = repoFromUrl(task.pr.url);
-      rows.push(
-        makeRow({
-          tag: 'merge?',
-          extra: pr ? `#${pr.num}` : '-',
-          id: task.id,
-          text: `PR ready: ${task.pr.url}`,
-          repo: pr ? pr.repo : taskRepo(task),
-          ageSeconds: statusLogAge(facts, task),
-          paneId: herdr.paneId,
-          lost: herdr.lost,
-          unknown: herdr.unknown,
-          focusable: Boolean(herdr.paneId),
-          url: task.pr.url,
-        }),
-      );
+      const review = reviewRow(facts, fetched, {
+        id: task.id,
+        url: task.pr.url,
+        title: (row && row.title) || (task.backlog && task.backlog.title) || null,
+        ageSeconds: statusLogAge(facts, task),
+        herdr,
+        focusable: Boolean(herdr.paneId),
+      });
+      if (review) rows.push(review);
+    }
+  }
+
+  // Secondmate children parked with a PR the ledger names (childPrUrl), from
+  // every ledger and without a flag: the PR is the captain's whichever home
+  // raised it. A remote home's pane cannot be focused from here.
+  for (const ledger of facts.ledgers || []) {
+    const summary = ledger.summary || {};
+    const endpoints = Array.isArray(summary.endpoints) ? summary.endpoints : [];
+    const holdsById = new Map((Array.isArray(summary.holds) ? summary.holds : []).map((h) => [h.id, h]));
+    for (const [id, state] of ledgerChildStates(ledger)) {
+      if (!parkedForCaptain(state)) continue;
+      const url = childPrUrl(ledger, id);
+      if (!url) continue;
+      const ep = endpoints.find((e) => e && e.id === id);
+      const herdr = herdrColumn(facts, ep && ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) });
+      const hold = holdsById.get(id);
+      const review = reviewRow(facts, fetched, {
+        id,
+        url,
+        title: hold && hold.title ? hold.title : null,
+        ageSeconds: childStatusAge(facts, ledger, id),
+        herdr,
+        focusable: Boolean(herdr.paneId) && !ledger.remote,
+        home: homeLabel(ledger),
+        homeId: homeIdOf(ledger),
+      });
+      if (review) rows.push(review);
     }
   }
 
@@ -323,11 +482,46 @@ function needsRows(facts, opts) {
     }
   }
 
-  const order = { blocked: 0, decide: 1, hold: 2, 'merge?': 3 };
+  const order = { blocked: 0, decide: 1, hold: 2, review: 3 };
   return rows
     .map((r, i) => ({ r, i }))
     .sort((a, b) => (order[a.r.tag] ?? 9) - (order[b.r.tag] ?? 9) || a.i - b.i)
     .map((x) => x.r);
+}
+
+// The Needs you `review` row of one parked task with a PR, or null when the
+// PR is not the captain's to review: GitHub reports it finished (merged or
+// closed, the 12-hour tail included) or conflicting (a worker's repair, not a
+// review). With a fetched record that says ready the WHAT text ends in the
+// CHECKS state and AGE is the plain time since the task parked; with no
+// record at hand (fetch off, failed, the PR not in the fetched set) or one
+// whose mergeability GitHub has not computed, the row lists on the task state
+// alone and AGE carries the fallback `~`, as the PR panes mark a stand-in
+// age. `enter` opens the PR (url); the herdr fields are the worker's pane.
+function reviewRow(facts, fetched, { id, url, title, ageSeconds, herdr, focusable, home = MAIN_HOME_LABEL, homeId = MAIN_HOME_LABEL }) {
+  const c = fetched.get(url) || null;
+  const readiness = prReadiness(c);
+  if (readiness === 'finished' || readiness === 'conflicting') return null;
+  const pr = repoFromUrl(url);
+  const label = pr ? `${pr.repo}#${pr.num}` : url;
+  const what = (c && c.title) || title || null;
+  const checks = readiness === 'ready' && c.checks ? ` · checks ${c.checks}` : '';
+  return makeRow({
+    tag: 'review',
+    extra: pr ? `#${pr.num}` : '-',
+    id,
+    text: `${label}${what ? ` · ${what}` : ''}${checks}`,
+    repo: pr ? pr.repo : '-',
+    home,
+    homeId,
+    ageSeconds,
+    ageFallback: readiness !== 'ready',
+    paneId: herdr.paneId,
+    lost: herdr.lost,
+    unknown: herdr.unknown,
+    focusable,
+    url,
+  });
 }
 
 // ------------------------------------------------------ My PRs, To review
@@ -362,11 +556,27 @@ function needsRows(facts, opts) {
 export const TERMINAL_WINDOW_SECONDS = 12 * 3600;
 
 // The STATUS column's words, in the order the panes list them: open work
-// first (a PR the identity already reviewed after the ones still waiting),
-// then what finished. '-' is a recorded PR the fetch did not list (or the
-// fetch is off), whose status is unknown; it sits between the two.
-export const REVIEW_STATUSES = ['DRAFT', 'IN REVIEW', 'CHANGES REQUESTED', 'APPROVED', 'CLOSED', 'MERGED'];
-const STATUS_ORDER = { DRAFT: 0, 'IN REVIEW': 1, 'CHANGES REQUESTED': 2, APPROVED: 3, '-': 4, CLOSED: 5, MERGED: 6 };
+// first (READY, a fleet task's PR waiting on the captain, ahead of the rest;
+// a PR the identity already reviewed after the ones still waiting; REPAIRING,
+// a fleet task's PR its worker is fixing, last of the open ones), then what
+// finished. '-' is a recorded PR the fetch did not list (or the fetch is
+// off), whose status is unknown; it sits between the two.
+export const REVIEW_STATUSES = ['READY', 'DRAFT', 'IN REVIEW', 'CHANGES REQUESTED', 'APPROVED', 'REPAIRING', 'CLOSED', 'MERGED'];
+const STATUS_ORDER = { READY: 0, DRAFT: 1, 'IN REVIEW': 2, 'CHANGES REQUESTED': 3, APPROVED: 4, REPAIRING: 5, '-': 6, CLOSED: 7, MERGED: 8 };
+
+// The STATUS of an open PR that belongs to a fleet task (fleetPrTasks), so My
+// PRs and Needs you agree: READY when the task is parked for the captain and
+// GitHub reports the PR ready (prReadiness); REPAIRING when the task is
+// working again after a done line (isRepairing) or GitHub reports the PR
+// conflicting, whatever the task state. Otherwise the PR's own status, as for
+// a PR no task recorded. A finished PR keeps MERGED or CLOSED.
+function fleetStatus(c, status, task) {
+  if (!task || status === 'MERGED' || status === 'CLOSED') return status;
+  const readiness = prReadiness(c);
+  if (task.repairing || readiness === 'conflicting') return 'REPAIRING';
+  if (task.parked && readiness === 'ready') return 'READY';
+  return status;
+}
 
 export const IDENTITY_UNKNOWN_TEXT = 'identity unknown: see Settings (.)';
 export const SCOPE_EMPTY_TEXT = 'no repositories in scope: see Settings (.)';
@@ -503,7 +713,7 @@ function byNewest(a, b) {
 function byStatus(rows) {
   return rows
     .map((r, i) => ({ r, i }))
-    .sort((a, b) => (STATUS_ORDER[a.r.status] ?? 4) - (STATUS_ORDER[b.r.status] ?? 4) || byNewest(a.r, b.r) || a.i - b.i)
+    .sort((a, b) => (STATUS_ORDER[a.r.status] ?? STATUS_ORDER['-']) - (STATUS_ORDER[b.r.status] ?? STATUS_ORDER['-']) || byNewest(a.r, b.r) || a.i - b.i)
     .map((x) => x.r);
 }
 
@@ -537,6 +747,7 @@ function mineRows(facts) {
   const snap = facts.snapshot || {};
   const taskById = new Map((Array.isArray(snap.tasks) ? snap.tasks : []).map((t) => [t.id, t]));
   const unlisted = unlistedChecks(prs);
+  const fleet = fleetPrTasks(facts);
   const seen = new Set();
   for (const c of paneCandidates(prs, 'mine')) {
     seen.add(c.url);
@@ -545,7 +756,7 @@ function mineRows(facts) {
     if (terminal && !insideWindow(c, status, facts.now)) continue;
     const rec = byUrl.get(c.url);
     if (rec && rec.done && !terminal) continue;
-    rows.push(fetchedPrRow(facts, taskById, c, rec, status));
+    rows.push(fetchedPrRow(facts, taskById, c, rec, fleetStatus(c, status, fleet.get(c.url))));
   }
   for (const r of recorded) {
     if (seen.has(r.url) || r.done) continue;
@@ -623,6 +834,9 @@ function prPaneEmpty(facts, pane) {
 //                     and in-flight children that are parked, paused or blocked
 //   decisions_open[]  {id, key, verb, summary, reason, hold_bucket, ...}
 //   queued[]          {id, title, repo, kind, hold_*}
+//   contributions     {captain[]: {task, url, kind, reason, hold}, ...}  the
+//                     forge contributions whose next actor is the captain;
+//                     the one field naming a child's PR (childPrUrl)
 // The handoff that delegates an item (fm-backlog-handoff.sh -> tasks-axi mv)
 // moves the backlog block byte-exact and writes no origin marker; a child's
 // task id IS the mate's backlog item id, and nothing in the ledger, the fleet
@@ -640,8 +854,18 @@ function prPaneEmpty(facts, pane) {
 // Worst-state ranking for a group row: blocked > decision > working > failed >
 // everything else (idle, unknown, done, parked). A failed child is the mate's
 // own cleanup, so it does not outrank live work; it shows on expansion.
-const STATE_RANK = { blocked: 0, failed: 3, decide: 1, 'needs-decision': 1, hold: 1, working: 2 };
-const INFLIGHT_ORDER = { working: 0, blocked: 1, decide: 1, 'needs-decision': 1, hold: 1, unknown: 2, 'awaiting merge': 3, done: 3, failed: 4 };
+const STATE_RANK = { blocked: 0, failed: 3, decide: 1, 'needs-decision': 1, hold: 1, working: 2, 'repairing PR': 2 };
+const INFLIGHT_ORDER = { working: 0, 'repairing PR': 0, blocked: 1, decide: 1, 'needs-decision': 1, hold: 1, unknown: 2, 'awaiting merge': 3, done: 3, failed: 4 };
+
+// The STATE word of a task with a recorded PR: `awaiting merge` for a done
+// main-home task whose backlog row is open (awaitingMerge), `repairing PR`
+// for one working again after a done line (isRepairing / childRepairing),
+// else firstmate's own state word.
+function prStateTag(state, { awaiting = false, repairing = false }) {
+  if (awaiting) return 'awaiting merge';
+  if (repairing) return 'repairing PR';
+  return state || 'unknown';
+}
 const FLAG_TAGS = new Set(['blocked', 'decide', 'needs-decision', 'hold']);
 const TERMINAL_TAGS = new Set(['done', 'failed']);
 
@@ -692,7 +916,7 @@ function mainTaskRow(facts, task, backlogById = new Map()) {
   const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
   const doing = cs.detail || (task.hints && task.hints.last_event_text) || (task.paths && task.paths.status_log && task.paths.status_log.last_event && task.paths.status_log.last_event.note) || '';
   return makeRow({
-    tag: awaitingMerge(task, backlogById) ? 'awaiting merge' : cs.state || 'unknown',
+    tag: prStateTag(cs.state, { awaiting: awaitingMerge(task, backlogById), repairing: isRepairing(facts, task) }),
     extra: herdr.extra,
     id: task.id,
     text: `${kindPrefix(task.kind)}${doing}`,
@@ -724,9 +948,10 @@ function ledgerChildRows(facts, ledger, decisionByChild) {
     const herdr = herdrColumn(facts, ep && ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) });
     const d = decisionByChild.get(child.id);
     const h = holdsById.get(child.id);
+    const childState = child.state || 'working';
     rows.push(
       makeRow({
-        tag: d ? decisionTag(d.verb) : child.state || 'working',
+        tag: d ? decisionTag(d.verb) : prStateTag(childState, { repairing: childRepairing(facts, ledger, child.id, childState, childPrUrl(ledger, child.id)) }),
         extra: herdr.extra,
         id: child.id,
         text: d ? decisionText(d) : h && h.title ? heldText(h) : `${kindPrefix(child.kind)}${child.doing || child.name || ''}`,
@@ -746,9 +971,10 @@ function ledgerChildRows(facts, ledger, decisionByChild) {
     const herdr = herdrColumn(facts, ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) });
     const d = decisionByChild.get(ep.id);
     const h = holdsById.get(ep.id);
+    const epState = ep.state || 'unknown';
     rows.push(
       makeRow({
-        tag: d ? decisionTag(d.verb) : ep.state || 'unknown',
+        tag: d ? decisionTag(d.verb) : prStateTag(epState, { repairing: childRepairing(facts, ledger, ep.id, epState, childPrUrl(ledger, ep.id)) }),
         extra: herdr.extra,
         id: ep.id,
         text: d ? decisionText(d) : h && h.title ? heldText(h) : `endpoint ${ep.endpoint && ep.endpoint.target ? ep.endpoint.target : '?'} (${ep.source || 'pane'})`,
@@ -1203,6 +1429,7 @@ export function buildModel(facts, options = {}) {
     prs: facts.prs || { enabled: false },
     refresh: facts.refresh || null,
     mtime: typeof facts.mtime === 'function' ? facts.mtime : () => null,
+    statusVerbs: typeof facts.statusVerbs === 'function' ? facts.statusVerbs : () => null,
   };
   const builders = { needs: needsRows, mine: mineRows, inflight: inflightRows, findings: findingsRows, landed: landedRows, toreview: toReviewRows };
   const panes = PANES.map((p, i) => {

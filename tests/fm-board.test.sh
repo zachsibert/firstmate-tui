@@ -94,6 +94,14 @@
 #                   IN REVIEW, APPROVED, CLOSED, MERGED), a merged PR 11h59m and
 #                   one 12h01m before now, an open PR of a done task, a closed PR
 #                   with no time stamp, a closed draft and an unlisted recorded PR
+#   review-rows.json  160x60, Needs you review rows and the words that go
+#                   with them: a done and a paused main-home task with clean
+#                   open PRs, a task repairing a conflicting PR after a done
+#                   line (status_logs), one on its first pass, a closed and a
+#                   merged PR inside the tail, a secondmate ledger naming a
+#                   parked child's PR and a repairing child's through
+#                   contributions.captain, and a blocked worker, a keyed
+#                   decision and a live hold for the sort
 #   column-widths.json  160x40, the column-spacing screenshot's shape: three
 #                   captain holds with a long organisation/repo name and HOME
 #                   main, seven live PRs with long titles and BASE main, three
@@ -336,11 +344,11 @@ assert_row "$frame" '^ firstmate-tui · /fixture/firstmate · 3 homes ' "the tit
 assert_row "$frame" '^│ blocked +- +scout-beta +blocked: gh auth expired +acme/api +main +2h │$' "blocked worker row with repo, home and age"
 assert_row "$frame" '^│ decide +db-choice +ship-alpha +Postgres or SQLite for the cache\? +acme/widgets +main +5m │$' "keyed decision row shows key, task, summary"
 assert_row "$frame" '^│ hold +- +decide-vendor +Pick the vendor for the address API · Two quotes in the report +acme/api +main +3d │$' "live captain hold row with title and reason"
-assert_row "$frame" '^│ merge\? +#7 +ship-gamma +PR ready: https://github.com/acme/api/pull/7 +acme/api +main +1m │$' "green-unmerged PR row"
+assert_row "$frame" '^│ review +#7 +ship-gamma +acme/api#7 · Retry on 429 from the address API +acme/api +main +1m~ │$' "green-unmerged PR row: a review row on the task state alone, since the fetch does not carry PR 7, so its age is marked ~ (falsify: bring the merge? row back, or drop the fallback in reviewRow)"
 assert_not_contains "$frame" "later-hold" "dated hold is not actionable and stays out of Needs you"
 assert_before "$frame" '^│ blocked +- +scout-beta' '^│ decide +db-choice' "blocked sorts before decide"
 assert_before "$frame" '^│ decide +db-choice' '^│ hold +- +decide-vendor' "decide sorts before hold"
-assert_before "$frame" '^│ hold +- +decide-vendor' '^│ merge\?' "hold sorts before merge?"
+assert_before "$frame" '^│ hold +- +decide-vendor' '^│ review ' "hold sorts before review"
 # Secondmate decisions stay out of Needs you by default and flag their In flight group instead
 # (falsify: drop the opts.allHomesNeeds guard in needsRows, or the flag in ledgerGroup).
 assert_not_contains "$frame" "etl-cutover" "secondmate captain hold is not in Needs you by default (and hyperion is collapsed)"
@@ -350,7 +358,7 @@ frame_all=$(render populated.json --all-homes-needs) || fail "populated --all-ho
 assert_contains "$frame_all" "Needs you (6)" "--all-homes-needs adds the secondmate ledger decision and the relayed one"
 assert_row "$frame_all" '^│ hold +- +etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +hyperion +1d │$' "--all-homes-needs: secondmate captain hold row labelled with its home"
 assert_row "$frame_all" '^│ decide +etl-window +hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record (the KEY column grows to fit the key; falsify: cap extra below 10 in columnSpec)"
-assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ merge\?' "--all-homes-needs: hold sorts before merge?"
+assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ review ' "--all-homes-needs: hold sorts before review"
 
 # My PRs with --no-prs: the recorded PRs only, tagged PR and marked off (falsify: drop the
 # --no-prs case in parseArgs, or the !prs.enabled branch in unlistedChecks).
@@ -460,7 +468,7 @@ assert_contains "$frame_k" "[2] My PRs  [3] Teammates' PRs  [4] In flight  [5] F
 assert_contains "$frame_k" "0            show every pane (with all six hidden the board lists these keys)" "help overlay documents 0 and the landing page"
 
 # Opening a PR: enter in My PRs, on a Needs-you PR row and on a Landed row with a PR,
-# through the injected opener only (falsify: drop the url field from reviewRows, the merge? row or
+# through the injected opener only (falsify: drop the url field from fetchedPrRow, reviewRow or
 # landedRows, drop the PR rung from landedTarget, or drop the 'open' case in keyAction). The opener
 # receives the exact URL as its only argument.
 frame_o=$(render_open populated.json "tab,enter") || fail "open review: render exited non-zero"
@@ -470,7 +478,7 @@ frame_o=$(render_open populated.json "tab,j,enter") || fail "open review second 
 assert_opened "https://github.com/acme/api/pull/8" "enter on the second My PRs row (the failing live candidate nobody recorded) opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/api/pull/8 (api#8)" "footer notice names the opened URL"
 frame_o=$(render_open populated.json "j,j,j,enter") || fail "open needs enter: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/7" "enter on the Needs-you merge? row opens its PR"
+assert_opened "https://github.com/acme/api/pull/7" "enter on the Needs-you review row opens its PR"
 frame_o=$(render_open populated.json "tab,tab,tab,tab,enter") || fail "open landed enter: render exited non-zero"
 assert_opened "https://github.com/acme/etl/pull/12" "enter on the first Landed row opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/etl/pull/12 (etl-index)" "footer notice names the Landed URL"
@@ -1184,9 +1192,85 @@ assert_row "$frame_st_90" '^│ failing +IN REVIEW +api#203 +Retry on 429 +1h �
 assert_widths "$frame_st_90" 90 "90-column pr-status frame lines are 90 columns"
 frame_st_70=$(render pr-status.json --cols 70 --rows 30) || fail "pr-status 70: render exited non-zero"
 assert_row "$frame_st_70" '^ STATE +ID +WHAT +HOME *$' "70 columns: the list shares one header across panes"
-assert_row "$frame_st_70" '^ pending +st-draft +Rework the geocoder cache with a… +main *$' "70 columns: a review row in the shared list (HOME is 4 wide for main and ends the line)"
+assert_row "$frame_st_70" '^ pending +st-draft +Rework the geocoder cache with a two-t… +main *$' "70 columns: a review row in the shared list (HOME is 4 wide for main and ends the line; the shared STATE column is as wide as the widest state word on the frame, IN REVIEW, so a fixture task reading awaiting merge would narrow WHAT again)"
 assert_not_contains "$frame_st_70" "DRAFT" "70 columns: the list has no STATUS column"
 assert_widths "$frame_st_70" 70 "70-column pr-status frame lines are 70 columns"
+
+# ------------------------------------------------------------ review rows
+# tests/fixtures/review-rows.json: parked tasks with a PR in the main home and in a secondmate
+# ledger, a task repairing its PR, one on its first pass, a closed and a merged PR inside the
+# 12-hour tail, and all four Needs you tags.
+frame_rv=$(render review-rows.json) || fail "review-rows: render exited non-zero"
+frame_rv_x=$(render review-rows.json --expand all) || fail "review-rows --expand all: render exited non-zero"
+frame_rv_np=$(render review-rows.json --no-prs) || fail "review-rows --no-prs: render exited non-zero"
+# Needs you: one review row per task parked for the captain whose PR GitHub reports open and
+# mergeable, WHAT `<repo>#<num> · <title> · checks <state>`, AGE the time since the task parked
+# with no ~ (falsify: drop the done branch of parkedWithPr, the checks suffix in reviewRow, or
+# set ageFallback true for a ready PR).
+assert_contains "$frame_rv" "Needs you (6)" "review-rows: blocked, decide, hold and three review rows"
+assert_row "$frame_rv" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter · checks passing +acme/api +main +10m │$' "a done task with a clean open PR is a review row with the checks state and a plain age"
+assert_row "$frame_rv" '^│ review +#22 +ship-paused +acme/api#22 · Rate-limit headers on every list endpoint · checks pending +acme/api +main +25m │$' "a task firstmate paused on the captain counts as parked (falsify: drop paused from PARKED_STATES)"
+assert_row "$frame_rv" '^│ review +#61 +child-ready +acme/etl#61 · ETL: nightly loader · checks passing +acme/etl +hyperion +40m │$' "a secondmate child parked with the PR its ledger's contributions.captain names is a review row labelled with its home, without --all-homes-needs (falsify: gate the ledger loop behind opts.allHomesNeeds, or read active_children alone)"
+assert_no_row "$frame_rv" '^│ review +#23 ' "a task working again on a conflicting PR has no review row (falsify: drop the conflicting return in reviewRow)"
+assert_no_row "$frame_rv" '^│ review +#62 ' "a secondmate child repairing its PR has no review row"
+assert_no_row "$frame_rv" '^│ review +#24 ' "a PR closed 1h ago, inside the tail, yields no review row (falsify: drop the finished return in reviewRow)"
+assert_no_row "$frame_rv" '^│ review +#25 ' "a PR merged 2h ago, inside the tail, yields no review row"
+assert_no_row "$frame_rv" '^│ review +#31 ' "a working task on its first pass has no review row (falsify: let parkedForCaptain accept working)"
+assert_not_contains "$frame_rv" "merge?" "the merge? row is gone: the review row replaces it (falsify: push the old merge? row in needsRows)"
+assert_count "$frame_rv" "#21 " 1 "ship-ready yields exactly one Needs you row: never a merge? and a review row for one task"
+# The sort: blocked, decide, hold, review (falsify: reorder `order` in needsRows).
+assert_before "$frame_rv" '^│ blocked +- +scout-block' '^│ decide +cache-ttl' "review-rows: blocked sorts before decide"
+assert_before "$frame_rv" '^│ decide +cache-ttl' '^│ hold +- +hold-vendor' "review-rows: decide sorts before hold"
+assert_before "$frame_rv" '^│ hold +- +hold-vendor' '^│ review +#21' "review-rows: hold sorts before review"
+# My PRs: READY for a parked task's clean open PR, REPAIRING for a working-again task or a
+# conflicting PR, today's words for the rest (falsify: drop fleetStatus from mineRows, or its
+# parked / repairing branches).
+assert_row "$frame_rv" '^│ passing +READY +ship-ready +Retry on 429 with jitter +main +3h │$' "My PRs reads READY for the done task's clean PR, so both panes agree"
+assert_row "$frame_rv" '^│ pending +READY +ship-paused +Rate-limit headers on every list endpoint +main +5h │$' "READY for the paused task's PR"
+assert_row "$frame_rv" '^│ passing +READY +etl#61 +ETL: nightly loader +main +1h │$' "READY for the secondmate child's PR the ledger names (falsify: skip the ledgers in fleetPrTasks)"
+assert_row "$frame_rv" '^│ passing +REPAIRING +ship-dirty +Bulk lookup endpoint +main +4h │$' "REPAIRING for a task working again on a conflicting PR"
+assert_row "$frame_rv" '^│ passing +REPAIRING +etl#62 +ETL: backfill the history +main +30m │$' "REPAIRING for the repairing secondmate child's PR"
+assert_row "$frame_rv" '^│ pending +IN REVIEW +ship-first +Widget cache warm-up +main +6h │$' "a working task on its first pass keeps IN REVIEW (falsify: drop the done check in repairingFromLog)"
+assert_row "$frame_rv" '^│ none +CLOSED +ship-closed +Abandoned retry budget spike +main +8h │$' "a closed PR of a done task keeps CLOSED"
+assert_row "$frame_rv" '^│ passing +MERGED +ship-merged +Geocoder timeout +main +9h │$' "a merged PR of a done task keeps MERGED"
+assert_count "$frame_rv" " READY " 3 "exactly three READY rows"
+assert_count "$frame_rv" " REPAIRING " 2 "exactly two REPAIRING rows"
+# The sort: READY ahead of every other open status, REPAIRING after them, the finished statuses
+# at the bottom, newest first inside a status (falsify: reorder STATUS_ORDER).
+assert_before "$frame_rv" '^│ passing +READY +etl#61' '^│ passing +READY +ship-ready' "inside READY the 1h-old PR sorts before the 3h-old one"
+assert_before "$frame_rv" '^│ pending +READY +ship-paused' '^│ pending +IN REVIEW +ship-first' "READY sorts before IN REVIEW"
+assert_before "$frame_rv" '^│ pending +IN REVIEW +ship-first' '^│ passing +REPAIRING +etl#62' "IN REVIEW sorts before REPAIRING"
+assert_before "$frame_rv" '^│ passing +REPAIRING +ship-dirty' '^│ none +CLOSED +ship-closed' "REPAIRING sorts before CLOSED"
+assert_before "$frame_rv" '^│ none +CLOSED +ship-closed' '^│ passing +MERGED +ship-merged' "CLOSED sorts before MERGED"
+# In flight: `repairing PR` for a task with a PR that is working again after a done line in its
+# status log, `working` for one on its first pass; the same for a secondmate child through its
+# ledger's PR and its home's status log (falsify: drop prStateTag from mainTaskRow or
+# ledgerChildRows, or read the current state alone).
+assert_row "$frame_rv" '^│ repairing PR +working +ship-dirty +merging main into the branch +acme/api +main +5m │$' "In flight reads repairing PR for the task working again on its PR"
+assert_row "$frame_rv" '^│ working +working +ship-first +waiting for the Test workflow +acme/widgets +main +1h │$' "a first-pass worker with a PR still reads working"
+assert_row "$frame_rv" '^│ paused +idle +ship-paused +awaiting captain approve-and-label +acme/api +main +25m │$' "a paused task keeps its own state word"
+assert_row "$frame_rv" '^│ awaiting merge +done +ship-ready +PR https://github.com/acme/api/pull/21 checks green +acme/api +main +10m │$' "awaiting merge is kept for the done task with an unmerged PR"
+assert_row "$frame_rv_x" '^│ repairing PR +working +↳ child-repair +resolving the conflict with main +acme/etl +hyperion +2m │$' "the expanded group lists the repairing child as repairing PR"
+assert_row "$frame_rv_x" '^│ repairing PR +1 live +▾ hyperion ' "the group row takes the repairing child's state, ranked with working"
+assert_before "$frame_rv" '^│ repairing PR +working +ship-dirty' '^│ blocked +blocked +scout-block' "in flight: repairing PR sorts with working, before blocked (falsify: drop repairing PR from INFLIGHT_ORDER)"
+# Without PR data the rows fall back to the task state: every parked task with a PR lists,
+# finished or not, with the ~ age mark and no checks word; the repairing state still comes from
+# the status log (falsify: drop the fallback in reviewRow, or make isRepairing need the fetch).
+assert_contains "$frame_rv_np" "Needs you (8)" "--no-prs: five review rows on the task state alone"
+assert_row "$frame_rv_np" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter +acme/api +main +10m~ │$' "--no-prs: the review row lists with the fallback ~ and no checks word"
+assert_row "$frame_rv_np" '^│ review +#24 +ship-closed +acme/api#24 · Abandoned retry budget spike +acme/api +main +2h~ │$' "--no-prs: a closed PR the board cannot see as closed lists on the task state, marked ~"
+assert_row "$frame_rv_np" '^│ review +#61 +child-ready +acme/etl#61 +acme/etl +hyperion +40m~ │$' "--no-prs: the child row has no title to show and reads the label alone"
+assert_not_contains "$frame_rv_np" "checks passing" "--no-prs: no checks word on any review row"
+assert_row "$frame_rv_np" '^│ repairing PR +working +ship-dirty ' "--no-prs: repairing PR comes from the status log, not GitHub"
+frame_rv_nc=$(render "$(variant review-rows.json prs-no-carry '{"prs": {"candidate_prs": []}}')") || fail "review-rows fetched without the PRs: render exited non-zero"
+assert_row "$frame_rv_nc" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter +acme/api +main +10m~ │$' "a fetch that does not carry the PR falls back to the task state with ~ (falsify: return null from reviewRow when fetched.get misses)"
+# enter on a review row opens its PR through the injected opener, the child's included
+# (falsify: drop url from reviewRow).
+frame_o=$(render_open review-rows.json "j,j,j,enter") || fail "review-rows open: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/21" "enter on the first review row opens its PR"
+frame_o=$(render_open review-rows.json "j,j,j,j,j,enter") || fail "review-rows open child: render exited non-zero"
+assert_opened "https://github.com/acme/etl/pull/61" "enter on the secondmate child's review row opens its PR"
+assert_widths "$frame_rv" 160 "review-rows frame lines are 160 columns"
 
 # ------------------------------------------------------------------- My PRs
 # The pane as the union (tests/fixtures/my-prs.json): the identity's own PRs whatever their
@@ -1202,7 +1286,7 @@ assert_row "$frame_mp" '^│ passing +IN REVIEW +ship-alpha +Add the widget cach
 assert_row "$frame_mp" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +1m~ │$' "my-prs: a recorded PR the fetch did not return keeps the - row with the file-time age"
 assert_row "$frame_mp" '^│ none +CLOSED +api#10 +Old spike +main +8h │$' "my-prs: the identity's PR closed 2h ago is listed as CLOSED"
 assert_row "$frame_mp" '^│ passing +MERGED +api#9 +Bump the retry budget +main +6h │$' "my-prs: the identity's PR merged 30m ago is listed as MERGED"
-assert_count "$frame_mp" "Retry on 429" 1 "my-prs: a toreview row draws once on the board"
+assert_count "$frame_mp" " api#8 " 1 "my-prs: a toreview row draws once on the board (its api#8 id; the Needs you review row of ship-gamma repeats the title, not the id)"
 assert_before "$frame_mp" "Teammates' PRs \(1\)" '^│ failing +IN REVIEW +api#8 .*Retry on 429' "my-prs: that one row is under the Teammates' PRs header, not in My PRs"
 assert_before "$frame_mp" '^│ passing +IN REVIEW +dotfiles#5' '^│ passing +IN REVIEW +ship-alpha' "my-prs: inside IN REVIEW the 3h-old PR sorts before the 5h-old one"
 assert_before "$frame_mp" '^│ passing +IN REVIEW +ship-alpha' '^│ unlisted +- +ship-gamma' "my-prs: the unlisted recorded PR sorts after the open rows"
@@ -2496,12 +2580,12 @@ assert_row "$buttons" '^left select$' "the same left-button press selects the ro
 # The wheel moves the selection three rows in the focused pane, whichever pane the pointer is over, and
 # clamps at the ends (falsify: change WHEEL_ROWS, or hit-test the wheel's pointer).
 frame_m=$(render_mouse populated.json "wheel:down:30,39" --keys "enter") || fail "mouse wheel: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/7" "wheel down over Landed moves the focused Needs you selection three rows to merge?, which enter opens"
+assert_opened "https://github.com/acme/api/pull/7" "wheel down over Landed moves the focused Needs you selection three rows to the review row, which enter opens"
 tags_m=$(render populated.json --mouse "wheel:down:30,39" --tags) || fail "mouse wheel --tags: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}merge\? ' "wheel down: the fourth Needs you row is selected"
+assert_row "$tags_m" '\{inverse\}review ' "wheel down: the fourth Needs you row is selected"
 assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[6\]' "wheel: the pane under the pointer is not focused"
 tags_m=$(render populated.json --mouse "wheel:up:30,39 wheel:down:30,39 wheel:down:30,39" --tags) || fail "mouse wheel clamp: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}merge\? ' "wheel up at the top stays, two wheel downs clamp at the last row"
+assert_row "$tags_m" '\{inverse\}review ' "wheel up at the top stays, two wheel downs clamp at the last row"
 tags_m=$(render populated.json --mouse "wheel:down:30,39 wheel:up:30,39" --tags) || fail "mouse wheel back: render exited non-zero"
 assert_row "$tags_m" '\{inverse\}blocked\{/inverse\}' "wheel down then up is back on the first row"
 # A wheel move breaks a double-click: click, wheel, click on the same row is two singles (falsify: keep
