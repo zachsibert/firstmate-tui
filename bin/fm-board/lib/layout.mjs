@@ -112,5 +112,7 @@ export function hitTest(frame, x, y) {
   if (zone.kind === 'row') return { kind: 'row', pane: zone.pane, row: zone.row };
   if (zone.kind === 'title') return { kind: 'title', pane: zone.pane };
   if (zone.kind === 'pane') return { kind: 'pane', pane: zone.pane };
+  // The Settings page (lib/settings.mjs): one of its selectable entries.
+  if (zone.kind === 'settings') return { kind: 'settings', entry: zone.entry };
   return null;
 }

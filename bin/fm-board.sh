@@ -10,7 +10,11 @@
 #                                      board starts in the pane this command was
 #                                      typed in, so split your herdr pane first to
 #                                      put it beside firstmate (`run` is accepted
-#                                      as a synonym for old launch lines)
+#                                      as a synonym for old launch lines); when the
+#                                      board exits 75 (the relaunch key on its
+#                                      Settings page after an upgrade) this script
+#                                      starts the copy at this path again, which
+#                                      is then the new one
 #   firstmate-tui open --detached [flags]
 #                                      open the board away from this terminal: a
 #                                      plugin tab pane in the current workspace
@@ -33,6 +37,7 @@
 #                               [--keys <list>] [--mouse <list>] [--expand <all|ids>]
 #                               [--opener-cmd <argv>] [--viewer-cmd <argv>]
 #                               [--view-state <file>] [--tags]
+#                               [--curl-cmd <argv>] [--install-root <dir>]
 #                                      print one frame to stdout and exit
 #   firstmate-tui --headless [flags]   run the refresh schedule with no terminal
 #                                      (test mode; stop it with a signal)
@@ -41,9 +46,10 @@
 # flag is passed through to bin/fm-board/index.mjs unchanged, after `open` or
 # with no subcommand alike; see `firstmate-tui --help` for the list (--home,
 # --refresh, --no-prs, --no-herdr, --no-mouse, --all-homes-needs,
-# --opener-cmd, --viewer-cmd, --view-state, --herdr-cmd, --herdr-socket,
-# --snapshot-timeout, --keys, --mouse, --expand, --tags, --headless; --prs is
-# accepted and does nothing, live PR data being the default).
+# --opener-cmd, --viewer-cmd, --view-state, --curl-cmd, --install-root,
+# --herdr-cmd, --herdr-socket, --snapshot-timeout, --keys, --mouse, --expand,
+# --tags, --headless; --prs is accepted and does nothing, live PR data being
+# the default).
 #
 # When this copy runs from an install (an install-record beside bin/) whose
 # recorded bin dir has an `fm-board` command but no `firstmate-tui` yet, which
@@ -77,6 +83,9 @@ ENTRY="$BOARD_DIR/index.mjs"
 PLUGIN_ID="firstmate.board"
 NAME=firstmate-tui
 OLD_NAME=fm-board
+# The board exits with this status on the relaunch key of its Settings page
+# (RELAUNCH_EXIT in bin/fm-board/lib/settings.mjs); run_board answers it.
+RELAUNCH_STATUS=75
 
 die() {
   printf '%s: %s\n' "$NAME" "$*" >&2
@@ -143,11 +152,12 @@ common flags, after `open` or with no subcommand:
 more flags, same places: --all-homes-needs, --opener-cmd <argv>, --viewer-cmd <argv>,
   --view-state <path>, --herdr-cmd <argv>, --herdr-socket <path>, --snapshot-timeout <s>;
   test mode: --render-once, --fixture <json>, --cols N, --rows N, --keys <list>,
-  --mouse <list>, --expand <all|ids>, --tags, --headless. The README's Launch section
-  explains each one.
+  --mouse <list>, --expand <all|ids>, --tags, --headless, --curl-cmd <argv>,
+  --install-root <dir>. The README's Launch section explains each one.
 
 The board reads the firstmate home in FM_HOME (export it first). Press ? inside the
-board for the keys.
+board for the keys, and . for the Settings page: the installed version, the latest
+release, an upgrade or a beta from inside the board (each install asks y first).
 EOF
   if [ -f "$RECORD" ]; then
     printf '\nthis install: %s (from %s); firstmate-tui upgrade replaces it\n' "$PREFIX_DIR" "$(record_get installed_from)"
@@ -275,6 +285,8 @@ case "$command" in
   version) show_version "$@"; exit 0 ;;
   upgrade) run_upgrade "$@" ;; # execs install.sh or dies
 esac
+# The flags as typed, for the relaunch below: the new copy resolves them itself.
+ORIG_ARGS=("$@")
 
 want_herdr=1
 render_once=0
@@ -294,7 +306,7 @@ while [ "$#" -gt 0 ]; do
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
-    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd)
+    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
   esac
@@ -491,8 +503,23 @@ focus_board() {
   printf 'focused %s\n' "$pane"
 }
 
+# run: node is a child rather than an exec so the board's exit status can be
+# read. RELAUNCH_STATUS means the captain pressed the relaunch key on the
+# Settings page after an in-board upgrade: this script starts the copy at its
+# own path again with the flags as typed, and since an install keeps its
+# prefix that copy is the newly installed one (a checkout simply restarts).
+# Every other status passes through unchanged.
+run_board() {
+  node "$ENTRY" "${pass[@]+"${pass[@]}"}"
+  local status=$?
+  if [ "$status" -eq "$RELAUNCH_STATUS" ]; then
+    exec bash "$ROOT/fm-board.sh" run "${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}"
+  fi
+  exit "$status"
+}
+
 case "$command" in
   open) open_detached ;; # plain open became run above; only --detached lands here
   focus) focus_board ;;
-  run) exec node "$ENTRY" "${pass[@]+"${pass[@]}"}" ;;
+  run) run_board ;;
 esac

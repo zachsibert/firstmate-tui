@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from './text.mjs';
 import { whichOnPath } from './viewer.mjs';
+import { parseReleases, RELEASES_PER_PAGE } from './settings.mjs';
 
 // Run a command to completion, bounded by timeoutMs. Resolves to { out, error }:
 // stdout on exit 0, else the last stderr line (or the timeout / spawn failure).
@@ -251,6 +252,21 @@ export async function fetchPrs(fmHome, snapshot, { timeoutMs, env = process.env 
   }
   if (!snapshot) return { candidate_prs: [], error: 'no fleet snapshot to name the candidate repositories', note: null };
   return runGhPrs(snapshot, { timeoutMs, env });
+}
+
+// The GitHub releases of the board's own repository, for the Settings page:
+// the latest stable release (GET /releases/latest, never a prerelease) and
+// the prereleases (GET /releases, newest first). Fetched only when the page
+// opens and on r inside it, never on the refresh tick. curl runs as an argv
+// spawn (`--curl-cmd`, default curl; tests point it at tests/fake-curl.sh),
+// and each reply is JSON.parse'd; a failed call keeps curl's last stderr line
+// as its error so the page can show it verbatim.
+export async function fetchReleases({ repo, curlCmd = null, timeoutMs = 20000 }) {
+  const argv = Array.isArray(curlCmd) && curlCmd.length ? curlCmd : ['curl'];
+  const api = `https://api.github.com/repos/${repo}/releases`;
+  const get = (url) => runJson(argv[0], [...argv.slice(1), '-fsSL', '--retry', '2', '--retry-delay', '1', '-H', 'Accept: application/vnd.github+json', url], { env: process.env, timeoutMs });
+  const [latest, list] = await Promise.all([get(`${api}/latest`), get(`${api}?per_page=${RELEASES_PER_PAGE}`)]);
+  return parseReleases({ latest, list });
 }
 
 // One secondmate ledger read. Returns { summary, error, generatedAt }.

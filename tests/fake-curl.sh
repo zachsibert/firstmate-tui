@@ -2,11 +2,14 @@
 # tests/fake-curl.sh - a stand-in for curl that serves GitHub from a directory.
 #
 # tests/install.test.sh copies this file to <dir>/curl and puts <dir> first on
-# PATH, so bin/install.sh resolves and downloads releases without the network.
-# The two curl shapes the installer uses are answered from $FAKE_CURL_ROOT:
+# PATH, so bin/install.sh resolves and downloads releases without the network;
+# tests/fm-board.test.sh passes it as `--curl-cmd` so the board's Settings
+# page reads its release list offline. The curl shapes they use are answered
+# from $FAKE_CURL_ROOT:
 #
 #   https://api.github.com/repos/<repo>/releases/latest        api/latest.json
 #   https://api.github.com/repos/<repo>/releases?per_page=1    api/newest.json
+#   https://api.github.com/repos/<repo>/releases[?per_page=N]  api/releases.json
 #   https://github.com/<repo>/releases/download/<tag>/<asset>  download/<tag>/<asset>
 #
 # -o <file> writes the answer to that file, otherwise it goes to stdout. Every
@@ -33,6 +36,7 @@ done
 case "$url" in
   https://api.github.com/repos/*/releases/latest) file="$FAKE_CURL_ROOT/api/latest.json" ;;
   https://api.github.com/repos/*/releases\?per_page=1) file="$FAKE_CURL_ROOT/api/newest.json" ;;
+  https://api.github.com/repos/*/releases|https://api.github.com/repos/*/releases\?*) file="$FAKE_CURL_ROOT/api/releases.json" ;;
   https://github.com/*/releases/download/*/*)
     rest=${url#https://github.com/}
     rest=${rest#*/*/releases/download/}

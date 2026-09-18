@@ -28,15 +28,24 @@
 // buffer, raw mode off, input paused), the viewer runs with inherited stdio,
 // and the screen is resumed and repainted when it exits. SIGINT is ignored by
 // the board meanwhile so a ctrl-c meant for the viewer never quits the board.
+//
+// The Settings page (`.`, lib/settings.mjs) fetches the GitHub releases API
+// through --curl-cmd when it opens and on r inside it, never on the tick; a
+// confirmed upgrade runs `bash <root>/bin/fm-board.sh upgrade ...` with piped
+// output and each line is drawn as it arrives; the relaunch key exits the
+// process with RELAUNCH_EXIT, which bin/fm-board.sh run answers by starting
+// the copy at the same path again (Node cannot exec in place).
 
 import { buildModel, parseTarget } from './model.mjs';
 import { renderFrame } from './render.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, mtime, runSnapshot } from './sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, runSnapshot } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
 import { focusProblem, handleKey, handleMouse, moveSelection, viewProblem } from './controller.mjs';
 import { resolveViewer, runViewer } from './viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.mjs';
+import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsFlags } from './settings.mjs';
+import { defaultInstallRoot, readInstall, runUpgrade } from './upgrade.mjs';
 
 export { moveSelection } from './controller.mjs';
 
@@ -93,6 +102,8 @@ export async function runApp(opts) {
       notice: '',
       noticeBad: false,
       stale: false,
+      page: 'board',
+      settings: initialSettings({ install: readInstall(opts.installRoot || defaultInstallRoot()), flags: settingsFlags(opts) }),
     },
     refreshing: false,
     refreshPending: false,
@@ -303,12 +314,41 @@ export async function runApp(opts) {
     draw();
   };
 
-  const quit = () => {
+  const shutdown = (code) => {
     if (quitting) return;
     quitting = true;
     if (herdr) herdr.close();
     if (screen) screen.destroy();
-    process.exit(0);
+    process.exit(code);
+  };
+  const quit = () => shutdown(0);
+
+  // Settings page: the release data, fetched on open and on r (never on the
+  // tick), and the upgrade child, whose lines are drawn as they arrive.
+  const settingsFetch = () => {
+    const s = state.view.settings;
+    if (s.releases.state === 'fetching') return;
+    s.releases = { ...s.releases, state: 'fetching' };
+    draw();
+    fetchReleases({ repo: s.install.repo, curlCmd: opts.curlCmd, timeoutMs: 20000 }).then((r) => {
+      s.releases = r;
+      draw();
+    });
+  };
+  const settingsUpgrade = (running) => {
+    const s = state.view.settings;
+    runUpgrade({
+      launcher: s.install.launcher,
+      args: running.args,
+      onLine: (text) => {
+        s.output.push(text);
+        draw();
+      },
+    }).then((r) => {
+      const result = finishUpgrade(s, r);
+      notice(resultNotice(result), !result.ok, result.ok ? 30000 : 15000);
+      draw();
+    });
   };
 
   const ctx = {
@@ -331,6 +371,9 @@ export async function runApp(opts) {
       refresh('manual');
     },
     persist,
+    settingsFetch,
+    settingsUpgrade,
+    relaunch: () => shutdown(RELAUNCH_EXIT),
     quit,
   };
 

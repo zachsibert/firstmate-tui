@@ -29,10 +29,16 @@
 //           Any pane may go, the last one too: with all five hidden the frame
 //           is the landing page (lib/render.mjs) and only 0-5, r, ? and q act
 //   r       refresh (the snapshot and the PR checks, unless --no-prs)
+//   .       the Settings page (lib/settings.mjs): installed version, latest
+//           release, upgrade and betas through the launcher, read-only flags;
+//           while it is open every key goes to settingsKeyAction and every
+//           mouse event to settingsMouseAction; . / esc / q bring the board
+//           back with its selection intact
 //   ?       help       q / ctrl-c  quit
 
 import { hitTest, PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
+import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
 
 const OPEN_PANES = new Set(['review', 'needs', 'landed']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
@@ -148,7 +154,7 @@ export function paneForKey(key) {
 // key that would otherwise move the selection or act on a row nobody can see
 // only reminds the captain how to bring a pane back; a key the board does not
 // bind stays the silent no-op it is everywhere else.
-const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', 'r', '?', 'q', 'ctrl-c']);
+const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', 'r', '.', '?', 'q', 'ctrl-c']);
 const ROW_KEYS = new Set(['enter', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
 
 export function keyAction(model, view, key) {
@@ -161,6 +167,8 @@ export function keyAction(model, view, key) {
       return { type: 'quit' };
     case '?':
       return { type: 'help' };
+    case '.':
+      return { type: 'settings' };
     case 'r':
       return { type: 'refresh' };
     case 'H':
@@ -233,8 +241,76 @@ function clampSelection(ctx) {
   ctx.view.row = v.row;
 }
 
+// The Settings page, open: one action from settingsKeyAction or
+// settingsMouseAction (lib/settings.mjs decides what a key or a click means)
+// applied to view.settings, with the effects handed to the host:
+// settingsFetch() fetches the release data, settingsUpgrade(running) starts
+// the launcher's upgrade and later calls finishUpgrade, relaunch() exits the
+// board with RELAUNCH_EXIT. Closing the page never touches the board's
+// selection, expanded groups or hidden rows.
+function applySettingsAction(ctx, action) {
+  const { view } = ctx;
+  const s = view.settings;
+  switch (action.type) {
+    case 'quit':
+      ctx.quit();
+      return;
+    case 'close':
+      s.pending = null;
+      view.page = 'board';
+      view.lastClick = null;
+      return;
+    case 'help':
+      view.help = true;
+      return;
+    case 'menu':
+      s.menu = action.menu;
+      s.cursor = 0;
+      view.lastClick = null;
+      return;
+    case 'move':
+      s.cursor = action.cursor;
+      view.lastClick = action.click || null;
+      return;
+    case 'activate':
+      s.cursor = action.cursor;
+      view.lastClick = null;
+      applySettingsAction(ctx, action.action);
+      return;
+    case 'fetch':
+      ctx.settingsFetch();
+      return;
+    case 'confirm':
+      s.pending = { channel: action.channel, version: action.version };
+      ctx.notice(confirmText(s.pending));
+      return;
+    case 'cancel':
+      s.pending = null;
+      ctx.notice('cancelled; nothing was installed');
+      return;
+    case 'upgrade': {
+      s.pending = null;
+      s.running = { channel: action.channel, version: action.version, args: upgradeArgs(action) };
+      s.output = [];
+      s.result = null;
+      ctx.notice(`running firstmate-tui upgrade ${s.running.args.join(' ')} …`);
+      ctx.settingsUpgrade(s.running);
+      return;
+    }
+    case 'relaunch':
+      ctx.relaunch();
+      return;
+    case 'notice':
+      ctx.notice(action.text, action.bad);
+      return;
+    default:
+      break;
+  }
+}
+
 // ctx: { view, model, rebuild(), notice(text, bad), open(row), focus(row),
-//        viewReport(row), refresh(), persist(), quit() }.
+//        viewReport(row), refresh(), persist(), settingsFetch(),
+//        settingsUpgrade(running), relaunch(), quit() }.
 // rebuild() must replace ctx.model from the current view (the expanded set,
 // the hidden set and the hidden panes change which rows and panes exist);
 // persist() saves view.hidden and view.hiddenPanes.
@@ -245,6 +321,10 @@ export function handleKey(ctx, key) {
     if (key === 'ctrl-c') ctx.quit();
     return;
   }
+  if (view.page === 'settings') {
+    applySettingsAction(ctx, settingsKeyAction(view.settings, key));
+    return;
+  }
   applyAction(ctx, keyAction(ctx.model, view, key));
 }
 
@@ -253,6 +333,10 @@ export function handleMouse(ctx, ev) {
   if (!ev || ev.type === 'up') return;
   if (view.help) {
     if (ev.type === 'down') view.help = false;
+    return;
+  }
+  if (view.page === 'settings') {
+    applySettingsAction(ctx, settingsMouseAction(view.settings, view, ev, { dblclickMs: DBLCLICK_MS }));
     return;
   }
   applyAction(ctx, mouseAction(ctx.model, view, ev));
@@ -286,6 +370,17 @@ function applyAction(ctx, action) {
       return;
     case 'help':
       view.help = true;
+      return;
+    case 'settings':
+      // Open on the main menu with the cursor at the top; the release data is
+      // fetched on every open (never on the refresh tick), and a result from
+      // an earlier visit stays on the page.
+      view.page = 'settings';
+      view.settings.menu = 'main';
+      view.settings.cursor = 0;
+      view.settings.pending = null;
+      view.lastClick = null;
+      ctx.settingsFetch();
       return;
     case 'refresh':
       ctx.refresh();
