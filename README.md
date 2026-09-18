@@ -1,88 +1,104 @@
 # firstmate-tui
 
-`firstmate-tui`: a live, herdr-hosted terminal board over the [firstmate](https://github.com/kunchenguid/firstmate) fleet snapshot, so all parallel work is visible at a glance instead of buried in a scrolling chat thread. One command, `firstmate-tui`, opens it in the terminal you are in; `firstmate-tui --help` lists the rest.
+firstmate-tui is a live terminal board over the work your coding agents are doing for you, plus the pull requests waiting on you.
+It reads the state that [firstmate](https://github.com/kunchenguid/firstmate), a supervisor that runs coding agents from a checkout on your machine, keeps on disk.
+It asks GitHub about your pull requests, and it asks [herdr](https://herdr.dev), the terminal multiplexer those agents run in, which agent panes are still alive.
+All of it lands on one screen that refreshes itself: what needs your answer, your own pull requests and their checks, the pull requests teammates asked you to review, what is being worked on right now, the reports the agents wrote, and what shipped.
+You want it when several agents work for you at once and scrolling back through a chat no longer tells you where things stand.
+The board is read-only.
+It never writes into firstmate's files, never answers a question on your behalf and never merges anything.
+Its only actions are jumping to an agent's pane, opening a pull request in your browser and showing a report in the terminal.
 
-![The live board filling a dark terminal: six bordered panes stacked top to bottom, each titled with its key badge and a count, the title line counting down to the next refresh. Pane 1, Needs you, holds three hold rows with their due dates. Pane 2, My PRs, lists the pull requests you opened and the ones your workers opened for you, with their check state, status, title, base branch and age. Pane 3, Teammates' PRs, lists the pull requests teammates asked you to review, in the same columns plus the author's GitHub login. Pane 4, In flight, shows a working row, a decide row flagged with an exclamation mark and a done row, each with its live herdr worker count. Pane 5, Findings, lists scout and report files by home and age. Pane 6, Landed, lists merged and done work by date. The footer line names the keys, ending with q quit.](docs/fm-board.png)
+![The board filling a dark terminal: bordered panes stacked top to bottom, each titled with its number key and a row count, with columns such as state, id, what, repo, home and age, and the key hints on the bottom line.](docs/fm-board.png)
 
-Panes, top to bottom by urgency, the two PR panes side by side; each pane's key is its position, `1` to `6`:
-
-1. **Needs you** - what the main firstmate needs from you: blocked workers, keyed worker decisions, live captain holds and `review` rows, one per PR that is yours to review: its task is parked for you (the worker said done, or firstmate paused it on you, while the backlog row is still open) and GitHub reports the PR open and mergeable. The row reads `<repo>#<number> · <title> · checks <state>`, its AGE is the time since the task parked, and `enter` opens the PR. A PR its worker is repairing (a merge conflict, a re-resolve after your review) has no row until it is clean again, and a merged or closed PR never has one. Without live PR data (`--no-prs`, a failed fetch, or a PR the fetch did not return) the row lists on the task state alone, its AGE marked with a trailing `~`. Rows sort blocked, decide, hold, review. Decisions and holds are the main home's only by default; a secondmate's own decisions (its ledger's open decisions, and the keyed decisions its task record relays into the main home) flag its In flight group instead (`--all-homes-needs` lists them here too). Review rows come from every home: a secondmate child's PR is read from its ledger's `contributions.captain` list
-2. **My PRs** - the pull requests that are yours to look at before the rest of the team does: every open PR your GitHub login authored, in any repository or organisation the account can see (what https://github.com/pulls/authored shows), plus the PRs recorded on unfinished fleet tasks whatever their author (a worker's PR opened by a bot or another login is still your output), plus PRs of either kind that merged or closed in the last 12 hours. Six columns: CHECKS (the check state), STATUS, ID (the firstmate task, or `repo#number` for a PR no task recorded), TITLE (the PR's title, cut with an ellipsis to the room left), BASE (the branch the PR targets) and AGE. STATUS is `DRAFT`, `IN REVIEW` (open, review pending or changes requested), `APPROVED`, `CLOSED` (closed unmerged) or `MERGED`. A PR that belongs to a fleet task has two more words, so this pane and Needs you agree: `READY` when the task is parked for you (done or paused) and GitHub reports the PR open and mergeable, `REPAIRING` when the task is working again after it said done or GitHub reports the PR conflicting. A merged or closed PR stays listed for 12 hours after it finished, so you see what landed since you last looked, then leaves; a PR of a task whose backlog row is already done shows only in that window, and a PR a secondmate record merely mentions stays out. Rows sort by status, `READY`, `DRAFT`, `IN REVIEW`, `APPROVED`, `REPAIRING`, then `CLOSED`, then `MERGED` at the bottom, newest first within a status; a recorded PR the fetch did not return reads `-` in STATUS and sits between the open and the finished rows. All of it comes from GitHub on every refresh (`--no-prs` turns that off). AGE is the time since the PR was opened when the live data carries it; otherwise (fetch off, fetch failed, or the PR not in the fetched set) it is the task's file-time age with a trailing `~`, so a GitHub fact and a stand-in for it are never read as the same thing. `enter` opens the PR in your browser. Which login is "you" is the [config file](#the-config-file)'s `identity.github_login`, else the account `gh` is logged in as, else git's `github.user`; while they are being asked (on the first refresh, after the snapshot, and again on `r` while the login is unknown) both PR panes show `⠋ resolving GitHub identity…`, and when none answers they show one row, `identity unknown: see Settings (.)`, and fetch nothing
-3. **Teammates' PRs** - the pull requests teammates are waiting on you for: the open PRs in its scope where your login is a requested reviewer, directly or through a team you belong to, and not the author, plus those that merged or closed in the last 12 hours. The scope is the fleet's candidate repositories (the repositories of the PRs recorded on fleet tasks and of the live task worktrees, at most ten) plus every repository the config file names under `review.repos`, so a repository with a label rule is searched before any fleet work touches it. A repository's label rule keeps a PR only when it carries one of the listed labels (the shipped example lists `MatthewsREIS/gemini` with `ready-to-merge`); `review.default_labels` is the rule for every repository without its own entry, and an empty list means unfiltered. The same columns as My PRs plus AUTHOR, the PR author's GitHub login (`-` when GitHub names none), between ID and TITLE; STATUS reads `APPROVED` or `CHANGES REQUESTED` when your own latest review on the PR says so, otherwise the same words as My PRs, and rows sort `DRAFT`, `IN REVIEW`, `CHANGES REQUESTED`, `APPROVED`, `CLOSED`, `MERGED`. `enter` opens the PR. With nothing to review the pane reads `no pull requests waiting for your review`; with an empty scope, `no repositories in scope: see Settings (.)`
-4. **In flight** - one row per main-home worker (a worker that said done while its PR is unmerged reads `awaiting merge`; one working again on a PR it once said done with, repairing a merge conflict or re-resolving after a review, reads `repairing PR`, which is read from its status log), and one group row per secondmate home: the worst state among the mate, its children and its relayed decisions, the live worker count, the child ids, the shared repo and the age of the newest child event, with a leading `!` when a child has an open decision or is blocked. Expand a group (`l`, `right` or `enter`) to see the mate's own agent row, each worker with the herdr agent state beside firstmate's own state, the home's live captain decisions and the mate's relayed decisions. A worker whose recorded pane is gone from herdr shows **pane lost** in red in the HERDR column (in Needs you, the whole row turns red); while herdr is disconnected the cell reads **unknown** in grey instead, because absence cannot be proved
-5. **Findings** - scout reports and other report files, newest first, from every home. `enter` opens the report in a terminal viewer and returns to the board when it exits
-6. **Landed** - done backlog rows and every secondmate home's landed work, newest first. WHAT names the row's first target after its title: the PR URL, else its report path (relative to the home that owns it), else `pane <id>` while herdr still lists the worker's pane. `enter` takes that target: it opens the PR, else views the report, else focuses the pane; a row with none of them gets a footer notice
-
-Every row carries the repo, the home it belongs to, and an age computed from file modification times (status logs, report files). The two PR panes are the exception: they draw TITLE and BASE where the other panes draw REPO and HOME (the repo stays on the row, so `enter` still knows where to go), Teammates' PRs adds AUTHOR between ID and TITLE, and their age is the time since the PR was opened when the live PR data provides it and the file-time age marked `~` otherwise. Rows from a remote or cached home say so in the HOME column. The title line counts down to the next refresh (`next refresh in 18s`), reads `refreshing…` while one runs, and after a failed snapshot or PR fetch reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose own data failed to refresh is marked `(stale)`; so a stale board is visibly stale. The same line warns `herdr disconnected (<reason>)` in red whenever the herdr link is down, and says nothing about herdr while it is up.
-
-Data comes from `bin/fm-fleet-snapshot.sh --json` on the main home and each secondmate home's `state/home-summary.json` ledger; live PR data comes from GitHub through bounded searches in `gh api graphql`, at most four per refresh plus one lookup of the recorded PRs the searches missed (the firstmate home's `bin/fm-bearings-snapshot.sh --include-prs` stands in for My PRs when gh is not on PATH); agent state comes from `herdr api snapshot` at start and then herdr's socket API (`events.subscribe`), so the board reacts to changes instead of polling herdr. The board is read-only: it never writes into a firstmate home, a project or a state directory. Its own files are `view-state.json` and `config.json`, beside each other ([Hiding rows and panes](#hiding-rows-and-panes), [The config file](#the-config-file)). Its actions are jumping to a worker pane (`herdr agent focus`), opening a PR in your browser (`open` on macOS, `xdg-open` on Linux, always with the URL as one argument and never through a shell) and showing a report in a terminal viewer. It never moves or closes a pane; split herdr panes yourself.
-
-### Hiding rows and panes
-
-Firstmate retires Done rows on its own (`done_keep` per home, archived to `data/done-archive.md`), so "I have looked at this" is view state that belongs to the board, not to firstmate. `x` hides the selected row, `X` unhides every row of the current pane, and `H` shows hidden rows greyed with a `(hidden)` marker so nothing is lost; the pane header counts them (`Landed (30, 12 hidden)`). Keys `1` to `6` switch a pane off and on (Needs you, My PRs, Teammates' PRs, In flight, Findings, Landed), `0` shows all six; a hidden pane frees its rows to the others and the title line lists the hidden numbers (`panes hidden: 6`). Each pane title carries its key the way btop does (`[1] Needs you (3)`, `[6] Landed (30, 12 hidden)`, and `── [4] In flight` in the narrow list), so the numbers need no lookup. Any pane may go, the last one too: with all six hidden the grid gives way to a landing page that lists the key for each pane, `0` for all of them and `r`, `?` and `q`, the title reads `all panes hidden`, and every other key only repeats that reminder. Both, and the column widths dragged with the mouse ([Mouse](#mouse)), are remembered in the board's own file, `view-state.json`: at `$(herdr plugin config-dir firstmate.board)/view-state.json` when herdr is present, else `$XDG_CONFIG_HOME/fm-board/view-state.json`, else `~/.config/fm-board/view-state.json` (`--view-state` overrides; a path inside `FM_HOME` is refused). A hidden row's key is pane, home and id, plus the completion date for Landed, so an item that lands again reappears; an all-hidden set is saved like any other, so a restart with everything hidden lands on the key page again. A file written before 0.4.0 names the second pane `review`; it is read as `mine`, so hidden rows, a hidden pane and dragged widths survive the rename.
-
-### The config file
-
-Two things about the PR panes are yours to set: which GitHub login is you, and which labels a pull request must carry to be listed in Teammates' PRs. Both live in `config.json`, beside `view-state.json`: at `$(herdr plugin config-dir firstmate.board)/config.json` when herdr is present, else `$XDG_CONFIG_HOME/fm-board/config.json`, else `~/.config/fm-board/config.json` (`--config <path>` overrides; a path inside `FM_HOME` is refused). When no file is there at startup the board writes the documented example, [`docs/config.example.json`](docs/config.example.json), so the first launch already carries the gemini rule and everyone has a real file to edit:
-
-```json
-{
-  "schema": "firstmate-tui-config.v1",
-  "identity": { "github_login": null },
-  "review": {
-    "default_labels": [],
-    "repos": { "MatthewsREIS/gemini": { "labels": ["ready-to-merge"] } }
-  }
-}
-```
-
-| Key | Meaning |
-| --- | --- |
-| `schema` | `firstmate-tui-config.v1`; a file with another schema is refused as a whole |
-| `identity.github_login` | the GitHub login the two PR panes are built around (`zachsibert`, not a name or an email). `null` means resolve it: the account `gh` is logged in as (`gh api user`, one call at startup, cached for the session), else git's `github.user` (`git config --get github.user`), else unknown, in which case both PR panes show `identity unknown: see Settings (.)` and fetch nothing, and `r` asks again |
-| `review.default_labels` | the labels a PR must carry one of to be listed in Teammates' PRs, in every repository without its own entry under `repos`; an empty list means unfiltered |
-| `review.repos` | one entry per repository, `"owner/name": { "labels": [...] }`. Each named repository joins the Teammates' PRs scope even when no fleet work touches it, and its `labels` list is its own rule: a PR there is listed only when it carries one of them, and an empty list means unfiltered whatever `default_labels` says |
-
-Unknown keys are ignored. A malformed file (bad JSON, a wrong type, a repository name that is not `owner/name`) is reported once in the footer and on the Settings page, and the board runs with the defaults: no login from the file, no label rules, no configured repositories; the file itself is never touched once it exists. The Settings page (`.`) shows the identity and where it came from (`Identity  zachsibert  (from gh api user)`), the config path with `(created from the example)` or `(using defaults: <reason>)` when that applies, and the label rules in effect, read-only. Editing the file from inside the board is a later task.
-
-### Why In flight groups by home
-
-The captain asked for one row per initiative the main firstmate delegated. The secondmate ledger carries `active_children[] {id, kind, state, repo, source, doing}`, `endpoints[] {id, state, source, endpoint.target}`, `holds[] {id, title, reason, source}`, `decisions_open[] {id, key, verb, summary, reason, hold_bucket}` and `queued[] {id, title, repo, kind, hold_*}`. The handoff that delegates an item (`fm-backlog-handoff.sh`, which calls `tasks-axi mv`) moves the backlog block byte-exact and records no origin; a child's task id is the mate's own backlog item id, and no field in the ledger, the fleet snapshot or `state/<id>.meta` names a parent item above it. Grouping by item would therefore give one row per worker again, so the board groups by home, and uses the id links it does have to show a child's decision text (`decisions_open`) or hold title and reason (`holds`) when the group is expanded. The comment above `inflightRows` in `bin/firstmate-tui/lib/model.mjs` names the one function to change when the ledger grows a per-child parent field.
-
-## Status
-
-M1, the read-only board, is implemented in this repository, plus the M1b follow-on (`enter` opens a PR in the browser, In flight groups secondmate work by home, and Needs you lists the main home only) and M2: `enter` on a Findings row opens the report in a terminal viewer, lost panes show in red, `x` / `X` / `H` hide and unhide rows, `1`-`6` / `0` hide and show panes (each title carries its key; with all six hidden a key page replaces the grid), `r` refreshes the snapshot and the live PR data at once, the mouse selects, double-clicks as `enter` and scrolls with the wheel (`--no-mouse` turns it off), `.` opens a Settings page that upgrades an installed board from inside it ([Upgrade from inside the board](#upgrade-from-inside-the-board)), and since 0.4.0 the PR pane is two: My PRs, what you and your workers opened, and Teammates' PRs, what teammates asked you to review, over a login and label rules in the board's config file ([The config file](#the-config-file)). The scout report that grounds the plan is in [`docs/scout-report-2026-09-16.md`](docs/scout-report-2026-09-16.md): data availability per pane, herdr capabilities, what is reusable from yimbot as a pattern, stack choice, and the four-milestone plan. Answering decisions, toasts and the findings watermark are later milestones.
+The screenshot is from an earlier release with five panes and one pull request pane.
+The current board has the six panes listed under [Using the board](#using-the-board).
 
 ## Prerequisites
 
-firstmate-tui is a terminal program that reads a firstmate home and talks to herdr. Put each item below in place before installing; the check command shows what you have. On macOS the install commands use [Homebrew](https://brew.sh); Linux commands are given where they differ.
+Two words this README uses that are firstmate's own:
 
-**Required**
+- A **firstmate home** is a checkout of the firstmate repository that firstmate runs from, with its `bin/` scripts and the `state/` and `data/` directories it fills.
+  The board reads one main home, the one `FM_HOME` points at.
+- firstmate can hand part of its work to a second copy of itself running from another home.
+  firstmate calls that copy a secondmate; this README calls it a **delegate home**.
+  The board finds delegate homes through the main home's `data/secondmates.md` and lists their work too.
 
-1. **Node 20 or newer.** Runs the board. npm is needed only for the [development install](#development-install), since a release tarball carries the one dependency.
-   Check: `node --version` prints `v20` or higher.
-   Install: macOS `brew install node`. Linux: the distribution package when it is 20 or newer (`sudo apt install nodejs` on Debian and Ubuntu is often older), otherwise the packages or version managers listed at https://nodejs.org/en/download.
-2. **herdr 0.8.x or newer** (socket API protocol 20). Hosts the board's pane and supplies live agent state; `--no-herdr` runs the board without it. Whenever the board cannot reach herdr's socket (never connected, the subscription dropped, herdr not on PATH, or `--no-herdr`) the title line warns `herdr disconnected (<reason>)` in red, and the warning goes as soon as the subscription is back.
-   Check: `herdr --version` prints `herdr 0.8.2` or higher.
-   Install: macOS `brew install herdr`. Linux, or macOS without Homebrew: `curl -fsSL https://herdr.dev/install.sh | sh`. Both come from herdr's own install page, https://herdr.dev/install, which also covers mise, Nix, manual downloads and `herdr update`.
-3. **A firstmate home.** A checkout of https://github.com/kunchenguid/firstmate with `bin/fm-fleet-snapshot.sh` in it; the board runs that script for its data (and `bin/fm-bearings-snapshot.sh` for the live PR data only when gh is not on PATH). Secondmate homes are read from that home's `data/secondmates.md`.
-   Get one: `git clone https://github.com/kunchenguid/firstmate.git ~/firstmate` (any path works).
-   Point the board at it: `export FM_HOME=/path/to/that/checkout`, and add the line to your shell profile so it is set in every terminal. The board never guesses this path.
-   Check: `ls "$FM_HOME/bin/fm-fleet-snapshot.sh"` prints the path instead of an error.
-4. **jq 1.5 or newer.** The launcher reads herdr's JSON replies with it (only `-r` and the `//` operator).
-   Check: `jq --version` prints `jq-1.5` or higher.
-   Install: macOS `brew install jq`. Linux `sudo apt install jq` or `sudo dnf install jq`.
-5. **bash 3.2 or newer.** The launcher and the installer are bash scripts. They use nothing beyond bash 3.1 features (arrays with `+=`, `printf %q`, `BASH_SOURCE`), and both were run under macOS's stock `/bin/bash` 3.2.57 as the check. macOS ships 3.2 and Linux ships 5.x, so there is nothing to install.
-   Check: `bash --version` prints the version on its first line.
-6. **curl and tar** for the installer, plus `shasum` or `sha256sum` for the checksum; all ship with macOS and with every Linux. If missing on Linux: `sudo apt install curl tar`.
-   Check: `curl --version` and `tar --version` each print a version line.
+### Required
 
-**Optional**
+The launcher checks the firstmate home, Node and herdr before it starts and stops with a message when one is missing.
+Nothing checks bash or jq up front.
 
-- **glow** (optional). Renders a Findings report in the terminal when you press `enter` on it; without glow the viewer falls back to `$EDITOR`, then `vim`, then `less`.
-  Check: `glow --version`. Install: macOS `brew install glow`. Linux: packages for apt, dnf and others are listed at https://github.com/charmbracelet/glow.
-- **gh, the GitHub CLI, logged in** (optional). The board runs `gh api graphql` itself on every refresh, at most four searches plus one lookup, for each pull request's checks, status, title, base branch, author, labels, your own review and the time it was opened (the CHECKS, STATUS, TITLE, BASE and AGE columns of My PRs and Teammates' PRs, plus AUTHOR in Teammates' PRs), and `gh api user` once at startup for your login unless the config file names it. Without gh on PATH My PRs falls back to the firstmate home's `bin/fm-bearings-snapshot.sh --include-prs`, which needs gh as well, so in practice that pane then reads `checks failed` and the footer says why once, and Teammates' PRs reads `gh not on PATH: Teammates' PRs needs the GitHub CLI`; `--no-prs` runs the board without the fetch.
-  Check: `gh auth status` prints `Logged in to github.com`. Install: macOS `brew install gh`. Linux: https://github.com/cli/cli/blob/trunk/docs/install_linux.md. Then `gh auth login` once.
+**bash 3.2 or newer.**
+The `firstmate-tui` command and the installer are bash scripts.
+macOS ships bash 3.2 and Linux ships 5.x, so there is nothing to install.
+Check: `bash --version` prints the version on its first line.
+
+**A firstmate home, in `FM_HOME`.**
+The board runs that home's `bin/fm-fleet-snapshot.sh` for its data on every refresh.
+The launcher stops unless `FM_HOME` names a directory holding an executable `bin/fm-fleet-snapshot.sh`; it never guesses the path from where you started it.
+Check: `ls "$FM_HOME/bin/fm-fleet-snapshot.sh"` prints the path instead of an error.
+Get one: `git clone https://github.com/kunchenguid/firstmate.git ~/firstmate` (any path works), then put `export FM_HOME=$HOME/firstmate` in your shell profile so it is set in every terminal.
+
+**herdr 0.8.2 or newer.**
+herdr hosts the board's pane and tells it which agent panes are alive.
+The launcher checks that a `herdr` command is on `PATH`.
+The 0.8.2 minimum is the one the board's plugin manifest declares, and herdr enforces it when you link the plugin.
+`--no-herdr` runs the board without herdr; the title line then says so.
+Check: `herdr --version` prints `herdr 0.8.2` or higher.
+Install: macOS `brew install herdr`.
+Linux, or macOS without Homebrew: `curl -fsSL https://herdr.dev/install.sh | sh`.
+herdr's install page, https://herdr.dev/install, covers the other routes and `herdr update`.
+
+**Node 20 or newer.**
+Node runs the board.
+The launcher reads Node's major version and stops below 20.
+npm is needed only for the [development install](#development), because a release tarball already carries the one dependency.
+Check: `node --version` prints `v20` or higher.
+Install: macOS `brew install node`.
+Debian and Ubuntu: `sudo apt install nodejs` when the packaged version is 20 or newer (Ubuntu 24.04 packages Node 18, which is too old), otherwise the packages and version managers at https://nodejs.org/en/download.
+
+**jq 1.5 or newer.**
+jq is a command that reads JSON.
+`firstmate-tui open --detached` and `firstmate-tui focus` read herdr's answers with it; the board itself does not use it.
+Nothing checks for it up front, so those two commands fail without it.
+Check: `jq --version` prints `jq-1.5` or higher.
+Install: macOS `brew install jq`.
+Debian and Ubuntu: `sudo apt install jq`.
+Other systems: https://jqlang.github.io/jq/download/.
+
+**For the installer: curl, tar, and sha256sum or shasum.**
+The installer downloads the release with curl, unpacks it with tar and verifies the checksum with sha256sum or, when that is missing, shasum.
+It checks for all three before it downloads anything and names the missing one.
+All of them ship with macOS and with every common Linux.
+Check: `curl --version`, `tar --version` and `shasum --version` (or `sha256sum --version`) each print a version.
+Install, Debian and Ubuntu, when one is missing: `sudo apt install curl tar coreutils`.
+
+### Optional
+
+**gh, the GitHub CLI, logged in.**
+gh gives the two pull request panes their data.
+On every refresh the board runs `gh api graphql` itself, at most four searches plus one lookup, and once per session `gh api user` for your GitHub login unless the [config file](#configuration) names it.
+Without gh on `PATH`, My PRs falls back to a firstmate script that needs gh as well, so in practice that pane reports a failed fetch, and Teammates' PRs reads `gh not on PATH: Teammates' PRs needs the GitHub CLI`.
+`--no-prs` runs the board without any GitHub call; the two panes then list only the pull request links firstmate recorded.
+Check: `gh auth status` prints `Logged in to github.com`.
+Install: macOS `brew install gh`.
+Debian and Ubuntu: `sudo apt install gh`, or the packages at https://github.com/cli/cli/blob/trunk/docs/install_linux.md.
+Then run `gh auth login` once.
+
+**glow.**
+glow renders a Markdown report in the terminal when you press `enter` on a Findings row.
+Without it the board uses `$EDITOR`, then `vim`, then `less`.
+Check: `glow --version`.
+Install: macOS `brew install glow`.
+Linux: the packages listed at https://github.com/charmbracelet/glow.
+
+**python3, for the test suite only.**
+The last section of `tests/fm-board.test.sh` drives the real board on a pseudo-terminal through a Python script.
+Without python3 that section is skipped with a note.
+Check: `python3 --version`.
+Install: macOS `brew install python@3`.
+Debian and Ubuntu: `sudo apt install python3`.
 
 ## Install
 
@@ -92,225 +108,312 @@ One command installs the latest stable release:
 curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash
 ```
 
-It reads the release's asset list, downloads the release tarball (`firstmate-tui-<tag>.tar.gz`; a 0.2.x release has `fm-board-<tag>.tar.gz` instead, and either name works) and its `.sha256` from the [GitHub Release](https://github.com/zachsibert/firstmate-tui/releases), verifies the checksum, unpacks into `~/.local/share/fm-board` (`$XDG_DATA_HOME/fm-board` when that is set) and writes a `firstmate-tui` command into `~/.local/bin`, with `fm-board` beside it as an alias (see below). The tarball carries the one dependency, so no npm step runs. It prints where everything went, plus a one-line note if `~/.local/bin` is not on your `PATH`. It writes nothing else: no shell rc file, no herdr config. For other locations add `--prefix /opt/firstmate-tui --bin-dir /usr/local/bin` after `bash -s --`. The installer needs `curl`, `tar` and `shasum` or `sha256sum`; the board itself still needs the [Prerequisites](#prerequisites) above.
+It asks GitHub for the latest release, downloads the release tarball `firstmate-tui-<tag>.tar.gz` and its `.sha256` file, verifies the checksum, unpacks the tarball and writes the command.
+A failed download or a checksum mismatch stops it before anything is replaced.
+It writes three things and nothing else: no shell profile, no herdr config.
 
-Once installed, `firstmate-tui` stands for `bin/firstmate-tui.sh` in every command below (`firstmate-tui open`, `firstmate-tui --help`), and the plugin directory to link is `~/.local/share/fm-board/bin/firstmate-tui` (the install directory keeps the former name).
+| What | Where |
+| --- | --- |
+| The files | `~/.local/share/fm-board`, or `$XDG_DATA_HOME/fm-board` when that variable is set. This is the prefix. The directory keeps the board's former name, so an upgrade moves nothing |
+| The command | `~/.local/bin/firstmate-tui`, a one-line script that runs the launcher inside the prefix. `~/.local/bin/fm-board` is written beside it as an alias, the command's former name, and goes away in the next release |
+| The install record | `<prefix>/install-record`, a key=value file naming the prefix, the bin dir, the repository, the installed version and the tarball layout. `firstmate-tui upgrade` reads it |
 
-**The former name, `fm-board`.** Up to 0.1.0 the command was called `fm-board`. The installer still writes `fm-board` as an alias for this release, so a shell habit or a script that calls it keeps working; the alias goes away in the next release, so switch to `firstmate-tui`. Since 0.3.0 the tarball is `firstmate-tui-<tag>.tar.gz` and the launcher and package inside it are `bin/firstmate-tui.sh` and `bin/firstmate-tui/`; up to 0.2.x they were `fm-board-<tag>.tar.gz`, `bin/fm-board.sh` and `bin/fm-board/`. The installer accepts both: it downloads whichever name the release has (the new one when both are there) and installs a tarball of either layout, so `firstmate-tui upgrade --version 0.2.6` goes back to a 0.2.x release the same way any other version is installed. Only the install directory (`~/.local/share/fm-board`) keeps the former name, so nothing moves on an upgrade.
-
-**Upgrading from 0.2.5 or 0.2.6.** Run the install command above once more. It replaces the install in place (same prefix, same bin dir; hidden rows and panes live outside both and stay) with the current release and its installer, and from then on `firstmate-tui upgrade` works as usual. The installers that shipped in 0.2.5 and 0.2.6 stop on the answer GitHub gives for a missing asset (curl exit 56 through its redirect, not the 22 they waited for) instead of trying the other asset name, so their `firstmate-tui upgrade` is not reliable; the reinstall gets past them. An install older than 0.2.5 must first reach 0.2.5 with its own `fm-board upgrade --version 0.2.5` (its installer downloads the old asset name only, and 0.2.5 is the last release that carries it), then reinstall the same way. A herdr plugin linked at the old package directory, `.../bin/fm-board`, points at a directory the upgrade removed: run `herdr plugin unlink firstmate.board` and link `.../bin/firstmate-tui` once ([Launch](#launch)); the plugin id and its config directory stay, so `fm-home` and `view-state.json` are kept.
-
-### Versions and betas
-
-`firstmate-tui version` prints the installed version and what it is:
+When the bin dir is not on your `PATH`, the installer ends with this line:
 
 ```
-firstmate-tui 0.2.0 (stable release)
-installed at /Users/you/.local/share/fm-board (from release v0.2.0); firstmate-tui upgrade replaces it
+install: note: /Users/you/.local/bin is not on your PATH; add it, or run /Users/you/.local/bin/firstmate-tui by its full path
 ```
 
-A stable release is `X.Y.Z`, the `version` in `bin/firstmate-tui/package.json` on `main`. A beta is that same version plus the short hash of the commit it was built from, `0.2.0-d8b290e`: every push to a branch other than `main` publishes one as a GitHub prerelease (see [Releasing](#releasing)), so a beta names one exact commit you can install. `firstmate-tui version` on a beta prints `firstmate-tui 0.2.0-d8b290e (beta: 0.2.0 at commit d8b290e)`. Betas are deleted when their pull request closes and at most 30 are kept at a time, so a beta is for trying a branch, not for staying on.
+Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile yourself; the installer never edits it.
+For other locations add the flags after `bash -s --`, for example `bash -s -- --prefix /opt/firstmate-tui --bin-dir /usr/local/bin`.
+`bin/install.sh --help` lists every flag, including `--from-file <tarball>` for a tarball you already have.
+To uninstall, delete the prefix directory and the `firstmate-tui` and `fm-board` commands in the bin dir.
 
-### Upgrade and switch
+### Link the herdr plugin (once)
 
-`firstmate-tui upgrade` replaces the install with another version, in either direction. It runs the installer that shipped inside the install against the same prefix and bin dir (the installer records both, and the repository, in `install-record` under the prefix), downloads and verifies the new tarball, unpacks it beside the install and swaps it in as a whole, so a failed download or checksum leaves what you have. Hidden rows and panes live outside the install ([Hiding rows and panes](#hiding-rows-and-panes)) and come through unchanged. Versions are never compared, so going back is the same step as going forward:
+Linking registers the board's plugin manifest with herdr.
+After that herdr's command palette has two entries, one that opens the board in a tab pane and one that focuses it, and `firstmate-tui open --detached` places the board in a tab pane of the current workspace instead of a hidden workspace.
+Linking is optional: without it `firstmate-tui` still runs in whatever terminal you type it in.
+It is also user-global, so it affects every herdr session on the machine.
+
+```sh
+herdr plugin link ~/.local/share/fm-board/bin/firstmate-tui
+echo "$FM_HOME" > "$(herdr plugin config-dir firstmate.board)/fm-home"
+```
+
+The second line matters because a palette action carries no environment: the plugin reads `FM_HOME` from that `fm-home` file.
+To bind a key to the focus action, add this to `~/.config/herdr/config.toml`:
+
+```toml
+[[keys.command]]
+key = "prefix+y"
+type = "plugin_action"
+command = "firstmate.board.focus"
+```
+
+A plugin linked before 0.3.0 points at `.../bin/fm-board`, a directory the upgrade removed.
+Run `herdr plugin unlink firstmate.board` once and link the new path as above; the plugin id stays, so the config directory and the `fm-home` file are kept.
+
+### First run
+
+```sh
+export FM_HOME=/path/to/your/firstmate/home
+firstmate-tui
+```
+
+The launcher checks the home, Node and herdr, then the board fills the terminal with six bordered panes.
+Each pane's body starts with a spinner line naming what it waits on (the fleet snapshot, then for the two pull request panes your GitHub identity, then the GitHub checks or the GitHub review requests) until that data first lands, about five seconds for the snapshot and a few more for GitHub.
+The first launch also writes the board's config file from the shipped example, so you have a real file to edit; [Configuration](#configuration) says where it lives and what is in it.
+Press `?` inside the board for the keys, `.` for the Settings page and `q` to quit.
+
+Without `FM_HOME` the launcher stops and prints two commands to copy: the `export` for a terminal launch and the `mkdir` plus `echo` that write the plugin's `fm-home` file.
+When a firstmate home sits above the current directory the `export` names it, but the board never adopts one on its own.
+
+The two pull request panes are built around one GitHub login, yours.
+The board takes it from the config file's `identity.github_login` when set, else from the account gh is logged in as (`gh api user`, once per session), else from git's `github.user` setting.
+While the board asks them, on the first refresh and again on `r` while the login is unknown, both panes show the spinner line `resolving GitHub identity`.
+When none of the three answers, both panes show one row, `identity unknown: see Settings (.)`, and fetch nothing; [Troubleshooting](#troubleshooting) has the fix.
+
+Inside herdr, `firstmate-tui` runs in the pane you type it in.
+To put the board beside firstmate, split the pane first (herdr's defaults are `ctrl+b` then `v` for a pane to the right and `ctrl+b` then `-` for one below), run `firstmate-tui` in the new pane, and close that pane yourself when done.
+`firstmate-tui open --detached` opens the board away from your terminal instead, in its own herdr pane, and `firstmate-tui focus` brings that pane forward later.
+
+## Upgrade and betas
+
+`firstmate-tui version` prints what is installed and where:
+
+```
+firstmate-tui 0.4.2 (stable release)
+installed at /Users/you/.local/share/fm-board (from release v0.4.2); firstmate-tui upgrade replaces it
+```
+
+A stable release is numbered `X.Y.Z`.
+A beta is that number plus the short hash of the commit it was built from, such as `0.4.2-d8b290e`; every push to a branch other than `main` publishes one as a GitHub prerelease, so a beta names one exact commit you can install.
+On a beta the first line reads `firstmate-tui 0.4.2-d8b290e (beta: 0.4.2 at commit d8b290e)`.
+Betas are deleted when their pull request closes, and at most 30 are kept at a time, so a beta is for trying a branch, not for staying on.
 
 ```sh
 firstmate-tui upgrade                            # to the latest stable release
 firstmate-tui upgrade --pre                      # to the newest release, betas included
-firstmate-tui upgrade --version 0.2.0-d8b290e    # to one exact version, beta or release (v0.2.0-d8b290e works too)
-firstmate-tui upgrade --stable                   # from a beta back to the latest stable release, although the beta sorts higher
+firstmate-tui upgrade --version 0.4.2-d8b290e    # to one exact version, beta or release (v0.4.2 works too)
+firstmate-tui upgrade --stable                   # from a beta back to the latest stable release
 ```
 
-The same three flags work on the install command after `bash -s --` (`--pre`, `--version 0.2.0-d8b290e`, `--stable`), which is how to start on a beta with nothing installed yet. `firstmate-tui upgrade` from a git checkout refuses and prints the `git pull` that updates a checkout instead. To uninstall, delete the prefix directory and the `firstmate-tui` and `fm-board` commands. `bin/install.sh --help` lists every flag, including `--from-file <tarball>` for a tarball you already have.
+`firstmate-tui upgrade` runs the installer that shipped inside your install against the prefix and bin dir in the install record.
+It downloads and verifies the new tarball, unpacks it beside the install and swaps the whole directory in, so a failed download or checksum leaves what you have.
+Versions are never compared, so going back is the same step as going forward.
+Your config file and view state live outside the prefix and come through unchanged.
+The same three flags work on the install command after `bash -s --`, which is how to start on a beta with nothing installed yet.
+From a git checkout, `firstmate-tui upgrade` refuses and prints the `git pull` that updates a checkout instead.
 
-### Upgrade from inside the board
+**From inside the board.**
+Press `.` for the Settings page.
+It shows the running version, where it is installed and from which release, the latest stable release with its date and a verdict (`upgrade available`, `up to date`, or that you are on a beta), the launch flags in effect, and the identity and config file the pull request panes use.
+From an install it offers `Upgrade to <version>`, a **Betas** submenu listing the prereleases newest first with their commit and date, and `Back to stable`.
+Choosing one shows the exact command it stands for and asks `y to confirm, esc to cancel`; only `y` runs it, through the same `firstmate-tui upgrade` as the command line, with the installer's lines appearing on the page.
+On success the page reads `restart to use <version>` and `R` restarts the board on the new copy.
+A failure leaves the installer's output on the page and the current install untouched.
+`r` fetches the release list again; `.`, `esc` or `q` returns to the board.
+Release data is fetched only when the page opens and on `r`, never on the refresh tick.
 
-Press `.` in the running board to open the Settings page; `.`, `esc` or `q` brings the board back with its selection intact. The page shows the running version in the words `firstmate-tui version` prints, where the copy is installed and from which release, the latest stable release with its publish date and a verdict (`upgrade available`, `up to date`, or that you are on a beta), and the launch flags it can read (`--refresh`, PR data, the herdr overlay, the mouse), read-only. From an install it offers one action, `Upgrade to <version>`, plus a **Betas** submenu that lists the prereleases newest first with the commit each was built from and its date, and a `Back to stable` entry. Choosing any of them shows one line naming the exact version and the command it stands for (`install 0.2.1 (firstmate-tui upgrade --version 0.2.1)? y to confirm, esc to cancel`), and only `y` runs it; any other key cancels. The install is `firstmate-tui upgrade --version <v>` (or `--stable` for Back to stable) run through the installed launcher, so it is the same download, verify and swap as the command line, and its progress lines appear on the page as they arrive. On success the page reads `restart to use <version>` and `R` quits and relaunches the board: the board exits with status 75 and the launcher starts the copy at the same path again, which is now the new one. A failure leaves the installer's output on the page verbatim (a failed download or checksum leaves the current install untouched) and the page stays usable. From a git checkout the page says so, shows the `git -C <checkout> pull` command instead of upgrade actions, and still lists the betas read-only. Release data is fetched only when the page opens and on `r` inside it, never on the refresh tick, so the GitHub API sees two calls per visit. `--curl-cmd <argv>` names the curl to use (tests point it at a fake) and `--install-root <dir>` where the page looks for the install (test mode).
+**Older installs.**
+Since 0.3.0 the tarball is `firstmate-tui-<tag>.tar.gz`; up to 0.2.x it was `fm-board-<tag>.tar.gz` with `bin/fm-board.sh` and `bin/fm-board/` inside.
+The current installer knows both names and both layouts, so `firstmate-tui upgrade --version 0.2.6` still goes back to a 0.2.x release.
+An install at 0.2.5 or 0.2.6 should run the install command above once more, because the installers that shipped in those two versions stop on a missing asset instead of trying the other name; after that reinstall `firstmate-tui upgrade` works as usual.
+An install older than 0.2.5 first runs its own `fm-board upgrade --version 0.2.5`, the last release under the old asset name, and then reinstalls the same way.
 
-### Development install
+## Using the board
 
-```sh
-git clone https://github.com/zachsibert/firstmate-tui.git
-cd firstmate-tui/bin/firstmate-tui && npm ci
-```
+The six panes, top to bottom; each pane's key is its number:
 
-`npm ci` installs the single pinned dependency, `neo-blessed` 0.2.0 (MIT), into `bin/firstmate-tui/node_modules`. The terminal library sits behind one adapter module (`bin/firstmate-tui/lib/tui-blessed.mjs`) so it can be swapped without touching the model, layout or renderer. From a checkout the command is `bin/firstmate-tui.sh`.
+1. **Needs you**: what firstmate is waiting on you for: blocked agents, decisions to make, holds you set with their due dates, and one `review` row per pull request that is yours to review because its agent is done and GitHub reports the pull request open and mergeable.
+2. **My PRs**: every open pull request your GitHub login authored, in any repository, plus the pull requests recorded on unfinished firstmate tasks whoever opened them, plus either kind that merged or closed in the last 12 hours; the columns are CHECKS, STATUS, ID, TITLE, BASE (the branch it targets) and AGE.
+3. **Teammates' PRs**: the open pull requests where you are a requested reviewer, directly or through a team, and not the author, in the repositories firstmate works in plus the ones the config file names, filtered by the config file's label rules, with the same columns plus AUTHOR.
+4. **In flight**: one row per agent working in the main home, with firstmate's state (`working`, `awaiting merge`, `repairing PR`, `done`) beside herdr's live pane count, and one group row per delegate home that expands to its agents.
+5. **Findings**: the reports the agents wrote, newest first, from every home.
+6. **Landed**: finished work, newest first: merged pull requests and done tasks, with the pull request URL, report path or pane id in WHAT.
 
-## First run
+The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing…` while one runs, and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
+Each pane title carries its key and its row count, as in `[1] Needs you (3)`.
+In the HERDR column, `pane lost` in red means herdr no longer has that agent's pane, and `unknown` in grey means herdr is disconnected so the board cannot tell.
+The bottom line lists the keys, and `?` shows them all.
 
-```sh
-export FM_HOME=/path/to/your/firstmate/checkout   # the home from Prerequisites, step 3
-firstmate-tui                                     # from a checkout: bin/firstmate-tui.sh
-```
-
-The board fills the terminal with six bordered panes, top to bottom: `[1] Needs you`, `[2] My PRs`, `[3] Teammates' PRs`, `[4] In flight`, `[5] Findings` and `[6] Landed`. Each title carries its key badge and the row count (`[1] Needs you (3)`), and the title line at the top counts down to the next refresh (`next refresh in 18s`); the screenshot at the top predates the countdown and the Teammates' PRs pane. On a cold start the panes have nothing to show yet, so each body carries a spinner line naming what it waits on, `⠋ loading fleet snapshot…` in Needs you, In flight, Findings and Landed, `⠋ resolving GitHub identity…` in My PRs and Teammates' PRs while the login they are built around is looked up (the config file, then `gh api user`, then git, once the snapshot is in), then `⠋ loading GitHub checks…` in My PRs and `⠋ loading GitHub review requests…` in Teammates' PRs, until that data first lands (about five seconds for the snapshot, a few more for GitHub); the `identity unknown: see Settings (.)` row appears only once every source has failed; a pane whose data has landed once never spins again: it keeps its rows while a refresh runs and reads its empty text when there is nothing to list. The first launch also writes the board's config file from the example ([The config file](#the-config-file)); the Settings page (`.`) shows where it went and which GitHub login the PR panes are built around. The bottom line lists the keys. Move with `j` and `k` or click a row, switch panes with `tab`, press `enter` on a row (or double-click it) to open or focus it, `?` for the help overlay, and `q` to quit. `firstmate-tui --help` prints the usage page (the subcommands, the common flags and where the install lives); [Launch](#launch) covers running the board inside herdr and every flag, and [Keys](#keys) has every key.
-
-## Launch
-
-```sh
-export FM_HOME=/path/to/your/firstmate/home
-
-# in the current terminal: a plain shell, or the herdr pane you typed this in
-firstmate-tui                # the same as `firstmate-tui open`; from a checkout, bin/firstmate-tui.sh
-
-# away from this terminal: a herdr plugin tab pane, or a hidden workspace
-firstmate-tui open --detached
-firstmate-tui focus          # bring that detached pane forward later
-```
-
-The subcommands:
-
-| Command | Meaning |
-| --- | --- |
-| `firstmate-tui [flags]`, `firstmate-tui open [flags]` | run the board in this terminal. Every flag in the table below goes after `open` or directly after `firstmate-tui`; `run`, the old name of this default, is still accepted |
-| `firstmate-tui open --detached [flags]` | open the board away from this terminal, in its own herdr pane, and print the pane id |
-| `firstmate-tui focus` | bring that detached pane forward |
-| `firstmate-tui upgrade [--stable \| --pre \| --version <v>]` | replace the install with another release ([Upgrade and switch](#upgrade-and-switch)) |
-| `firstmate-tui version` | print the installed version and whether it is a stable release or a beta (also `-V`, `--version`) |
-| `firstmate-tui help` | the usage page: what the board is, these subcommands, the common flags, and where this install lives (also `-h`, `--help`). An unknown subcommand prints the same page to stderr and exits 2 |
-
-Without `FM_HOME` the launcher stops and prints two lines, each a command to copy: the `export` for a terminal launch, and the `mkdir -p` plus `echo` that writes the plugin's `fm-home` file (with the directory resolved through `herdr plugin config-dir` when herdr answers). When a firstmate home sits above the current directory, the `export` names it; the board never adopts one on its own.
-
-`open` runs the board where you typed it, so you decide where it sits. To put it beside firstmate in herdr 0.8.2 (default keys, prefix `ctrl+b`; `herdr --default-config` prints them and `[keys]` in `~/.config/herdr/config.toml` rebinds them):
-
-1. Split the pane firstmate runs in: `ctrl+b` then `v` puts the new pane to the right (`split_vertical`), `ctrl+b` then `-` puts it below (`split_horizontal`). From a shell, `herdr pane split --current --direction right` (or `--direction down`) does the same.
-2. In the new pane, run `firstmate-tui` with `FM_HOME` exported.
-3. When done, `q` quits the board, then `ctrl+b` then `x` closes the pane (`close_pane`), or `herdr pane close <pane-id>` with the id that `herdr pane current` prints.
-
-`open --detached` keeps the old placement: the herdr plugin route when the plugin is linked, otherwise a hidden workspace (`herdr workspace create --no-focus` plus `pane run`, the same pattern firstmate's away-mode daemon uses). `focus` brings that pane forward. To link the plugin once:
-
-```sh
-herdr plugin link "$PWD/bin/firstmate-tui"     # from a checkout; after an install: ~/.local/share/fm-board/bin/firstmate-tui
-echo "$FM_HOME" > "$(herdr plugin config-dir firstmate.board)/fm-home"   # actions carry no FM_HOME
-```
-
-Then `herdr plugin action invoke firstmate.board.open` opens the board as a detached tab pane (the palette has no terminal to run it in, so the manifest passes `--detached`) and `firstmate.board.focus` brings it forward; bind a key with `[[keys.command]] key = "prefix+y" type = "plugin_action" command = "firstmate.board.focus"` in `~/.config/herdr/config.toml`.
-
-Options, after `open` or directly after `firstmate-tui` (`firstmate-tui --help` names the common ones):
-
-| Flag | Meaning |
-| --- | --- |
-| `--home <path>` | add a secondmate home (repeatable). Default: `FM_HOME` plus every home listed in `FM_HOME/data/secondmates.md` |
-| `--refresh <seconds>` | refresh cadence, default 30. Every tick runs the fleet snapshot and then, unless `--no-prs`, the live GitHub PR fetch (at most four searches through `gh api graphql`, all at once, then one lookup of the recorded PRs the searches missed), so nothing on screen is older than this plus the two steps. The next refresh is due this many seconds after the last one started, and the title line counts down to it (`next refresh in 18s`, `refreshing…` while one runs); `r` and herdr events on a known task pane (debounced to at most one start per 10 s) start a refresh at once and so reset the countdown. A tick that lands while a refresh is still running is skipped, and the panes keep the data they have |
-| `--no-prs` | skip the live GitHub PR fetch (`gh api graphql`; `fm-bearings-snapshot.sh --include-prs` when gh is not on PATH) and the `gh api user` identity call. My PRs then lists the recorded PR URLs of unfinished tasks only, `-` in STATUS and BASE, marked `checks: off (--no-prs)` with the file-time age marked `~`, Teammates' PRs reads `PR fetch off (--no-prs)`, and `r` says `PR checks off: start without --no-prs`. `--prs` is still accepted and does nothing, since the live data is the default |
-| `--config <path>` | the board's config file: the GitHub login the PR panes are built around and the Teammates' PRs label rules ([The config file](#the-config-file)); default `$(herdr plugin config-dir firstmate.board)/config.json` via the wrapper, else `$XDG_CONFIG_HOME/fm-board/config.json`, else `~/.config/fm-board/config.json`; never inside `FM_HOME`. Written once from `docs/config.example.json` when absent |
-| `--no-herdr` | skip the herdr overlay and the socket subscription |
-| `--all-homes-needs` | Needs you also lists every secondmate home's open decisions (default: main home only; secondmate decisions flag their In flight group) |
-| `--opener-cmd <argv>` | command that opens a URL in the browser, default `open` on macOS and `xdg-open` on Linux; the URL is appended as one argument |
-| `--viewer-cmd <argv>` | command that shows a Findings report in the terminal; default `glow -p` when glow is on PATH, else `$EDITOR`, else `vim`, else `less`; the report path is appended as one argument |
-| `--view-state <path>` | where hidden rows, hidden panes and dragged column widths are remembered; default `$(herdr plugin config-dir firstmate.board)/view-state.json` via the wrapper, else `$XDG_CONFIG_HOME/fm-board/view-state.json`, else `~/.config/fm-board/view-state.json`; never inside `FM_HOME` |
-| `--curl-cmd <argv>` | command the Settings page (`.`) fetches the GitHub releases API with, default `curl`; in `--render-once` nothing is fetched without it |
-| `--install-root <dir>` | where the Settings page looks for `bin/firstmate-tui/package.json`, `install-record` and `bin/firstmate-tui.sh`; default the directory two levels above the package (the install prefix, or the checkout). Test mode: points the page at a fake prefix |
-| `--render-once [--fixture <json>] [--cols N] [--rows N]` | print one frame to stdout and exit (test mode) |
-| `--keys <list>` / `--expand <all\|ids>` | with `--render-once`: press these keys (comma or space separated, e.g. `tab,j,enter`) and expand these In flight groups before rendering. A PR open runs `--opener-cmd` when given and is only reported in the footer otherwise; a Findings enter runs `--viewer-cmd` when given and otherwise reports the viewer the chain resolved to; a herdr focus is reported, never run; `r` against a fixture only reports that it cannot refresh |
-| `--no-mouse` | ignore the mouse: no click, double-click, wheel or column drag, and mouse reporting is never switched on, so the terminal's own text selection works as usual. Default: mouse on (see [Mouse](#mouse)) |
-| `--mouse <list>` | with `--render-once`: mouse events, applied in order with `--keys` (comma or space separated): `click:X,Y`, `dblclick:X,Y`, `tripleclick:X,Y`, `wheel:up:X,Y`, `wheel:down:X,Y`, `drag:X1,Y->X2` (a left press at X1, motion to X2 in steps, release), `move:X,Y` (one motion report with the button held) and `release:X,Y`, X the column and Y the line, both from 0 at the top-left cell; any other token is a key, so `click:30,29 x` selects a row and hides it. The events take the same path as the terminal's, measured against the frame the app would have drawn |
-| `--tags` | with `--render-once`: print the frame with its color tags (`{red-fg}pane lost{/red-fg}`) instead of plain text |
-| `--herdr-cmd <argv>` / `--herdr-socket <path>` | how to reach herdr when the defaults (`HERDR_BIN_PATH`, `HERDR_SOCKET_PATH`, `herdr status`) do not apply, for example a lab session |
-| `--headless` | run the refresh schedule with no terminal: nothing is drawn, no key is read (test mode; the suite stops it with a signal) |
-
-What the live PR data costs: the board asks GitHub directly, through its search API in `gh api graphql` (the `gh search prs` command carries no review decision, checks, base or head branch, so the API is called as such). Every refresh runs at most four searches, all started at once after the fleet snapshot: My PRs open (`is:pr is:open author:<login>`), My PRs tail (`is:pr author:<login> closed:>=<12 hours ago>`; a merged PR counts as closed), Teammates' PRs open (`is:pr is:open review-requested:<login> -author:<login>` plus one `repo:` qualifier per repository in scope while the query fits GitHub's 256 characters, else the scope is applied in code alone) and Teammates' PRs tail (the same with `closed:>=` in place of `is:open`); the two Teammates' PRs searches are skipped when the scope is empty. Each asks for the 50 most recently updated matches, so every open PR and the merged and closed ones of the last 12 hours fit; the board keeps the open ones and the finished ones inside that window and drops the rest before they reach the pane, and when a search has more than 50 matches the footer says it was capped. Recorded task PRs the author searches did not return (a bot author, an old PR) are looked up in one more call, at most 50 of them. At the default 30 seconds that is eight searches a minute, well inside GitHub's search limits (30 a minute for authenticated requests through the REST search API; GraphQL search counts against the 5,000 points an hour), plus two lookups and, once per session, `gh api user` for your login. A larger `--refresh` or `--no-prs` reduces it. `review-requested:<login>` matches a request to you and a request to a team you belong to (`user-review-requested:` would match the direct requests only). Until the first fetch of a session lands, a recorded PR row reads `checks: fetching`; when a pane's searches fail, its previous rows stay on screen, its title is marked `(stale)` (each PR pane on its own), the title line reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, and the footer names the failure once, as it names the script fallback once when gh is not on PATH. That fallback serves My PRs only, lists open recorded PRs and carries no title, base branch or draft flag: its rows read `IN REVIEW` or `APPROVED` from the review decision alone, show the recorded task's title in TITLE and `-` in BASE, and a merged or closed PR never appears through it.
-
-## Keys
-
-| Key | Action |
+| Key or gesture | Action |
 | --- | --- |
 | `j` / `k`, arrows | move the selection |
 | `tab` / `shift-tab` | next / previous pane |
-| `enter` | My PRs, Teammates' PRs, Landed, or a Needs you `review` row: open the PR in the browser. Landed row without a PR: view its report in the viewer, else focus its worker pane while herdr lists it (a remote home's report and a lost pane are skipped), else the notice `nothing to open (no PR, report or pane)`. In flight group row: expand or collapse it. In flight worker, or a Needs you worker row: focus its herdr pane (`herdr agent focus`); a row whose pane is lost gets a notice instead. Findings row: open the report in the viewer (`glow -p`, else `$EDITOR`, else `vim`, else `less`) and come back when it exits |
-| `l` / `right` | expand the selected In flight group |
-| `h` / `left` | collapse the group, from the group row or from one of its children (the selection lands on the group row) |
-| `x` | hide the selected row from view (on a hidden row shown by `H`: unhide it) |
-| `X` | unhide every row in the current pane |
-| `H` | toggle showing hidden rows, greyed and marked `(hidden)` |
-| `1` .. `6` | show or hide a pane: 1 Needs you, 2 My PRs, 3 Teammates' PRs, 4 In flight, 5 Findings, 6 Landed; each pane title shows its key (`[1] Needs you`). With all six hidden the board shows a page listing these keys instead of the grid |
-| `0` | show every pane |
-| `r` | refresh now: the fleet snapshot and then the live GitHub PR fetch, the same as a timer tick, and the title line's countdown restarts from it (with `--no-prs` the footer says `PR checks off: start without --no-prs`); while the GitHub login is unknown it is resolved again first. Pressed while a refresh is running, it queues one follow-up |
-| `.` | Settings page: the running version, where it is installed, the latest stable release and whether an upgrade is available, the read-only launch flags, and the GitHub login the PR panes are built around with the config file's path and label rules ([The config file](#the-config-file)); `enter` on `Upgrade to <version>`, a beta in the **Betas** submenu or `Back to stable` asks `y to confirm, esc to cancel` and then runs the launcher's own `firstmate-tui upgrade`; `r` refetches the release data; after a success `R` quits and relaunches; `.`, `esc` or `q` returns to the board ([Upgrade from inside the board](#upgrade-from-inside-the-board)) |
-| `=` | reset every column width to its automatic size, in every pane (a dragged width is view state, see [Mouse](#mouse)); the Settings page's `Reset column widths` entry does the same |
-| `?` | help overlay |
-| `q`, `ctrl-c` | quit |
+| `enter`, or a double-click | act on the row: open its pull request in your browser; on a Findings row show the report in the terminal viewer; on an In flight group expand or collapse it; on an agent row focus its herdr pane; on a Landed row without a pull request show its report, else focus its pane |
+| `l` / `right`, `h` / `left` | expand / collapse the selected In flight group |
+| `x`, `X`, `H` | hide the selected row; unhide every row in the pane; show hidden rows greyed and marked `(hidden)` |
+| `1` to `6`, `0` | show or hide that pane; show every pane (with all six hidden the board lists these keys) |
+| `r` | refresh now: the fleet snapshot, then the GitHub fetch |
+| `.` | the Settings page ([Upgrade and betas](#upgrade-and-betas)) |
+| `=` | reset every column width to its automatic size |
+| `?`, `q` or `ctrl-c` | help overlay; quit |
+| click | select that row and focus its pane; a click on a pane title focuses the pane |
+| wheel | move the selection three rows in the focused pane |
+| drag a column boundary in a pane's header line | resize that column; the width is saved and kept across restarts; a double-click on the boundary resets it |
 
-A transient footer notice names every opened URL, every focused pane, every viewed report and every hide; the notice takes precedence over the key hint when the two do not fit side by side.
+Only the left mouse button is bound; the right button opens herdr's own pane menu.
+While the board runs, your terminal reports mouse events to it, so hold your terminal's text-selection modifier to select text, or start with `--no-mouse`.
+Inside herdr the mouse reaches the board with herdr's default `mouse_capture = true`, which passes the mouse to pane programs that ask for it.
+Column widths are computed from the values on screen.
+Below 100 columns the REPO and AGE columns are dropped (the pull request panes drop BASE instead), and below 80 columns the six panes become one scrolling list with section headers.
 
-### Mouse
+### Commands
 
-Clicking is the same as navigating there with the keys; nothing else changes.
-
-| Gesture | Action |
+| Command | Meaning |
 | --- | --- |
-| click on a row | select it: the pane takes the focus and the cursor lands on the row, exactly where `tab` and `j`/`k` would have put it |
-| click on a pane title, or on a pane's empty space | focus that pane |
-| double-click on a row | the same as `enter` on it: open the PR, focus the worker, expand or collapse the group, view the report. Two clicks on one row within 400 ms count, and once they have acted no further press on that row inside the same 400 ms acts again, so one gesture opens a PR once however many events the terminal reports for it |
-| wheel | move the selection three rows in the focused pane, whichever pane the pointer is over |
-| drag a column boundary in a pane's header row | resize that column: press on the two blank cells between two column labels (one cell either side counts too), move sideways, release. The fixed column beside the boundary follows the pointer and the pane's flexible column (WHAT, TITLE or REPORT) gives up or takes back the same number of cells; the column never goes under its label width plus one, nor past what the flexible column can spare. While the button is held the boundary is drawn as a bar down the header and the rows. On the release the width is saved in `view-state.json`, per pane and column, and replaces the automatic width until it is reset. A key pressed mid-drag ends the drag |
-| double-click a column boundary | reset that column to its automatic width (`=` resets every column of every pane) |
+| `firstmate-tui [flags]`, `firstmate-tui open [flags]` | run the board in this terminal |
+| `firstmate-tui open --detached [flags]` | open the board in its own herdr pane and print the pane id |
+| `firstmate-tui focus` | bring that detached pane forward |
+| `firstmate-tui upgrade [--stable \| --pre \| --version <v>]` | replace the install with another release |
+| `firstmate-tui version` | print the installed version and whether it is a stable release or a beta (also `-V`, `--version`) |
+| `firstmate-tui help` | the usage page (also `-h`, `--help`); an unknown subcommand prints it and exits 2 |
 
-Only the left button is bound: nothing on the right or middle button, and the title line and footer ignore clicks. A drag that does not start on a header boundary does nothing beyond the click it began with, and the panes themselves are never resized from the board: herdr owns its split borders. `--no-mouse` turns all of it off, drags included. On the Settings page (`.`) a click highlights an entry, a double-click chooses it as `enter` would, the wheel moves the highlight one entry, and a click while a confirmation is pending cancels it; `y` on the keyboard is the only way to confirm an install, and a click never reaches the board behind the page.
+### Launch flags
 
-Two things have to hold for the mouse to reach the board. Your terminal must support mouse reporting: the board asks the terminal to report clicks when it starts and stops asking when it exits, and while it is asking, a plain drag no longer selects text, so hold your terminal's text-selection modifier while dragging, or start with `--no-mouse` and use the keys. Inside herdr, herdr must pass mouse events to the pane: `herdr --default-config` (herdr 0.8.2) documents `mouse_capture = true`, the default, which captures the mouse for herdr's own UI but, in its words, lets pane apps "receive mouse when they request it", which the board does. With that default, left click, double-click and the wheel reach the board in a herdr pane; the right button opens herdr's own pane menu, which is why the board binds nothing to it.
+Flags go after `open` or directly after `firstmate-tui`.
+`firstmate-tui --help` names the common ones.
 
-A column drag is the one gesture herdr also has a use for: a drag that starts on a split border resizes herdr's own panes, and a drag-select copies text from a pane whose app has not asked for the mouse. The board asks for button-motion reporting (mode 1002) along with clicks, so a drag that starts on a header boundary inside the board's pane should be forwarded the way a click is. In an isolated herdr 0.8.2 session the whole path was verified with injected reports: `herdr pane send-text` wrote the exact X10 and SGR bytes a terminal sends for a press, the motion and the release into a pane running the board, and `herdr pane read` showed the bar mid-drag, the resized column, the reset after a double-click and the footer notice, with `view-state.json` following each step. What that cannot show is herdr's routing of a real pointer, which no command injects, so a live drag with a mouse in a herdr pane has not been observed. To try it: with the board in its pane, put the pointer on the two blank cells between `ID` and `WHAT` in a pane's header line, hold the left button, move a few cells sideways and release; the bar should follow the pointer and the footer should read `ID 23 wide · double-click the boundary resets it, = resets every column`. If herdr resizes its own pane instead, the pointer was on a split border, so start one cell further inside the board; if nothing happens at all, look at `ui.mouse_capture` in `herdr --default-config` (default `true`), the setting that decides whether herdr reads the mouse and hands it to pane apps that request it.
+| Flag | Meaning |
+| --- | --- |
+| `--refresh <seconds>` | how often the board refreshes, default 30. Each refresh runs the fleet snapshot and then the GitHub fetch. `r` and a herdr event on a known agent pane refresh at once; a tick that lands during a running refresh is skipped |
+| `--no-prs` | skip the GitHub fetch and the `gh api user` call. My PRs lists recorded pull request links with `checks: off (--no-prs)`, and Teammates' PRs reads `PR fetch off (--no-prs)` |
+| `--home <path>` | add a delegate home (repeatable). Default: `FM_HOME` plus every home in `FM_HOME/data/secondmates.md` |
+| `--no-herdr` | run without herdr: no live pane state and no herdr calls |
+| `--no-mouse` | ignore the mouse and leave the terminal's own text selection alone |
+| `--all-homes-needs` | Needs you also lists every delegate home's open decisions; by default those flag the home's In flight group instead |
+| `--config <path>`, `--view-state <path>` | where the board's two files live ([Configuration](#configuration)); a path inside `FM_HOME` is refused |
+| `--opener-cmd <argv>` | the command that opens a URL, default `open` on macOS and `xdg-open` on Linux; the URL is appended as one argument |
+| `--viewer-cmd <argv>` | the command that shows a Findings report, default `glow -p`, else `$EDITOR`, else `vim`, else `less`; the path is appended |
+| `--snapshot-timeout <seconds>` | kill a snapshot run after this long, default 60 |
+| `--herdr-cmd <argv>`, `--herdr-socket <path>` | how to reach herdr when `HERDR_BIN_PATH`, `HERDR_SOCKET_PATH` and `herdr status` do not apply |
+| `--render-once`, `--fixture`, `--cols`, `--rows`, `--keys`, `--mouse`, `--expand`, `--tags`, `--headless`, `--curl-cmd`, `--install-root` | test mode: print one frame, or run the schedule without a terminal. `bin/firstmate-tui/lib/args.mjs` documents each one |
 
-Each fixed column is as wide as the widest value it shows in its pane, at least its label and at most 24 cells, with two blank cells between columns; the one flexible column per pane (WHAT, TITLE or REPORT) takes the rest. So BASE reading `main` on every row is four cells wide, AGE hugs its ages, and a long title gets the room those columns used to hold. A width dragged with the mouse replaces the automatic one for that column until it is reset. Below 100 columns the REPO and AGE columns are dropped (the two PR panes drop BASE instead and keep AGE, and Teammates' PRs keeps AUTHOR too); below 80 columns the six panes collapse into one scrolling list with section headers that share one column header, sized to the widest value in any pane, so a PR row shows its title under WHAT there and no AUTHOR column; dragged widths do not apply to that shared header and nothing on it is a boundary. The frame never shrinks below 20 rows.
+## Configuration
 
-## Tests
+The board owns two files and writes nowhere else: never into a firstmate home, a project or a `state/` directory.
+Both live in the same directory: the one `herdr plugin config-dir firstmate.board` prints when herdr answers, else `$XDG_CONFIG_HOME/fm-board/`, else `~/.config/fm-board/`.
+`--config` and `--view-state` override the two paths one at a time.
 
-```sh
-tests/fm-board.test.sh
-tests/install.test.sh
+### config.json
+
+The config file holds the two things about the pull request panes that are yours to set.
+When no file exists at startup, the board writes this example, [`docs/config.example.json`](docs/config.example.json), byte for byte, and never touches the file again:
+
+```json
+{
+  "schema": "firstmate-tui-config.v1",
+  "identity": {
+    "github_login": null
+  },
+  "review": {
+    "default_labels": [],
+    "repos": {
+      "MatthewsREIS/gemini": {
+        "labels": [
+          "ready-to-merge"
+        ]
+      }
+    }
+  }
+}
 ```
 
-The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the live PR data (the default, `--prs` as a no-op and `--no-prs`), the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, the review rows with the READY / REPAIRING words and the `repairing PR` state (with live PR data and without), lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, the `[n]` key badge on every pane title in both layouts, pane toggles with one, five and all six panes hidden (the landing page, its restart from a saved all-hidden state, `0` bringing the grid back, and a pre-0.4.0 file naming the second pane `review` read as `mine`), and the launcher: bare `firstmate-tui`, `open` and `run` print the same frame, `help`, `--help` and `-h` print one usage page that leads with `firstmate-tui [open]` and never lists `run`, an unknown subcommand prints it to stderr and exits 2, `open --detached --no-herdr` refuses (against a fake `herdr` on `HERDR_BIN_PATH` and PATH that logs any call, so nothing reaches a live server), and its error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, with `tests/fake-gh.sh` on PATH as `gh` (it logs each call, answers `api user` with a login and `api graphql` with canned PRs dispatched on the search string or the lookup's aliases, and fails on `pr list`), so the suite asserts that `r` re-runs the snapshot and then the four searches and the recorded-PR lookup for the login gh named, with the configured gemini repository in the Teammates' PRs scope although no fleet task touches it, lists the identity's own PR outside the fleet's repositories, the bot-authored PR recorded on a task, the just-merged PR as `MERGED`, the labelled gemini PR and not the unlabelled one, a request through the identity's team, a PR the identity approved as `APPROVED` and never the identity's own PR in Teammates' PRs, drops one closed in 2020, resolves the identity once and not again on `r`, and never runs the firstmate PR script; only the snapshot and no gh call at all with `--no-prs`, the script fallback under a PATH holding no gh with Teammates' PRs saying what it needs, and that a fixture render runs nothing, without touching GitHub. The identity chain runs live against a fake git as well: the config file's login wins without a gh call, gh's login over git's, git's alone when gh is not logged in, and with nothing the identity row in both panes, the Settings warning naming the config file and the rungs tried, and `r` asking gh again; a fetch with the identity unknown leaves both panes unfetched, so the fetch spinner still follows a later `r` that finds the login. The config chain has its own checks: `--config` to an absent file writes the example byte for byte and never rewrites an existing file, the XDG and HOME rungs on a live render, a path inside `FM_HOME` refused with the fallback written instead, a malformed file giving the defaults with the footer notice and the Settings line and no gemini rule, and a fixture render without `--config` touching no file; the wrapper passes the plugin directory's `config.json` beside its `view-state.json`. The fetch's slug, checks-mapping (gh's list and the GraphQL contexts), projection (a gh record and a GraphQL node with author, labels and the identity's review), the four search strings with and without `repo:` qualifiers, the scope, the aliased lookup and the candidate rules are checked directly against two scratch git repositories, and the config and identity modules' pure pieces on their own. My PRs and Teammates' PRs have their own fixtures: the union with a Teammates' PRs row kept out of My PRs, and one Teammates' PRs row per STATUS word with the identity's own review winning, a request through a team, the window and the author filter, the AUTHOR column sized to its widest login with `-` for a PR whose author GitHub no longer names (kept at 90 columns, gone from the narrow list, its dragged width saved under the pane id, and absent from My PRs), plus `3`, `tab`, `enter`, `x`, a double-click, the empty-scope text, the identity row, `--no-prs` and the no-gh text. A view-state file written before the two PR panes sat side by side (the pane hidden, one of its rows hidden and a dragged width, all under its unchanged id) reads back the same at the pane's new position and round-trips. The PR age has its own fixture: a PR with a creation time, one without, a future and a malformed one, `--no-prs`, and the 100, 90 and 70 column widths. The STATUS column has one too: one PR per status (`DRAFT`, `IN REVIEW`, `APPROVED`, `CLOSED`, `MERGED`), a PR merged 11h59m before the fixture's `now` and one 12h01m before it, an open PR of a done task, a closed PR with no close time, a closed draft and a recorded PR the fetch did not list, asserting the six-column header, every status word, the ellipsis on a long title, the sort with newest first inside a status, the pane count, `enter` on a merged row, `--no-prs` and the 100, 90 and 70 column widths. The refresh schedule runs with `--headless` (no terminal, no keys) against a second stand-in whose snapshot sleeps past a 5-second `--refresh`, proving that no second fetch starts during a running refresh, that the next refresh follows as soon as the slow one completes, and that each refresh runs the snapshot before its gh calls. The title line is checked from a fixture `refresh` block at the fixture's clock: the countdown (`next refresh in 18s`, never negative), `refreshing…`, and `refresh failed 40s ago, retrying in 20s` in red with `(stale)` on the two PR panes after a PR fetch failure (on one alone when only its searches failed) and on the other four panes alone after a snapshot failure; no pane header says `ago`; and the herdr link: no herdr text at all while connected, and the red `herdr disconnected (<reason>)` warning (plain and with `--tags`) for `--no-herdr`, a never-connected, an unavailable and a dropped state, with the parentheses left out when no reason was recorded. The loading spinner comes from `cold-start.json`, a fixture with `refreshing: true` and neither a snapshot nor a `prs` block: the spinner line under every column header naming the fleet snapshot, the GitHub checks or the GitHub review requests (dimmed, checked with `--tags`), in the two PR panes alone, above My PRs' recorded rows, once the snapshot is present, the off state and no spinner with `--no-prs`, the `resolving GitHub identity` line in both PR panes while the identity is still null (a fixture's `prs.identity: null`, the app's state until its first refresh has asked the rungs) with zero rows, no identity row and no fetch spinner, in the wide and the narrow layout and moving its glyph with `loading_frame`, the identity row only for an identity resolved unknown (an identity object with no login), whether or not a refresh runs, the empty text for a pending identity outside a refresh, the Settings Identity line reading that the identity is being resolved, and on the pseudo-terminal the live first frame against a stand-in with a slow snapshot and no login source: the resolving line before the identity row, the row once the rungs have answered, both again on `r`, and with gh logged in the fetch spinner and then the rows after the resolving line, no spinner over data while a refresh runs or over the failure text of a first fetch that failed, `refresh.loading_frame` picking the glyph (`3` draws the fourth, `10` wraps to the first, a fraction is refused), In flight naming herdr above its rows while the link is still connecting and only while a refresh runs, and the same line in the narrow list. Mouse gestures go through `--mouse <list>` and the same fakes: a click selects a row in another pane and focuses it (checked with `--tags`, and by a key acting on the clicked row), a click on a pane title or its empty space focuses the pane, a double-click on a My PRs row opens its PR through the fake opener and on a Findings row views the report through the fake viewer exactly as `enter` does while two single clicks a second apart do not, a double-click on an In flight group expands it and a second one collapses it, a right- or middle-button press is a no-op in the controller and `rclick` is refused by `--mouse`, the wheel moves the focused pane's selection by three whichever pane the pointer is over and clamps at the ends, the narrow list has the same hit targets, and `--no-mouse` leaves the frame unchanged for every gesture. Column widths have their own fixture, `column-widths.json` (the shape of the screenshot that prompted the sizing rule: BASE always `main`, a long repository name, long titles), asserting that BASE is four cells, that the 81-character title shows in full and that an id past the 24-cell cap truncates; the drag goes through `drag:X1,Y->X2`, `move` and `release` tokens on `populated.json`: a drag on Needs you's ID/WHAT boundary widens ID and narrows WHAT by the same ten cells with the columns to the right unmoved, the boundary is taken from one cell either side of its gutter and from the header line only, a drag past the minimum clamps at the label width plus one and one past the maximum leaves the flexible column its five cells, the boundary beside the flexible column moves the fixed column on its other side, the bar is drawn mid-drag (bold yellow with `--tags`) and gone after the release, a key ends an open drag, a drag back to the start leaves no width behind, the width survives a restart through `--view-state` and pins the column when the data changes, a double-click on the boundary resets that column, `=` and the Settings entry reset every pane and count what they dropped, unknown pane or column ids and non-numeric widths in the file are dropped on the next save, the narrow list ignores saved widths and has no boundaries, `--no-mouse` ignores drags, and a malformed drag token is refused. `o` and `f` are asserted to be no-ops. The Settings page is driven with `--install-root` pointing at a fake install prefix (a `package.json` version, an `install-record`, and `tests/fake-upgrade.sh` as its `bin/firstmate-tui.sh`, which logs its arguments and prints installer-like lines) or at a directory with no record for the checkout case, and with `--curl-cmd bash tests/fake-curl.sh` serving the releases API from `tests/fixtures/releases/api`: the page render, upgrade available versus up to date, the API unreachable, the Betas list newest first with commit and date, the confirm line with `y` alone starting the fake upgrade and every other key cancelling without running it, the fake's lines and a verbatim failure on the page, the checkout hint with no actions, and `esc` / `.` / `q` returning to the board with the selection intact; on the page a click highlights an entry, a double-click chooses it, the wheel moves the highlight, a click while a confirmation is pending cancels it, and a click never reaches the board behind the page. `enter` on `Upgrade to <version>`, on a beta and on `Back to stable` each opens the confirm line, and the frame is byte for byte the one a double-click on the same entry opens. The terminal adapter is checked on its own: the two keypress events the terminal library emits for one Enter press become one `enter` key, so a confirmation never sees the key that opened it. The launcher's relaunch loop (exit 75 starts the board again with the same arguments, once) runs against `tests/fake-node.sh` on PATH. No real firstmate home, herdr server, pointer, GitHub call or install is needed, and no terminal except in the last section: with `python3` on PATH and the board's dependencies installed (`npm ci` in `bin/firstmate-tui`), `tests/pty-keys.py` runs the real interactive board on a pseudo-terminal and types raw bytes into it, so the terminal library's own input path, which `--render-once` never loads, is covered end to end: one carriage return on a My PRs row calls the fake opener exactly once (its argv, pid and parent pid are logged), one carriage return on the Settings `Upgrade` entry opens the confirm line and `y` then runs the fake launcher exactly once, CR LF opens once and LF alone does nothing, under `TERM=xterm-256color`, `screen` and `tmux-256color` wherever the host has their terminfo. Without `python3` or the dependencies that section is skipped with a note.
+| Key | Meaning |
+| --- | --- |
+| `schema` | must be `firstmate-tui-config.v1`; a file with another schema is refused as a whole |
+| `identity.github_login` | the GitHub login the two pull request panes are built around, such as `zachsibert`, never a name or an email. `null` means resolve it: the account gh is logged in as, else git's `github.user`, else unknown |
+| `review.default_labels` | the labels a pull request must carry one of to be listed in Teammates' PRs, in every repository without its own entry under `repos`; an empty list means no filter |
+| `review.repos` | one entry per repository, `"owner/name": { "labels": [...] }`. Each named repository is searched even when firstmate has no work in it, and its `labels` list is its own rule; an empty list means no filter there whatever `default_labels` says |
 
-`tests/install.test.sh` covers distribution without touching GitHub. It builds the release tarball with `scripts/package.sh` (the same script the release workflow runs) into a scratch directory, checks its layout and checksum file, refuses a tag that does not match `package.json`, flags a `-beta` tag as a prerelease, builds a per-commit beta with `--commit` and checks that the staged `package.json` carries `<version>-<sha7>` while the source tree is unchanged, installs the tarball with `bin/install.sh --from-file` into a scratch prefix and bin dir (also from stdin, the way `curl | bash` runs it) and proves the installed `firstmate-tui` command renders a fixture frame and that `fm-board` is written beside it. It then upgrades in place, rejects a wrong checksum and a damaged tarball without touching the existing install, refuses a prefix holding unrelated files, and checks that the default paths under a scratch `HOME` leave nothing else behind. With `tests/fake-curl.sh` standing in for GitHub (it serves the releases API and the download URLs from a directory and logs each URL), it installs through the default channel, swaps to the beta with `firstmate-tui upgrade --pre`, back with `--stable`, to an exact version with and without the `v`, and through `--from-file`, checks `firstmate-tui version` after each step, that a view-state file outside the prefix is byte for byte unchanged, that a failed download leaves the install alone, that `upgrade` from a checkout refuses with the git command, and pins the workflow lines the installer and the README depend on. For the asset rename it builds the real 0.2.5 tarball from the `v0.2.5` tag (`fm-board-v0.2.5.tar.gz`, the old layout) and checks that the current installer installs it from a file, that both commands run its `bin/fm-board.sh`, that `firstmate-tui version` and a render work from it, that `upgrade` swaps between the two layouts in both directions and names the replaced version each way, that a tree with a launcher of one name and a package directory of the other is refused, and, through the fake network, that a release holding only `firstmate-tui-<tag>.tar.gz` installs, that one holding only `fm-board-<tag>.tar.gz` (the 0.2.5 release) installs through the fallback and says so, that one holding both takes the new name whatever order the release lists them in, that a release with neither name stops before any download and lists what it has, that a missing checksum is an error rather than a fallback, and, with the asset list unreadable, that the installer tries both names and moves past curl exit 56 and exit 7 on the first. Then it walks the real upgrade chains with the installers from the tags: a 0.2.5 install made by the 0.2.5 installer (`git show v0.2.5:bin/install.sh`) is reinstalled through the current installer from stdin against a fake latest release holding the 0.3.0 tarball, and the suite asserts that the new asset name is downloaded, the new layout installed, `firstmate-tui version` reports the current version, `fm-board version` still answers through the alias, the record says `layout=firstmate-tui`, and a view-state file outside the prefix is byte for byte unchanged; a second 0.2.5 install's own `firstmate-tui upgrade` reaches the same release in one step, since that installer asks for the new name first, while the same installer stops on the exit-56 answer for a missing name (the reproduction) and the reinstalled copy moves past that answer. A 0.1.0 install made by the 0.1.0 installer still reaches 0.2.5 by the old asset name through `fm-board upgrade`, its first run writes the `firstmate-tui` command beside `fm-board`, and the same 0.1.0 installer pointed at the 0.3.0 release fails without touching the install, because that release no longer carries the old asset name; `firstmate-tui --help`, `help` and an unknown subcommand are checked on the installed command too. It also checks `scripts/next-version.sh`, the release workflow's version pick, against fake tag lists: `0.2.4` with `v0.2.4` taken gives `0.2.5`, a free `0.2.5` stays `0.2.5`, `v0.2.4` and `v0.2.5` taken give `0.2.6`, a free `0.3.0` wins, and a malformed version is refused. It needs `npm` for the vendoring step and the `v0.1.0` and `v0.2.5` tags in the clone.
+Unknown keys are ignored.
+A malformed file (bad JSON, a wrong type, a repository name that is not `owner/name`) is reported once in the footer and on the Settings page, and the board runs with the defaults: no login from the file, no label rules, no extra repositories.
+The Settings page (`.`) shows the identity and where it came from, such as `Identity  zachsibert  (from gh api user)`, the config file's path with `(created from the example)` or `(using defaults: <reason>)` when that applies, and the label rules in effect.
+
+### view-state.json
+
+The view state remembers what you hid and how you sized the columns: hidden rows (by pane, home and id, plus the completion date for Landed, so an item that lands again reappears), hidden panes, and every column width you dragged.
+firstmate retires done rows on its own, so hiding a row is the board's business and never a firstmate write.
+`=` resets every column width, and the Settings page has a `Reset column widths` entry that does the same.
+
+### The pane record
+
+`firstmate-tui open --detached` records the pane it created under `~/.local/state/fm-board/` (or `$XDG_STATE_HOME/fm-board/`, or the directory herdr provides in `HERDR_PLUGIN_STATE_DIR`), so `firstmate-tui focus` can find it later.
+
+## Troubleshooting
+
+**The title line reads `refresh failed ... ago, retrying in ...` in red and the pull request panes say `(stale)`.**
+Symptom: the title line turns red with a line such as `refresh failed 40s ago, retrying in 20s`, both pull request panes carry `(stale)` in their titles and keep their old rows, a footer notice starting `PR fetch: My PRs:` names the error once, and a recorded pull request in My PRs reads `checks: fetch failed`.
+Cause: the board's GitHub fetch failed, most often because the machine cannot reach or resolve `github.com` (a dropped network, a VPN that is not up, a DNS outage).
+Confirm: run `gh api user` in a terminal.
+It prints your GitHub account as JSON when GitHub is reachable, and a connection error when it is not.
+Fix: restore the network.
+The board retries on every tick and `r` retries at once; the red text clears on the first clean refresh.
+
+**Both pull request panes show one row, `identity unknown: see Settings (.)`.**
+Symptom: My PRs and Teammates' PRs each show that single row and fetch nothing, the footer shows once `GitHub identity unknown (<what was tried>); set identity.github_login in <config path> or run gh auth login`, and the Settings page's Identity line reads `identity unknown: set identity.github_login in <config path>, or run gh auth login`.
+A spinner line reading `resolving GitHub identity` in both panes for a few seconds after a start is not this: it is the board asking the three sources, and the row appears only once all three have failed.
+Cause: the board could not learn your GitHub login: the config file's `identity.github_login` is `null`, gh is not logged in (or not installed, or the board runs with `--no-prs`), and git has no `github.user` setting.
+Fix: either write your login into the config file's `identity.github_login`, or run `gh auth login` once.
+Then press `r`; while the identity is unknown a refresh asks again, so no restart is needed.
+Check: the Settings page's Identity line reads your login followed by `(from config)` or `(from gh api user)`.
+
+**The title line reads `herdr disconnected (<reason>)` in red.**
+Symptom: the title line carries that warning, and the HERDR column in In flight reads `unknown` in grey instead of a live pane count.
+Cause: the board cannot hold its subscription to herdr's socket.
+The reason in the parentheses says why: `--no-herdr` means you started it that way; `connecting` means it has not connected yet; a socket error such as `ECONNREFUSED` or `ENOENT` means herdr's server is not running or its socket has moved; `herdr status did not report a socket path` means the board found a `herdr` command but that command could not name a server.
+Check: run `herdr status`.
+It reports the running server, or fails when there is none.
+Fix: start herdr, or run the board from inside a herdr pane, where the socket is known through the environment; the board reconnects on its own and the warning goes as soon as the subscription is back.
+Outside herdr on purpose, start with `--no-herdr` and read the warning as a reminder rather than a fault.
 
 ## Releasing
 
-Releases are GitHub Releases, published by `.github/workflows/release.yml`, and nobody tags by hand. Every merge to `main` is a release. The one version source is `version` in `bin/firstmate-tui/package.json`, and `scripts/next-version.sh` decides what the next release is called: package.json's version when the tag `v<version>` does not exist yet, else the next free patch number (with `v0.2.4` released and package.json still at `0.2.4`, the next merge releases `0.2.5`). The workflow publishes two kinds of release:
+Releases are GitHub Releases, published by `.github/workflows/release.yml`; nobody tags by hand.
+Every merge to `main` is a release.
+The one version source is `version` in `bin/firstmate-tui/package.json`, and `scripts/next-version.sh` decides what the next release is called: package.json's version when the tag `v<version>` does not exist yet, else the next free patch number.
+When the picked version differs from package.json, the workflow writes it into package.json and the lockfile, commits that bump to `main` as `github-actions[bot]` with the skip-ci marker in the message, and releases at that commit; otherwise it releases at the merge commit itself.
+Every push to any other branch publishes a beta, a prerelease named `v<next>-<sha7>` and built with `scripts/package.sh --commit <sha>`, so a beta carries the version the next merge will release.
+When a pull request closes, merged or not, the workflow deletes the betas of its commits; after each new beta it also prunes betas beyond the newest 30, oldest first.
+Stable releases are never deleted.
 
-- **A stable release** appears on every push to `main`. The workflow picks the version as above. When it differs from package.json, it writes it into `bin/firstmate-tui/package.json` and the lockfile, commits `Release <version> [skip ci]` as `github-actions[bot]` and pushes that commit to `main`; a push made with the built-in token starts no workflow run, and the marker is the second guard, so the bump never releases itself again. Then it builds `firstmate-tui-v<version>.tar.gz` with `scripts/package.sh` at that commit (it unpacks to `firstmate-tui-v<version>/`), creates the tag there and publishes the release with the tarball, its `.sha256`, the install command and auto-generated notes. When package.json already names a free version, the release is cut at the merge commit itself.
-- **A beta** is published for every push to any other branch, named against the version the next merge will release: `scripts/package.sh --commit <sha>` builds `firstmate-tui-v<next>-<sha7>.tar.gz` with the full version `<next>-<sha7>` (`0.2.5-d8b290e`) stamped into the tarball's `package.json`, and a prerelease tagged `v<next>-<sha7>` is created at that commit, titled with the version. The default install skips prereleases; `--pre` or `--version` picks one up ([Upgrade and switch](#upgrade-and-switch)).
-
-**The renamed asset.** Up to 0.2.x the tarball was `fm-board-<tag>.tar.gz`, with `bin/fm-board.sh` and `bin/fm-board/` inside, and every installer before 0.2.5 downloaded that name and looked for those paths. An install upgrades with the installer that shipped in its own tarball, so the rename took two releases: the 0.2.5 installer learned to ask for `firstmate-tui-<tag>.tar.gz` first, fall back to `fm-board-<tag>.tar.gz`, accept either layout and note it in the install record (`layout=`), and 0.3.0 renamed the asset and the paths once the known installs were on 0.2.5. The installer keeps both names: it reads the release's asset list from the GitHub API and downloads `firstmate-tui-<tag>.tar.gz` when the release has it, else `fm-board-<tag>.tar.gz`; when that list cannot be read it tries the two names in that order and moves on from the first on any curl failure, not one exit status (GitHub answers a missing asset with curl exit 56 through its redirect, not 22, which is what stopped the 0.2.5 installer). It accepts either layout, so a 0.2.x release can still be installed. The `fm-board` command alias goes in the next release.
-
-Nothing needs a version bump to be released, so never open a PR only to bump a version. To move the minor or major number, change it in the PR that earns it and merge; that version wins as long as its tag is free. One rule for every commit you push: its message must never contain the literal skip-ci marker, the bracketed words the bot's bump commit uses, because GitHub then skips the PR's own checks and its beta. The workflow's bump commit is the only place that marker belongs; in prose, spell it out as "the skip-ci marker".
+Nothing needs a version bump to be released, so never open a pull request only to bump the version.
+To move the minor or major number, change it in the pull request that earns it:
 
 ```sh
-(cd bin/firstmate-tui && npm version 0.3.0 --no-git-tag-version)   # sets package.json and the lockfile
-git commit -am "Rework the panes; firstmate-tui 0.3.0"
-# push, open the PR, merge it: the Release run on main publishes v0.3.0
+(cd bin/firstmate-tui && npm version 0.5.0 --no-git-tag-version)   # sets package.json and the lockfile
+git commit -am "Rework the panes; firstmate-tui 0.5.0"
 ```
 
-Retention: when a pull request closes, merged or not, the workflow deletes the beta release and tag of every commit in it. After each new beta it also deletes hash betas beyond the newest 30, oldest first, which catches the betas of commits that were force-pushed away or pushed without a PR. Stable releases are never deleted.
+One rule for every commit you push: its message must never contain the literal skip-ci marker, the bracketed words the bot's bump commit uses, because GitHub then skips the pull request's own checks and its beta.
+The workflow's bump commit is the only place that marker belongs; in prose, spell it out as "the skip-ci marker".
+`scripts/package.sh` is the one place that builds the tarball, for the workflow and for the tests alike, and it refuses a release tag that is not `v` plus the source version.
+`.github/workflows/test.yml` runs both test suites, ShellCheck and actionlint on every pull request and on every push to a branch other than `main`.
+After editing a workflow, lint it with `actionlint` and run `tests/install.test.sh`, which pins the workflow lines the installer and this README depend on.
 
-The workflow uses the built-in `GITHUB_TOKEN` with `contents: write` and nothing broader, pins each action to a major version, and runs one job per ref at a time so two pushes never race. `scripts/package.sh` refuses a release tag that is not `v` plus the source version, so nothing can publish under the wrong name; at a bump commit the two agree by construction. `workflow_dispatch` re-runs the job for whichever branch it is started on. After editing the workflow, lint it with `actionlint` and run `tests/install.test.sh`, which builds both kinds of tarball the same way, checks `scripts/next-version.sh` against fake tag lists and pins the workflow lines the installer and this section depend on. `.github/workflows/test.yml` runs both test suites, ShellCheck and actionlint on every pull request and on every push to a branch other than `main`, so a red suite cannot reach `main` unnoticed.
+## Development
 
-## Layout of the code
-
+```sh
+git clone https://github.com/zachsibert/firstmate-tui.git
+cd firstmate-tui
+(cd bin/firstmate-tui && npm ci)   # installs the one dependency, neo-blessed 0.2.0
+bin/firstmate-tui.sh version       # from a checkout the command is bin/firstmate-tui.sh
 ```
-bin/install.sh               installer: download a release tarball (or --from-file), verify the checksum, unpack into --prefix, write the firstmate-tui command (and the fm-board alias) into --bin-dir and the install record; ships in the tarball so firstmate-tui upgrade runs it
-scripts/package.sh           build firstmate-tui-<tag>.tar.gz (unpacking to firstmate-tui-<tag>/) and its .sha256 for a release (<tag>) or a per-commit beta (--commit <sha>, version <version>-<sha7>); run by the release workflow and by tests/install.test.sh
-.github/workflows/release.yml  the one release path: a prerelease per push to a branch, the v<version> release once when main carries a new version, beta cleanup when a PR closes
-bin/firstmate-tui.sh              the firstmate-tui command: usage page, FM_HOME, node and herdr checks, open --detached/focus, version/upgrade, view-state and config paths, run index.mjs (and run it again when it exits 75, the Settings page's relaunch)
-bin/firstmate-tui/index.mjs       entry: argument parsing, --render-once, interactive run
-bin/firstmate-tui/lib/args.mjs    option definitions
-bin/firstmate-tui/lib/sources.mjs every read against firstmate homes and GitHub (snapshot, ledgers, mtimes, the gh api graphql searches and lookup for the two PR panes and their script fallback, the gh and git identity rungs, the GitHub releases fetch for the Settings page)
-bin/firstmate-tui/lib/config.mjs  the board-owned config.json: the GitHub login and the Teammates' PRs label rules, where it lives, its parse, the example written once
-bin/firstmate-tui/lib/identity.mjs  pure: the login the PR panes are built around, from the config file, gh or git, with the reason when none answers
-docs/config.example.json          the documented config file, byte for byte what a first launch writes
-bin/firstmate-tui/lib/settings.mjs  pure: the Settings page state, its entries, its key meanings, the releases API parse
-bin/firstmate-tui/lib/upgrade.mjs the install record and running version (readInstall) and the upgrade child (bash <prefix>/bin/firstmate-tui.sh upgrade ...) with its lines streamed
-bin/firstmate-tui/lib/model.mjs   pure: firstmate facts -> six panes of rows (scout report section 1, with My PRs and Teammates' PRs in place of Ready for review)
-bin/firstmate-tui/lib/layout.mjs  pure: pane heights, columns (auto widths from the rows, the dragged overrides, the clamps), width breakpoints, the mouse hit test and the column-boundary test
-bin/firstmate-tui/lib/render.mjs  pure: model + view state -> frame lines (plus what each line shows, for the mouse) and the help overlay
-bin/firstmate-tui/lib/herdr.mjs   herdr CLI calls and the socket subscription client
-bin/firstmate-tui/lib/controller.mjs  pure key and mouse semantics (move, expand/collapse, open, focus, view, hide, panes, refresh, the Settings page; click, double-click, wheel, the column-boundary drag and its resets) shared by the app and --keys / --mouse
-bin/firstmate-tui/lib/opener.mjs  open a URL in the browser: argv spawn of open / xdg-open / --opener-cmd
-bin/firstmate-tui/lib/viewer.mjs  show a report in the terminal: the glow / $EDITOR / vim / less chain and the argv spawn
-bin/firstmate-tui/lib/viewstate.mjs  the board-owned view-state.json: hidden row keys, hidden panes and dragged column widths, where it lives, atomic save, the review -> mine rename on read
-bin/firstmate-tui/lib/app.mjs     interactive controller: refresh schedule, view state, the effects behind each key (suspend/resume around the viewer)
-bin/firstmate-tui/lib/tui-blessed.mjs  the only module that imports neo-blessed; switches mouse reporting on and translates the library's mouse events (presses, releases, drags, the wheel), deciding nothing
-bin/firstmate-tui/herdr-plugin.toml    herdr plugin manifest (firstmate.board: board pane, open/focus actions)
+
+The tests:
+
+```sh
+env -u FORCE_COLOR bash tests/fm-board.test.sh    # the board: renders fixtures and asserts on the frames
+env -u FORCE_COLOR bash tests/install.test.sh     # the installer, the upgrade paths and the release workflow
 ```
+
+The board suite renders fixtures under `tests/fixtures/` through `--render-once` and asserts on the printed frame; it needs Node, and its last section needs python3 and the installed `node_modules`, and is skipped with a note without them.
+One check compares node's plain output, so `FORCE_COLOR` must be unset.
+The narrow-layout checks match the box-drawing dashes in a section header, so the shell needs a UTF-8 locale (`LANG=en_US.UTF-8`); under a bare environment with no locale two of them fail on that alone.
+The install suite builds the release tarball, installs it into a scratch prefix and walks the upgrade chains against a fake GitHub; it needs npm and a full clone, because it builds the 0.1.0 and 0.2.5 tarballs from their tags.
+Neither suite touches GitHub, a real herdr server or a browser.
+ShellCheck 0.11.0 must pass on every shell script: `npx --yes shellcheck@4.1.0 --norc bin/*.sh scripts/*.sh tests/*.sh`.
+[`AGENTS.md`](AGENTS.md) describes the layout of the code, the rules the board keeps and how each part is tested.
+The design report that grounds the board is [`docs/scout-report-2026-09-16.md`](docs/scout-report-2026-09-16.md).

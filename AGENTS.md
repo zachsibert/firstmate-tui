@@ -38,7 +38,7 @@ scout report at `docs/scout-report-2026-09-16.md` is the design record: its
 section 1 table is the pane-to-data mapping that `bin/firstmate-tui/lib/model.mjs`
 implements row for row (since 0.4.0 its Ready for review row is two panes, My
 PRs and Teammates' PRs, both over the identity in the board's config file; the
-README's Panes section is the current mapping), and its section 7 table is
+README's Using the board section is the current mapping), and its section 7 table is
 the milestone plan. Check the plan before widening scope: answering
 decisions, opening PRs, toasts and the findings watermark belong to later
 milestones.
