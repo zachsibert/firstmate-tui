@@ -11,7 +11,7 @@ const H = '─';
 const V = '│';
 
 export const HELP_LINES = [
-  'fm-board keys',
+  'firstmate-tui keys',
   '',
   '  j / down     next row            k / up       previous row',
   '  tab          next pane           shift-tab    previous pane',
@@ -118,7 +118,7 @@ function titleLine(model, cols) {
   const home = cols >= 100 ? m.fmHome : m.fmHome.split('/').filter(Boolean).slice(-1)[0] || m.fmHome;
   const allHidden = m.hiddenPanes && m.hiddenPanes.length === model.panes.length;
   const hiddenPanes = allHidden ? ' · all panes hidden' : m.hiddenPanes && m.hiddenPanes.length ? ` · panes hidden: ${m.hiddenPanes.join(',')}` : '';
-  const left = ` fm-board · ${home} · ${m.homes} home${m.homes === 1 ? '' : 's'}${hiddenPanes}`;
+  const left = ` firstmate-tui · ${home} · ${m.homes} home${m.homes === 1 ? '' : 's'}${hiddenPanes}`;
   const right = [];
   if (m.refresh && m.refresh.text) right.push(seg(m.refresh.text, m.refresh.failed ? 'title bad' : 'title'));
   if (m.herdrWarning) {
@@ -405,7 +405,7 @@ function renderSettings(model, cols, rows, view) {
   head.push(L([]));
   // Identity: the words `firstmate-tui version` prints, then where this copy lives.
   if (install.version) head.push(text(describeVersion(install.version)));
-  else head.push(text(`fm-board: version unreadable (${install.error})`, 'bad'));
+  else head.push(text(`firstmate-tui: version unreadable (${install.error})`, 'bad'));
   if (install.record) {
     head.push(text(`installed at ${install.root} (from ${install.record.installed_from || 'unknown'}) · repository ${install.repo}`));
   } else if (install.git) {

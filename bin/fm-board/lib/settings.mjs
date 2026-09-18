@@ -276,6 +276,11 @@ export function resultNotice(result) {
 //   j k       move the cursor         enter        choose the highlighted entry
 //   r         fetch the release data  R            relaunch after a success
 //   ?         help overlay            ctrl-c       quit
+// enter answers { type: 'activate', cursor, action }, the object a double-click
+// on the same entry yields, so the keyboard and the mouse open a confirmation
+// through the one activate case in lib/controller.mjs. The terminal adapter
+// delivers one enter per press (lib/tui-blessed.mjs normalizeKey); the pending
+// prompt only ever sees the keys pressed after it opened.
 export function settingsKeyAction(s, key) {
   if (s.running) return key === 'ctrl-c' ? { type: 'quit' } : { type: 'none' };
   if (s.pending) return key === 'y' ? { type: 'upgrade', channel: s.pending.channel, version: s.pending.version } : { type: 'cancel' };
@@ -316,7 +321,9 @@ export function settingsKeyAction(s, key) {
         return { type: 'none' };
       }
       if (key !== 'enter' && entry.action.type !== 'menu') return { type: 'none' };
-      return entry.action;
+      // The same object a double-click on this entry yields (settingsMouseAction),
+      // so both reach the entry's action through the one activate case.
+      return { type: 'activate', cursor, action: entry.action };
     }
     default:
       return { type: 'none' };

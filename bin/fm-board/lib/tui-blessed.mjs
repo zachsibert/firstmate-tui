@@ -10,16 +10,20 @@
 //   screen.resume()      -> take the terminal back and repaint everything
 //   screen.destroy()     -> restore the terminal
 // Keys are normalized to short names: j k h l o x X H f 0-9 up down left right
-// tab S-tab enter r ? q escape ctrl-c.
+// tab S-tab enter r ? q escape ctrl-c. One key press must reach onKey once:
+// the library reports the Enter key (\r) as two keypress events, and
+// normalizeKey() keeps one of them (see there).
 //
 // Mouse: with `mouse` true the screen listens for the library's mouse events,
 // which is what turns the terminal's mouse reporting on (and off again on
 // destroy, and around suspend/resume for the viewer, both inside the library).
 // normalizeMouse() turns each event into the plain object
 // lib/controller.mjs reads: { type: 'down' | 'up' | 'wheel', button, x, y,
-// dir, time }, cells from 0 at the top-left. Motion and drag events are
-// dropped; nothing here decides what a click means. With `mouse` false no
-// listener is added, so the terminal keeps its own click and text selection.
+// dir, time }, cells from 0 at the top-left. Motion and drag reports are
+// dropped, drags by the motion flag in their button code because the library
+// labels them presses (isMotion); nothing here decides what a click means.
+// With `mouse` false no listener is added, so the terminal keeps its own click
+// and text selection.
 //
 // A segment style is one or more space-separated names from STYLE_TAGS
 // ("selected lost" is an inverse row whose cell is also red); toTags() opens
@@ -75,11 +79,21 @@ export function toTags(lines) {
     .join('\n');
 }
 
+// One keypress event to one key name, or null for an event the board ignores.
+// The Enter key arrives twice: neo-blessed 0.2.0 names a \r keypress 'return'
+// and, before delivering it, re-emits a copy named 'enter' (lib/program.js,
+// the input keypress listener), so one press is the two events
+// { name: 'enter', sequence: '\r' } and { name: 'return', sequence: '\r' }.
+// Only the 'enter' event counts here; 'return' is dropped, or every Enter
+// would act twice (on the Settings page the second one cancelled the
+// confirmation the first had just opened). A \n keypress (ctrl-j) is named
+// 'linefeed' by the library and stays unbound.
 export function normalizeKey(ch, key) {
   const name = key && key.name;
   if (key && key.ctrl && name === 'c') return 'ctrl-c';
   if (name === 'tab') return key.shift ? 'S-tab' : 'tab';
-  if (name === 'enter' || name === 'return') return 'enter';
+  if (name === 'enter') return 'enter';
+  if (name === 'return') return null;
   if (name === 'up' || name === 'down' || name === 'left' || name === 'right' || name === 'escape' || name === 'pageup' || name === 'pagedown') return name;
   if (name === 'backtab') return 'S-tab';
   if (ch && ch.length === 1 && ch >= ' ') return ch;
@@ -91,8 +105,32 @@ export function normalizeKey(ch, key) {
 // (ESC [ b;x;y M).
 const MOUSE_SEQUENCES = /\x1b\[M[\s\S]{3}|\x1b\[<\d+;\d+;\d+[mM]|\x1b\[\d+;\d+;\d+M/g;
 
+// The reports in one input chunk when it carries two or more, else null. The
+// library parses one report per chunk (program.js _bindMouse anchors its match
+// at the start), so createScreen hands them over one at a time; exported so
+// the split is checked without a terminal.
+export function splitMouseReports(s) {
+  const parts = typeof s === 'string' ? s.match(MOUSE_SEQUENCES) : null;
+  return parts && parts.length >= 2 ? parts : null;
+}
+
+// The button code of an X10, urxvt or SGR report carries 32 when the pointer
+// moved to another cell: with a button held in mode 1002, without one in 1003,
+// both of which the library turns on. neo-blessed 0.2.0 turns only the
+// no-button codes into 'mousemove' and reports a drag with the left button
+// held as 'mousedown left' (program.js _bindMouse, verified on a pty), so a
+// click whose pointer slipped one cell would reach the controller as two
+// presses. The wire code is on the event as raw[0]; X10 and urxvt add 32 to it.
+function isMotion(data) {
+  const raw = Array.isArray(data.raw) ? data.raw[0] : null;
+  if (!Number.isInteger(raw)) return false;
+  const code = data.type === 'sgr' ? raw : raw - 32;
+  return (code & 32) !== 0;
+}
+
 export function normalizeMouse(data) {
   if (!data || !Number.isInteger(data.x) || !Number.isInteger(data.y)) return null;
+  if (isMotion(data)) return null;
   const button = data.button === 'left' || data.button === 'right' || data.button === 'middle' ? data.button : null;
   switch (data.action) {
     case 'mousedown':
@@ -108,7 +146,7 @@ export function normalizeMouse(data) {
   }
 }
 
-export async function createScreen({ onKey, onMouse, onResize, mouse = false, title = 'fm-board' }) {
+export async function createScreen({ onKey, onMouse, onResize, mouse = false, title = 'firstmate-tui' }) {
   const blessed = (await import('neo-blessed')).default;
   const screen = blessed.screen({
     smartCSR: true,
@@ -135,17 +173,15 @@ export async function createScreen({ onKey, onMouse, onResize, mouse = false, ti
   // calls program.enableMouse, verified in neo-blessed 0.2.0
   // lib/widgets/screen.js); without it the terminal never hears about it.
   if (mouse && onMouse) {
-    // The library parses one mouse sequence per input chunk (program.js
-    // _bindMouse anchors its match at the start of the chunk, verified in
-    // neo-blessed 0.2.0), and while the board is busy drawing the frame for
-    // one press the terminal can deliver that press's release and the next
-    // press in a single read, which would lose the second click of a
-    // double-click. Hand the library one sequence at a time.
+    // While the board is busy drawing the frame for one press the terminal
+    // can deliver that press's release and the next press in a single read,
+    // and the library would parse only the first (splitMouseReports), losing
+    // the second click of a double-click. Hand it one report at a time.
     const program = screen.program;
     const bindOne = program._bindMouse.bind(program);
     program._bindMouse = (s, buf) => {
-      const parts = typeof s === 'string' ? s.match(MOUSE_SEQUENCES) : null;
-      if (!parts || parts.length < 2) return bindOne(s, buf);
+      const parts = splitMouseReports(s);
+      if (!parts) return bindOne(s, buf);
       for (const part of parts) bindOne(part, buf);
       return undefined;
     };
