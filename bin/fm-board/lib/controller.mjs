@@ -16,11 +16,14 @@
 //   X       unhide every row of the current pane
 // Board-wide:
 //   H       toggle showing hidden rows (greyed, marked "(hidden)")
-//   1-5     show or hide one pane (Needs you .. Landed); 0 shows all five
+//   1-5     show or hide one pane (Needs you .. Landed); 0 shows all five.
+//           Any pane may go, the last one too: with all five hidden the frame
+//           is the landing page (lib/render.mjs) and only 0-5, r, ? and q act
 //   r       refresh (the snapshot, and the PR checks when --prs is on)
 //   ?       help       q / ctrl-c  quit
 
 import { PANES } from './layout.mjs';
+import { allPanesHidden } from './render.mjs';
 
 const OPEN_PANES = new Set(['review', 'needs', 'landed']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
@@ -97,7 +100,7 @@ export function moveSelection(model, view, key) {
 
 export function selectedRow(model, view) {
   const pane = model.panes[view.pane];
-  return pane ? pane.rows[view.row] || null : null;
+  return pane && !pane.hidden ? pane.rows[view.row] || null : null;
 }
 
 // Why a row cannot be focused right now, or null when `herdr agent focus` may
@@ -129,9 +132,17 @@ export function paneForKey(key) {
   return Number.isInteger(i) && i >= 0 && i < PANES.length ? PANES[i].id : null;
 }
 
+// Keys that still mean something on the landing page (every pane hidden). A
+// key that would otherwise move the selection or act on a row nobody can see
+// only reminds the captain how to bring a pane back; a key the board does not
+// bind stays the silent no-op it is everywhere else.
+const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', 'r', '?', 'q', 'ctrl-c']);
+const ROW_KEYS = new Set(['enter', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
+
 export function keyAction(model, view, key) {
   const pane = model.panes[view.pane];
-  const row = pane ? pane.rows[view.row] || null : null;
+  const row = pane && !pane.hidden ? pane.rows[view.row] || null : null;
+  if (allPanesHidden(model) && !LANDING_KEYS.has(key)) return ROW_KEYS.has(key) ? { type: 'notice', text: 'all panes hidden · 1-5 shows a pane, 0 shows all' } : { type: 'none' };
   switch (key) {
     case 'q':
     case 'ctrl-c':
@@ -272,16 +283,12 @@ export function handleKey(ctx, key) {
         ctx.notice(`pane shown: ${pane.title}`);
         return;
       }
-      const shown = ctx.model.panes.filter((p) => !p.hidden).length;
-      if (shown <= 1) {
-        ctx.notice('at least one pane stays visible', true);
-        return;
-      }
       view.hiddenPanes.add(action.paneId);
       ctx.rebuild();
       clamp();
       ctx.persist();
-      ctx.notice(`pane hidden: ${pane.title} · ${action.key} or 0 shows it again`);
+      if (allPanesHidden(ctx.model)) ctx.notice(`pane hidden: ${pane.title} · every pane hidden; 1-5 or 0 shows them`);
+      else ctx.notice(`pane hidden: ${pane.title} · ${action.key} or 0 shows it again`);
       return;
     }
     case 'show-panes':

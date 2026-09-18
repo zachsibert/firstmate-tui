@@ -21,6 +21,8 @@ const STYLE_TAGS = {
   border: ['{blue-fg}', '{/blue-fg}'],
   'border-focus': ['{bold}{cyan-fg}', '{/cyan-fg}{/bold}'],
   colhead: ['{bold}{underline}', '{/underline}{/bold}'],
+  badge: ['{grey-fg}', '{/grey-fg}'], // the [n] toggle key before a pane title
+  heading: ['{bold}', '{/bold}'], // the landing page's one heading line
   selected: ['{inverse}', '{/inverse}'],
   bad: ['{red-fg}', '{/red-fg}'],
   lost: ['{red-fg}', '{/red-fg}'],
