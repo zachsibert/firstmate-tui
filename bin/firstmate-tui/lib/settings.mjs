@@ -95,7 +95,7 @@ export function settingsFlags(opts) {
     { label: 'refresh cadence', value: `${opts.refresh} s (--refresh)` },
     { label: 'PR data', value: opts.prs ? 'on: live GitHub checks on every tick' : 'off (--no-prs)' },
     { label: 'herdr overlay', value: opts.herdr ? 'on' : 'off (--no-herdr)' },
-    { label: 'mouse', value: opts.mouse === false ? 'off (--no-mouse)' : 'on: click selects, double-click acts, wheel scrolls' },
+    { label: 'mouse', value: opts.mouse === false ? 'off (--no-mouse)' : 'on: click selects, double-click acts, wheel scrolls, a header boundary drags' },
   ];
 }
 
@@ -208,6 +208,8 @@ export function settingsEntries(s) {
   }
   entries.push({ id: 'betas', label: 'Betas', detail: betasDetail(r, checkout), selectable: true, action: { type: 'menu', menu: 'betas' } });
   entries.push({ id: 'refetch', label: 'Refresh release data', detail: `GitHub releases of ${s.install.repo}`, selectable: true, action: { type: 'fetch' } });
+  // Applied to the board's view by lib/controller.mjs, the same as the = key.
+  entries.push({ id: 'columns', label: 'Reset column widths', detail: 'every pane back to its automatic widths (= on the board)', selectable: true, action: { type: 'reset-columns' } });
   return entries;
 }
 

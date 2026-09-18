@@ -1,0 +1,92 @@
+{
+  "_comment": "The column-spacing screenshot's shape (2026-09-17): Needs you holds three captain holds whose REPO is a long organisation/name and whose HOME is always main; Ready for review lists seven live PRs nobody recorded, every BASE main, with long titles; In flight has three working tasks on one repository. now is 2026-09-16T12:00:00Z = epoch 1789560000. With fixed column widths BASE, REPO and HOME took the room TITLE and WHAT needed; the columns now size to their widest value, so the 81-character title shows in full, BASE is four cells wide and the 19-character repository name is not cut. The third hold's id is 28 characters, longer than the 24-cell cap, and truncates. Findings and Landed are empty.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 40,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "fm-board-asset-rename",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/firstmate-tui",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/fm-board-asset-rename.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Rename the release asset", "repo": "zachsibert/firstmate-tui" }
+      },
+      {
+        "id": "fm-board-loading-spinner",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/firstmate-tui",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7B:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/fm-board-loading-spinner.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Loading spinner per pane", "repo": "zachsibert/firstmate-tui" }
+      },
+      {
+        "id": "fm-board-settings-enter",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/firstmate-tui",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7C:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/fm-board-settings-enter.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Settings enter fix", "repo": "zachsibert/firstmate-tui" }
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "fm-board-asset-rename", "state": "in_flight", "title": "Rename the release asset", "repo": "zachsibert/firstmate-tui", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-16", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "fm-board-loading-spinner", "state": "in_flight", "title": "Loading spinner per pane", "repo": "zachsibert/firstmate-tui", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-16", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "fm-board-settings-enter", "state": "in_flight", "title": "Settings enter fix", "repo": "zachsibert/firstmate-tui", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-16", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "uuidv7-rfc-rewrite", "state": "queued", "title": "Rewrite RFC-017 as thought leadership for the platform team", "repo": "MatthewsREIS/gemini", "kind": "task", "hold_kind": "captain", "hold_reason": null, "hold_until": "2026-09-15", "hold_set": "2026-08-10T12:00:00Z", "hold_bucket": "live", "hold_age_days": 37, "captain_actionable": true, "since": "2026-08-10", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "uuidv7-rfc-scout-decision", "state": "queued", "title": "Drop or adopt three nonprod objects the scout found", "repo": "gemini", "kind": "task", "hold_kind": "captain", "hold_reason": null, "hold_until": null, "hold_set": null, "hold_bucket": "live", "hold_age_days": null, "captain_actionable": true, "since": "2026-09-01", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "review-rfc-discussion-thread", "state": "queued", "title": "Review RFC", "repo": "gemini", "kind": "task", "hold_kind": "captain", "hold_reason": "Captain asked on 2026-09-02", "hold_until": "2026-09-09", "hold_set": "2026-09-07T12:00:00Z", "hold_bucket": "live", "hold_age_days": 9, "captain_actionable": true, "since": "2026-09-07", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } }
+      ]
+    },
+    "scout_reports": [],
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "herdr": {
+    "agents": [
+      { "pane_id": "w7A:p1", "agent_status": "working", "terminal_title_stripped": "fm-board-asset-rename" },
+      { "pane_id": "w7B:p1", "agent_status": "working", "terminal_title_stripped": "fm-board-loading-spinner" },
+      { "pane_id": "w7C:p1", "agent_status": "idle", "terminal_title_stripped": "fm-board-settings-enter" }
+    ]
+  },
+  "prs": {
+    "candidate_prs": [
+      { "num": "279", "repo": "acme/hyperion-ai", "task": "-", "url": "https://github.com/acme/hyperion-ai/pull/279", "title": "refactor(helm): read credentials from hyperion-secrets instead of the chart values", "base": "main", "review": "none", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-08-25T12:00:00Z", "draft": true, "state": "OPEN", "merged_at": null, "closed_at": null },
+      { "num": "314", "repo": "acme/hyperion-ai", "task": "-", "url": "https://github.com/acme/hyperion-ai/pull/314", "title": "Match quality: the 2026-09-15 assessment, pair 2 adjustments and the scoring notes", "base": "main", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-16T06:00:00Z", "draft": false, "state": "OPEN", "merged_at": null, "closed_at": null },
+      { "num": "313", "repo": "acme/hyperion-ai", "task": "-", "url": "https://github.com/acme/hyperion-ai/pull/313", "title": "fix: floor Retry-After so a rate-limited 429 backs off for at least one second", "base": "main", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-16T04:00:00Z", "draft": false, "state": "OPEN", "merged_at": null, "closed_at": null },
+      { "num": "306", "repo": "acme/hyperion-ai", "task": "-", "url": "https://github.com/acme/hyperion-ai/pull/306", "title": "fix(hyperion-orch): gate vendor updates on change size and reviewer availability", "base": "main", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-14T12:00:00Z", "draft": false, "state": "OPEN", "merged_at": null, "closed_at": null },
+      { "num": "17", "repo": "acme/firstmate-tui", "task": "-", "url": "https://github.com/acme/firstmate-tui/pull/17", "title": "Count down to the next refresh on the title line; drop the per-pane ages", "base": "main", "review": "APPROVED", "mergeable": "UNKNOWN", "checks": "passing", "created_at": "2026-09-16T11:36:00Z", "draft": false, "state": "MERGED", "merged_at": "2026-09-16T11:50:00Z", "closed_at": "2026-09-16T11:50:00Z" },
+      { "num": "16", "repo": "acme/firstmate-tui", "task": "-", "url": "https://github.com/acme/firstmate-tui/pull/16", "title": "Ready for review columns: CHECKS, STATUS, ID, TITLE, BASE and AGE", "base": "main", "review": "APPROVED", "mergeable": "UNKNOWN", "checks": "passing", "created_at": "2026-09-16T11:31:00Z", "draft": false, "state": "MERGED", "merged_at": "2026-09-16T11:45:00Z", "closed_at": "2026-09-16T11:45:00Z" },
+      { "num": "15", "repo": "acme/firstmate-tui", "task": "-", "url": "https://github.com/acme/firstmate-tui/pull/15", "title": "fm-board: Settings page with upgrade from inside the board", "base": "main", "review": "APPROVED", "mergeable": "UNKNOWN", "checks": "passing", "created_at": "2026-09-16T10:00:00Z", "draft": false, "state": "MERGED", "merged_at": "2026-09-16T11:00:00Z", "closed_at": "2026-09-16T11:00:00Z" }
+    ]
+  },
+  "mtimes": {
+    "/fixture/firstmate/state/fm-board-asset-rename.status": 1789559880,
+    "/fixture/firstmate/state/fm-board-loading-spinner.status": 1789559940,
+    "/fixture/firstmate/state/fm-board-settings-enter.status": 1789559640
+  }
+}

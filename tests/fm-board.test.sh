@@ -17,7 +17,8 @@
 # reports the viewer the PATH chain resolved to, so the suite shadows glow with
 # the fake on PATH and no real viewer ever runs. Mouse gestures go through
 # `--mouse <list>` (click:X,Y, dblclick:X,Y, tripleclick:X,Y, wheel:up:X,Y,
-# wheel:down:X,Y and key names, in order with --keys; X the column and Y the
+# wheel:down:X,Y, drag:X1,Y->X2 (press, motion in steps, release), move:X,Y,
+# release:X,Y and key names, in order with --keys; X the column and Y the
 # line, from 0 at the top-left cell), which feeds lib/controller.mjs
 # handleMouse the same event objects the terminal adapter would, measured
 # against the frame the app would have drawn, so no terminal library and no
@@ -77,6 +78,10 @@
 #                   IN REVIEW, APPROVED, CLOSED, MERGED), a merged PR 11h59m and
 #                   one 12h01m before now, an open PR of a done task, a closed PR
 #                   with no time stamp, a closed draft and an unlisted recorded PR
+#   column-widths.json  160x40, the column-spacing screenshot's shape: three
+#                   captain holds with a long organisation/repo name and HOME
+#                   main, seven live PRs with long titles and BASE main, three
+#                   workers on one repository, Findings and Landed empty
 #   grouped.json    160x44, In flight grouping: two secondmate homes, one with
 #                   four children (a keyed decision, a blocked child with a hold
 #                   reason) plus live and dated captain holds, one quiet
@@ -293,7 +298,7 @@ assert_row "$frame" '^ firstmate-tui · /fixture/firstmate · 3 homes ' "the tit
 # Needs you rows (falsify: remove scout-beta's blocked_event, ship-alpha's open_decisions entry,
 # decide-vendor's hold_bucket=live, or ship-gamma's pr.url).
 assert_row "$frame" '^│ blocked +- +scout-beta +blocked: gh auth expired +acme/api +main +2h │$' "blocked worker row with repo, home and age"
-assert_row "$frame" '^│ decide +db-choice ship-alpha +Postgres or SQLite for the cache\? +acme/widgets +main +5m │$' "keyed decision row shows key, task, summary"
+assert_row "$frame" '^│ decide +db-choice +ship-alpha +Postgres or SQLite for the cache\? +acme/widgets +main +5m │$' "keyed decision row shows key, task, summary"
 assert_row "$frame" '^│ hold +- +decide-vendor +Pick the vendor for the address API · Two quotes in the report +acme/api +main +3d │$' "live captain hold row with title and reason"
 assert_row "$frame" '^│ merge\? +#7 +ship-gamma +PR ready: https://github.com/acme/api/pull/7 +acme/api +main +1m │$' "green-unmerged PR row"
 assert_not_contains "$frame" "later-hold" "dated hold is not actionable and stays out of Needs you"
@@ -308,7 +313,7 @@ assert_row "$frame" '^│ decide +1 live +!▸ hyperion ' "the home holding thos
 frame_all=$(render populated.json --all-homes-needs) || fail "populated --all-homes-needs: render exited non-zero"
 assert_contains "$frame_all" "Needs you (6)" "--all-homes-needs adds the secondmate ledger decision and the relayed one"
 assert_row "$frame_all" '^│ hold +- +etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +hyperion +1d │$' "--all-homes-needs: secondmate captain hold row labelled with its home"
-assert_row "$frame_all" '^│ decide +etl-wind… +hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record"
+assert_row "$frame_all" '^│ decide +etl-window +hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record (the KEY column grows to fit the key; falsify: cap extra below 10 in columnSpec)"
 assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ merge\?' "--all-homes-needs: hold sorts before merge?"
 
 # Ready for review with --no-prs: the recorded PRs only, tagged PR and marked off (falsify: drop the
@@ -332,7 +337,9 @@ assert_row "$frame" '^│ blocked +blocked +scout-beta +\(scout\) gh auth expire
 assert_row "$frame" '^│ awaiting merge +done +ship-gamma +PR https://github.com/acme/api/pull/7 checks green +acme/api +main +1m │$' "worker said done with an unmerged PR: STATE reads awaiting merge (falsify: drop awaitingMerge from mainTaskRow)"
 assert_row "$frame" '^│ done +pane lost +ship-old +PR https://github.com/acme/widgets/pull/30 merged +acme/widgets +main +2d │$' "done task whose backlog row is done stays done; its closed pane reads pane lost"
 assert_row "$frame" '^│ working +tmux +tmux-task +running the migration +acme/legacy +main +- │$' "tmux-backed task shows tmux in HERDR"
-assert_row "$frame" '^│ STATE {10}KEY ' "STATE column widens to fit awaiting merge (falsify: fix the width in tagColumnWidth)"
+assert_row "$frame" '^│ STATE {11}HERDR ' "In flight's STATE column widens to fit awaiting merge, then the two-cell gutter (falsify: cap tag below 14 in columnSpec, or change GUTTER)"
+assert_row "$frame" '^│ STATE {4}KEY ' "Needs you's STATE column is only as wide as its own widest word, blocked: fixed columns size per pane (falsify: size tag over the whole board again)"
+assert_row "$frame" '^│ CHECKS +STATUS +ID +TITLE +BASE  AGE │$' "Ready for review: BASE hugs its widest value, main, and AGE its ages, so TITLE gets the rest (falsify: give base or age a fixed width)"
 assert_before "$frame" '^│ working +working +ship-alpha' '^│ blocked +blocked +scout-beta' "in flight: working sorts before blocked"
 assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ awaiting merge +done +ship-gamma' "in flight: blocked sorts before awaiting merge"
 assert_before "$frame" '^│ awaiting merge +done +ship-gamma' '^│ done +pane lost +ship-old' "in flight: awaiting merge keeps the done slot, before plain done"
@@ -355,7 +362,7 @@ frame_x=$(render populated.json --expand all --rows 48) || fail "populated --exp
 assert_contains "$frame_x" "In flight (13)" "expanding both groups adds the mate rows, children, home decisions and the relayed decision"
 assert_row "$frame_x" '^│ decide +1 live +!▾ hyperion +child-one, child-failed +acme/etl +hyperion +1h │$' "expanded group row shows ▾"
 assert_row "$frame_x" '^│ working +idle +↳ hyperion +\(secondmate\) supervising two children +acme/etl +main +- │$' "expanded: the secondmate agent row is the first child"
-assert_row "$frame_x" '^│ decide +etl-wind… +↳ hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "expanded: the relayed keyed decision lists under the group (falsify: drop relayed from ledgerGroup)"
+assert_row "$frame_x" '^│ decide +etl-window +↳ hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "expanded: the relayed keyed decision lists under the group (falsify: drop relayed from ledgerGroup)"
 assert_row "$frame_x" '^│ working +working +↳ child-one +writing the loader +acme/etl +hyperion +3d │$' "expanded: active child with age from its home state file"
 assert_row "$frame_x" '^│ failed +pane lost +↳ child-failed +endpoint default:w2B:p2 \(run-step\) +- +hyperion +1h │$' "expanded: failed endpoint child whose pane is gone reads pane lost"
 assert_row "$frame_x" '^│ hold +- +↳ etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +hyperion +1d │$' "expanded: the home's live captain hold lists under the group"
@@ -495,8 +502,8 @@ assert_contains "$frame_narrow" "── [5] Landed (1)" "narrow: landed section 
 assert_count "$frame_narrow" "── [" 5 "narrow: five badges, one per section"
 assert_not_contains "$frame_narrow" "┌" "narrow: no pane borders"
 assert_row "$frame_narrow" '^ STATE +ID +WHAT +HOME +$' "narrow: single shared column header without REPO, AGE or HERDR"
-assert_row "$frame_narrow" '^ hold +decide-vendor +Pick the vendor for t… main +$' "narrow: hold row in list mode, text truncated to the flex column"
-assert_row "$frame_narrow" '^ working +ship-alpha +harness busy \(claude-… main +$' "narrow: in-flight row"
+assert_row "$frame_narrow" '^ hold +decide-vendor +Pick the vendor for the addr… +main +$' "narrow: hold row in list mode, text truncated to the flex column (which is what the fixed columns leave after sizing to their values)"
+assert_row "$frame_narrow" '^ working +ship-alpha +harness busy \(claude-hook\) +main +$' "narrow: in-flight row"
 assert_row "$frame_narrow" '^ working +▸ notes +notes-child +notes \(cached\) *$' "narrow: cached home group row in list mode"
 frame_narrow_x=$(render narrow.json --expand all) || fail "narrow --expand all: render exited non-zero"
 assert_row "$frame_narrow_x" '^ working +↳ notes-child +summarizing Monday +notes \(cached\) *$' "narrow expanded: cached home label on a ledger child"
@@ -553,7 +560,7 @@ assert_not_contains "$frame_gh" "↳ brag-week-37" "--expand by id: no children 
 # --all-homes-needs restores the secondmate decisions (falsify: drop the flag in lib/args.mjs).
 frame_ga=$(render grouped.json --all-homes-needs) || fail "grouped --all-homes-needs: render exited non-zero"
 assert_contains "$frame_ga" "Needs you (2)" "--all-homes-needs: both live secondmate decisions"
-assert_row "$frame_ga" '^│ decide +cutover-… +etl-cutover-runbook +Cut over Friday or Monday\? +- +hyperion +- │$' "--all-homes-needs: keyed child decision"
+assert_row "$frame_ga" '^│ decide +cutover-day +etl-cutover-runbook +Cut over Friday or Monday\? +- +hyperion +- │$' "--all-homes-needs: keyed child decision"
 assert_row "$frame_ga" '^│ hold +- +etl-vendor +Pick the ETL vendor · Two quotes in the report +acme/etl +hyperion +2d │$' "--all-homes-needs: captain hold with repo from queued"
 assert_not_contains "$frame_ga" "etl-later" "--all-homes-needs: dated hold still out"
 
@@ -638,7 +645,7 @@ frame_d=$(render lost-disconnected.json) || fail "disconnected: render exited no
 tags_d=$(render lost-disconnected.json --tags) || fail "disconnected --tags: render exited non-zero"
 assert_row "$frame_d" '^ firstmate-tui · /fixture/firstmate · 1 home +herdr disconnected \(ECONNREFUSED\) $' "disconnected fixture: the title line warns with the socket error as the reason"
 assert_row "$frame_d" '^│ working +unknown +ship-lost +adding the retry loop ' "disconnected: the missing pane reads unknown, not pane lost"
-assert_row "$tags_d" '\{grey-fg\}unknown +\{/grey-fg\}' "disconnected: the unknown cell is grey"
+assert_row "$tags_d" '\{grey-fg\}unknown *\{/grey-fg\}' "disconnected: the unknown cell is grey"
 assert_count "$tags_d" "{red-fg}" 1 "disconnected: the title warning is the only red text; no row is red"
 assert_contains "$tags_d" "{red-fg}herdr disconnected (ECONNREFUSED){/red-fg}" "disconnected: the warning carries the red tag the lost cell uses (falsify: give the warning the title style only)"
 assert_widths "$frame_l" 160 "lost frame lines are 160 columns"
@@ -881,7 +888,7 @@ assert_no_row "$frame_st" '^│ CHECKS [^│]*(REPO|HOME|WHAT|REVIEW)' "pr-statu
 assert_row "$frame_st" '^│ STATE +HERDR +ID +WHAT +REPO +HOME +AGE │$' "pr-status: the other panes keep the shared columns"
 # One row per status (falsify: change a branch of prStatus in lib/model.mjs).
 assert_row "$frame_st" '^│ pending +DRAFT +st-draft +Rework the geocoder cache with a two-tier LRU +main +2h │$' "isDraft reads DRAFT, with the title, base branch and PR age from the fetch"
-assert_row "$frame_st" '^│ passing +IN REVIEW +st-review +Paginate the address API: cursor tokens, [^│]*… main +5h │$' "an open PR awaiting review reads IN REVIEW, and a long title ends in an ellipsis inside the TITLE column (falsify: pad instead of truncate in fit)"
+assert_row "$frame_st" '^│ passing +IN REVIEW +st-review +Paginate the address API: cursor tokens, [^│]*… +main +5h │$' "an open PR awaiting review reads IN REVIEW, and a long title ends in an ellipsis inside the TITLE column (falsify: pad instead of truncate in fit)"
 assert_row "$frame_st" '^│ failing +IN REVIEW +api#203 +Retry on 429 +develop +1h │$' "changes requested reads IN REVIEW too; a PR nobody recorded is named repo#number and shows its base branch"
 assert_row "$frame_st" '^│ passing +APPROVED +st-approved +Rate-limit headers on every list endpoint +main +1d │$' "an open PR whose review decision is APPROVED reads APPROVED"
 assert_row "$frame_st" '^│ none +CLOSED +st-closed +Retry budget for the geocoder +main +8h │$' "a PR closed unmerged 3h ago reads CLOSED and is still listed"
@@ -925,7 +932,7 @@ assert_no_row "$frame_st_np" '^│ PR +- +st-merged ' "--no-prs: a done task's P
 # shares one header (falsify: drop BASE and AGE together, or keep BASE below WIDE_BREAKPOINT).
 frame_st_100=$(render pr-status.json --cols 100 --rows 30) || fail "pr-status 100: render exited non-zero"
 assert_row "$frame_st_100" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "100 columns: the six columns"
-assert_row "$frame_st_100" '^│ pending +DRAFT +st-draft +Rework the geocoder … main +2h │$' "100 columns: the title truncates with an ellipsis to make room"
+assert_row "$frame_st_100" '^│ pending +DRAFT +st-draft +Rework the geocoder cache with a [^│]*… +main +2h │$' "100 columns: the title truncates with an ellipsis to make room"
 assert_widths "$frame_st_100" 100 "100-column pr-status frame lines are 100 columns"
 frame_st_90=$(render pr-status.json --cols 90 --rows 30) || fail "pr-status 90: render exited non-zero"
 assert_row "$frame_st_90" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "90 columns: BASE is dropped, AGE stays"
@@ -933,8 +940,8 @@ assert_no_row "$frame_st_90" ' BASE ' "90 columns: no BASE column"
 assert_row "$frame_st_90" '^│ failing +IN REVIEW +api#203 +Retry on 429 +1h │$' "90 columns: the row loses its base branch and keeps its age"
 assert_widths "$frame_st_90" 90 "90-column pr-status frame lines are 90 columns"
 frame_st_70=$(render pr-status.json --cols 70 --rows 30) || fail "pr-status 70: render exited non-zero"
-assert_row "$frame_st_70" '^ STATE +ID +WHAT +HOME +$' "70 columns: the list shares one header across panes"
-assert_row "$frame_st_70" '^ pending +st-draft +Rework the geoc… main +$' "70 columns: a review row in the shared list"
+assert_row "$frame_st_70" '^ STATE +ID +WHAT +HOME *$' "70 columns: the list shares one header across panes"
+assert_row "$frame_st_70" '^ pending +st-draft +Rework the geocoder cache with a… +main *$' "70 columns: a review row in the shared list (HOME is 4 wide for main and ends the line)"
 assert_not_contains "$frame_st_70" "DRAFT" "70 columns: the list has no STATUS column"
 assert_widths "$frame_st_70" 70 "70-column pr-status frame lines are 70 columns"
 
@@ -1138,7 +1145,7 @@ assert_row "$frame_s" '^   Refresh release data +GitHub releases of acme/fm-boar
 assert_row "$frame_s" '^ refresh cadence +30 s \(--refresh\) +$' "settings: refresh cadence, read-only"
 assert_row "$frame_s" '^ PR data +on: live GitHub checks on every tick +$' "settings: PR data, read-only"
 assert_row "$frame_s" '^ herdr overlay +off \(--no-herdr\) +$' "settings: the herdr line reflects --no-herdr"
-assert_row "$frame_s" '^ mouse +on: click selects, double-click acts, wheel scrolls +$' "settings: the mouse line, on by default (falsify: drop the mouse entry from settingsFlags)"
+assert_row "$frame_s" '^ mouse +on: click selects, double-click acts, wheel scrolls, a header boundary drags +$' "settings: the mouse line, on by default (falsify: drop the mouse entry from settingsFlags)"
 assert_row "$frame_s" '^ j/k move  enter choose  r refetch  esc/\. back  \? help +$' "settings: the footer names the page's keys"
 assert_row "$frame_s" '^ firstmate-tui · /fixture/firstmate · 3 homes ' "settings: the title line stays and leads with firstmate-tui"
 assert_lines "$frame_s" 40 "settings: the frame is 40 lines"
@@ -1665,7 +1672,7 @@ assert_not_contains "$frame_ld" "loading herdr" "cold start connecting: herdr is
 # tab/j/k would leave them (falsify: drop the 'select' case from applyAction, or the row zones from
 # renderPanes).
 tags_m=$(render populated.json --mouse "click:30,29" --tags) || fail "mouse click: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}report +\{/inverse\}.*mobile-fix' "click on the second Findings row selects it"
+assert_row "$tags_m" '\{inverse\}report *\{/inverse\}.*mobile-fix' "click on the second Findings row selects it"
 assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[4\].*Findings \(3\)' "click on a Findings row focuses the Findings pane"
 assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[1\]' "click: Needs you lost the focus border"
 assert_no_row "$tags_m" '\{inverse\}blocked' "click: the old selection is no longer inverse"
@@ -1744,11 +1751,12 @@ assert_opened "$(printf 'https://github.com/acme/widgets/pull/41\nhttps://github
 # (lib/tui-blessed.mjs loads neo-blessed only inside createScreen). neo-blessed 0.2.0 labels a drag
 # report with the left button held (button code 32 + 32 in X10 and urxvt, 32 in SGR: the pointer
 # crossed a cell with the button down, terminal mode 1002) as 'mousedown left', seen on a pty, which
-# made the controller count a click whose pointer slipped a cell as two presses. The adapter drops
-# every report whose code carries the motion flag while presses, releases and the wheel pass (falsify:
-# drop isMotion). A chunk carrying two reports is split so the second click of a fast double-click is
-# not lost to the library's one-report parse; a single report is left alone (falsify: return the match
-# for one report too).
+# made the controller count a click whose pointer slipped a cell as two presses. The adapter turns
+# every report whose code carries the motion flag and a held button into a drag event (the column
+# resize reads them; a press never comes out of one) while presses, releases and the wheel pass
+# (falsify: drop motionCode, or return null for a drag). A chunk carrying two reports is split so the
+# second click of a fast double-click is not lost to the library's one-report parse; a single report
+# is left alone (falsify: return the match for one report too).
 adapter=$(node --input-type=module -e "
   import { normalizeMouse, splitMouseReports } from '$ROOT/bin/firstmate-tui/lib/tui-blessed.mjs';
   const show = (label, v) => console.log(label + ' ' + JSON.stringify(v === undefined ? null : v));
@@ -1760,17 +1768,23 @@ adapter=$(node --input-type=module -e "
   show('urxvt-drag', ev('mousedown', 64, 'urxvt'));
   show('sgr-press', ev('mousedown', 0, 'sgr'));
   show('sgr-drag', ev('mousedown', 32, 'sgr'));
+  show('sgr-motion', normalizeMouse({ action: 'mousemove', x: 30, y: 10, raw: [35, 63, 43, ''], type: 'sgr' }));
+  show('x10-motion', normalizeMouse({ action: 'mousemove', x: 30, y: 10, raw: [67, 63, 43, ''], type: 'X10' }));
+  show('sgr-release', ev('mouseup', 0, 'sgr'));
   show('split-two', splitMouseReports('\x1b[M#?+\x1b[M ?+'));
   show('split-one', splitMouseReports('\x1b[M ?+'));
   show('split-mixed', splitMouseReports('\x1b[<0;31;11m\x1b[M ?+'));
 ")
 assert_row "$adapter" '^x10-press \{"type":"down","button":"left","x":30,"y":10\}$' "adapter: an X10 left press is a down event"
-assert_row "$adapter" '^x10-drag null$' "adapter: an X10 drag report (code 64) is dropped although the library calls it mousedown"
+assert_row "$adapter" '^x10-drag \{"type":"drag","button":"left","x":30,"y":10\}$' "adapter: an X10 drag report (code 64) is a drag event, never a press, although the library calls it mousedown"
 assert_row "$adapter" '^x10-release \{"type":"up","button":"left","x":30,"y":10\}$' "adapter: an X10 release is an up event"
 assert_row "$adapter" '^x10-wheel \{"type":"wheel","dir":"up","x":30,"y":10\}$' "adapter: the wheel (code 96) is not mistaken for motion"
-assert_row "$adapter" '^urxvt-drag null$' "adapter: a urxvt drag report is dropped"
+assert_row "$adapter" '^urxvt-drag \{"type":"drag","button":"left","x":30,"y":10\}$' "adapter: a urxvt drag report is a drag event"
 assert_row "$adapter" '^sgr-press \{"type":"down","button":"left","x":30,"y":10\}$' "adapter: an SGR left press is a down event"
-assert_row "$adapter" '^sgr-drag null$' "adapter: an SGR drag report (code 32) is dropped"
+assert_row "$adapter" '^sgr-drag \{"type":"drag","button":"left","x":30,"y":10\}$' "adapter: an SGR drag report (code 32) is a drag event"
+assert_row "$adapter" '^sgr-motion null$' "adapter: SGR motion with no button held (code 35) is dropped"
+assert_row "$adapter" '^x10-motion null$' "adapter: X10 motion with no button held (code 67) is dropped"
+assert_row "$adapter" '^sgr-release \{"type":"up","button":"left","x":30,"y":10\}$' "adapter: an SGR release is an up event"
 assert_row "$adapter" '^split-two \["\\u001b\[M#\?\+","\\u001b\[M \?\+"\]$' "adapter: a chunk with a release and the next press splits into two reports"
 assert_row "$adapter" '^split-one null$' "adapter: a chunk with one report is left to the library"
 assert_row "$adapter" '^split-mixed \["\\u001b\[<0;31;11m","\\u001b\[M \?\+"\]$' "adapter: SGR and X10 reports in one chunk both split out"
@@ -1806,7 +1820,7 @@ assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[5\]' "wheel: the pane under the p
 tags_m=$(render populated.json --mouse "wheel:up:30,35 wheel:down:30,35 wheel:down:30,35" --tags) || fail "mouse wheel clamp: render exited non-zero"
 assert_row "$tags_m" '\{inverse\}merge\? ' "wheel up at the top stays, two wheel downs clamp at the last row"
 tags_m=$(render populated.json --mouse "wheel:down:30,35 wheel:up:30,35" --tags) || fail "mouse wheel back: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}blocked ' "wheel down then up is back on the first row"
+assert_row "$tags_m" '\{inverse\}blocked\{/inverse\}' "wheel down then up is back on the first row"
 # A wheel move breaks a double-click: click, wheel, click on the same row is two singles (falsify: keep
 # lastClick across a wheel action).
 frame_m=$(render_mouse populated.json "click:30,11 wheel:down:30,11 wheel:up:30,11 click:30,11") || fail "mouse click wheel click: render exited non-zero"
@@ -1856,6 +1870,167 @@ frame_m=$(render populated.json --mouse "click:30,29,x") || fail "mouse comma li
 assert_contains "$frame_m" "hidden mobile-fix" "a comma-separated list keeps the comma inside X,Y and reads the rest as keys"
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--no-mouse"; then pass; else fail "wrapper --help lists --no-mouse"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--mouse <list>"; then pass; else fail "wrapper --help lists --mouse"; fi
+
+# ----------------------------------------------------------- column widths
+# Every fixed column is as wide as the widest value it shows in its pane (at least its label, at most
+# the 24-cell cap), two blank cells separate neighbours, and the one flexible column (WHAT, TITLE,
+# REPORT) takes the rest. column-widths.json is the shape of the captain's 2026-09-17 screenshot, where
+# BASE (always main), REPO and HOME took the room TITLE needed (falsify: give base, repo or home a fixed
+# width again in lib/layout.mjs columnSpec).
+frame_cw=$(render column-widths.json) || fail "column-widths: render exited non-zero"
+assert_row "$frame_cw" '^│ CHECKS   STATUS     ID {16}TITLE {104}BASE  AGE │$' "column widths: CHECKS is as wide as passing, ID as wide as firstmate-tui#17, BASE four cells for main, AGE three, and TITLE has the 107 cells left"
+assert_row "$frame_cw" '^│ passing  DRAFT      hyperion-ai#279   refactor\(helm\): read credentials from hyperion-secrets instead of the chart values +main  22d │$' "column widths: the 81-character title shows in full in the room BASE gave back"
+assert_row "$frame_cw" '^│ hold   by 09-15  uuidv7-rfc-rewrite +Rewrite RFC-017 as thought leadership for the platform team +MatthewsREIS/gemini  main  37d │$' "column widths: a 19-character repository name is not cut and HOME hugs main"
+assert_row "$frame_cw" '^│ hold   by 09-09  review-rfc-discussion-t…  Review RFC · Captain asked on 2026-09-02' "column widths: an id longer than the 24-cell cap truncates with an ellipsis (falsify: raise COLUMN_CAP)"
+assert_row "$frame_cw" '^│ STATE  KEY       ID {24}WHAT ' "column widths: STATE stays as wide as its label when every value is shorter, KEY is as wide as by 09-15"
+assert_widths "$frame_cw" 160 "column widths: lines are 160 columns"
+assert_lines "$frame_cw" 40 "column widths: 40 lines"
+
+# Dragging a boundary. populated.json at 160x40: Needs you's column header is line 2 and its columns
+# start at x=2 STATE (7 wide), 11 KEY (9), 22 ID (13), 37 WHAT (96), 135 REPO (12), 149 HOME (4),
+# 155 AGE (3), two blank cells between neighbours, so the ID/WHAT gutter is cells 35-36 and a left press
+# on cells 34 to 37 takes that boundary. Ready for review's header is line 9 with CHECKS (8), STATUS
+# (9), ID (10) and its ID/TITLE gutter at 33-34. In the header line a column W cells wide reads as its
+# label followed by W blank cells (its padding plus the gutter) before the next label.
+# A drag from 35 to 45 widens ID by ten cells and WHAT gives up exactly those ten: the columns right of
+# WHAT keep their place and the line is still 160 cells (falsify: drop drag-move from applyAction, or
+# size the flexible column before the overrides are applied).
+assert_row "$frame" '^│ STATE    KEY        ID {13}WHAT {94}REPO' "before any drag ID is 13 wide, as wide as decide-vendor, and WHAT 96"
+frame_d=$(render populated.json --mouse "drag:35,2->45") || fail "drag ID/WHAT: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT {84}REPO +HOME  AGE │$' "drag: ID is 23 wide, WHAT 86, and REPO, HOME and AGE are where they were"
+assert_row "$frame_d" '^│ decide   db-choice  ship-alpha {15}Postgres or SQLite for the cache\? +acme/widgets  main   5m │$' "drag: the rows follow the header's widths"
+assert_widths "$frame_d" 160 "drag: lines are still 160 columns"
+assert_contains "$frame_d" "ID 23 wide · double-click the boundary resets it, = resets every column" "drag: the footer names the new width and both resets"
+# The boundary is taken from one cell either side of its gutter and nowhere else (falsify: change
+# BOUNDARY_REACH); only the header line has boundaries, a drag started on a row is a click on that row
+# (falsify: put header geometry on row zones).
+frame_d=$(render populated.json --mouse "drag:34,2->44") || fail "drag from ID's last cell: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT ' "a press on the last cell of ID, one cell before the gutter, drags the same boundary"
+frame_d=$(render populated.json --mouse "drag:37,2->47") || fail "drag from WHAT's first cell: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT ' "a press on the first cell of WHAT, one cell after the gutter, drags the same boundary"
+frame_d=$(render populated.json --mouse "drag:33,2->43") || fail "drag from two cells before the gutter: render exited non-zero"
+if [ "$frame_d" = "$frame" ]; then pass; else fail "a press two cells before the gutter is a plain header click and resizes nothing: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
+frame_d=$(render populated.json --mouse "drag:35,3->45") || fail "drag on a row: render exited non-zero"
+frame_c=$(render populated.json --mouse "click:35,3") || fail "click on a row: render exited non-zero"
+if [ "$frame_d" = "$frame_c" ]; then pass; else fail "a drag started on a row line selects the row and resizes nothing: $(diff <(printf '%s\n' "$frame_c") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
+# Clamps: a column never goes under its label width plus one, and never takes more than the flexible
+# column can spare (falsify: drop min or max from boundaryAt, or the clamp from drag-move).
+frame_d=$(render populated.json --mouse "drag:35,2->20") || fail "drag left past the minimum: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {3}WHAT ' "dragged 15 cells left, ID stops at 3, its label width plus one"
+assert_row "$frame_d" '^│ blocked  -          sc…  blocked: gh auth expired' "the rows truncate to the three-cell ID"
+assert_contains "$frame_d" "ID 3 wide" "the footer names the clamped width"
+frame_d=$(render populated.json --mouse "drag:35,2->158") || fail "drag right past the maximum: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {104}WHAT   REPO' "dragged to the frame's edge, ID stops at 104 and WHAT keeps its five-cell minimum"
+assert_row "$frame_d" '^│ hold     - +decide-vendor +Pick…  acme/api +main +3d │$' "the flexible column at its minimum shows four characters and the ellipsis"
+assert_widths "$frame_d" 160 "clamped drag: lines are still 160 columns"
+# The boundary beside the flexible column moves the fixed column on its other side, so the boundary
+# still follows the pointer: WHAT/REPO dragged right narrows REPO (falsify: return null in boundaries()
+# for a boundary whose left column is flexible, or drop sign).
+frame_d=$(render populated.json --mouse "drag:133,2->143") || fail "drag WHAT/REPO: render exited non-zero"
+assert_row "$frame_d" '^│ blocked  - +scout-beta +blocked: gh auth expired +acme…  main   2h │$' "dragging the WHAT/REPO boundary ten cells right narrows REPO to its five-cell minimum"
+assert_contains "$frame_d" "REPO 5 wide" "the footer names REPO, the column that moved"
+# Mid-drag, before the release, the boundary's first gutter cell draws a bar on the header and on
+# every row of that pane, bold yellow with --tags, and nowhere else (falsify: drop the drag branch
+# from gutterSegments, or the drag style from STYLE_TAGS).
+frame_d=$(render populated.json --mouse "click:35,2 move:40,2") || fail "mid-drag: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {16}│ WHAT ' "mid-drag: the bar stands in the header's gutter at the pointer, ID 18 wide"
+assert_row "$frame_d" '^│ blocked  -          scout-beta {8}│ blocked: gh auth expired' "mid-drag: the rows draw the bar in the same cell"
+tags_d=$(render populated.json --mouse "click:35,2 move:40,2" --tags) || fail "mid-drag --tags: render exited non-zero"
+assert_count "$tags_d" '{bold}{yellow-fg}│{/yellow-fg}{/bold}' 5 "mid-drag --tags: the bar is bold yellow on the header and the four rows of Needs you only"
+frame_d=$(render populated.json --mouse "click:35,2 move:40,2 release:40,2") || fail "drag then release: render exited non-zero"
+assert_not_contains "$frame_d" "│ WHAT" "after the release the bar is gone"
+assert_row "$frame_d" '^│ STATE    KEY        ID {18}WHAT ' "after the release ID keeps its 18 cells"
+frame_d=$(render populated.json --mouse "click:35,2 move:40,2" --keys "j") || fail "key mid-drag: render exited non-zero"
+assert_not_contains "$frame_d" "│ WHAT" "a key pressed mid-drag ends the drag"
+assert_row "$frame_d" '^│ STATE    KEY        ID {18}WHAT ' "a key pressed mid-drag keeps the width reached"
+# A drag that comes back to where it started leaves no custom width behind (falsify: persist on every
+# drag-end).
+frame_d=$(render populated.json --mouse "click:35,2 move:45,2 move:35,2 release:35,2") || fail "drag back: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "dragged out and back, ID is automatic again"
+assert_not_contains "$frame_d" "wide" "dragged out and back, no width is announced"
+
+# Persistence: the width goes to the view-state file on the release and a restart reads it back; the
+# saved width pins the column when the data changes (falsify: drop columns from serializeViewState or
+# loadViewState, or from persist in index.mjs).
+vs_cols="$SCRATCH/view-state-columns.json"
+rm -f "${vs_cols:?}"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,2->45") || fail "drag with view state: render exited non-zero"
+assert_file_contains "$vs_cols" '"needs": {' "the view-state file records the pane"
+assert_file_contains "$vs_cols" '"id": 23' "the view-state file records the column and its width"
+assert_file_contains "$vs_cols" '"hidden_panes": []' "the other view state is written beside it"
+frame_d=$(render populated.json --view-state "$vs_cols") || fail "drag reload: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT ' "a restart reads the width back from the file"
+frame_d=$(render column-widths.json --view-state "$vs_cols") || fail "drag reload other data: render exited non-zero"
+assert_row "$frame_d" '^│ STATE  KEY       ID {23}WHAT ' "the saved width pins ID at 23 where the data alone would size it 24"
+# A double-click on the boundary resets that column and drops it from the file (falsify: drop
+# reset-column from mouseAction, or the persist from its case).
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "dblclick:45,2") || fail "dblclick boundary: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "a double-click on the moved boundary puts ID back to its automatic width"
+assert_contains "$frame_d" "ID back to its automatic width" "the footer says so"
+assert_file_not_contains "$vs_cols" '"id"' "the reset column is gone from the file"
+frame_d=$(render populated.json --mouse "dblclick:35,2") || fail "dblclick automatic boundary: render exited non-zero"
+assert_contains "$frame_d" "ID already has its automatic width" "a double-click on an automatic column says there is nothing to reset"
+assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "and changes nothing"
+# = resets every pane, from the board and from the Settings page, and says how many widths it
+# dropped; the review pane's own column set resizes and resets the same way (falsify: drop the = case
+# from keyAction, the reset-columns entry from settingsEntries, or the review pane's header geometry).
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,2->45 drag:33,9->43") || fail "two drags: render exited non-zero"
+assert_row "$frame_d" '^│ CHECKS    STATUS     ID {20}TITLE ' "Ready for review's ID/TITLE boundary drags its ID to 20"
+assert_file_contains "$vs_cols" '"review": {' "the review pane's width is saved under its own id"
+frame_d=$(render populated.json --view-state "$vs_cols" --keys "=") || fail "reset all: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "= resets Needs you's ID"
+assert_row "$frame_d" '^│ CHECKS    STATUS     ID {10}TITLE ' "= resets Ready for review's ID"
+assert_contains "$frame_d" "column widths reset: 2 custom widths dropped" "= counts the widths it dropped"
+assert_file_not_contains "$vs_cols" '"id"' "= empties the saved widths"
+frame_d=$(render populated.json --keys "=") || fail "reset none: render exited non-zero"
+assert_contains "$frame_d" "no custom column widths to reset" "= with nothing to reset says so"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,2->45" --keys ".,pagedown,enter,escape") || fail "settings reset: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "the Settings page's last entry, Reset column widths, resets the board's columns"
+assert_contains "$frame_d" "column widths reset: 1 custom width dropped" "the Settings entry reports through the same notice"
+frame_s=$(render populated.json --keys ".") || fail "settings entry: render exited non-zero"
+assert_row "$frame_s" '^   Reset column widths +every pane back to its automatic widths \(= on the board\) +$' "the Settings page lists the entry"
+# A saved file naming a pane or column the board does not know, or a width that is not a positive
+# integer, loses only that entry (falsify: drop sanitizeColumns from loadViewState).
+printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":[],"columns":{"needs":{"id":30,"bogus":9},"nope":{"id":5},"review":{"id":"wide"}}}\n' > "$vs_cols"
+frame_d=$(render populated.json --view-state "$vs_cols" --keys "tab,tab,tab,tab,x") || fail "hand-written columns: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY        ID {30}WHAT ' "a saved width for a known pane and column applies"
+assert_row "$frame_d" '^│ CHECKS    STATUS     ID {10}TITLE ' "a width that is not a number is ignored"
+assert_file_contains "$vs_cols" '"id": 30' "the known width survives the next save"
+assert_file_not_contains "$vs_cols" 'bogus' "an unknown column key is dropped on the next save"
+assert_file_not_contains "$vs_cols" 'nope' "an unknown pane id is dropped on the next save"
+assert_file_not_contains "$vs_cols" 'wide' "a width that is not a number is dropped on the next save"
+# The narrow list shares one header over every pane and ignores the saved widths, and nothing on
+# that header is a boundary (falsify: pass overrides to columns() in renderList, or give the list
+# header a zone with geometry).
+printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":[],"columns":{"needs":{"id":30},"inflight":{"id":30}}}\n' > "$vs_cols"
+frame_d=$(render narrow.json --view-state "$vs_cols") || fail "narrow with columns: render exited non-zero"
+if [ "$frame_d" = "$frame_narrow" ]; then pass; else fail "narrow: the saved widths changed the shared list: $(diff <(printf '%s\n' "$frame_narrow") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
+frame_d=$(render narrow.json --mouse "drag:20,1->30 drag:9,1->15") || fail "narrow drag: render exited non-zero"
+if [ "$frame_d" = "$frame_narrow" ]; then pass; else fail "narrow: a drag on the shared header changed the frame: $(diff <(printf '%s\n' "$frame_narrow") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
+# --no-mouse leaves a drag unread like every other gesture (falsify: skip only click tokens under
+# --no-mouse in driveOnce).
+frame_d=$(render populated.json --no-mouse --mouse "drag:35,2->45 dblclick:35,2 move:40,2 release:40,2") || fail "--no-mouse drag: render exited non-zero"
+if [ "$frame_d" = "$frame" ]; then pass; else fail "--no-mouse: a drag changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
+# The help names the key and the gesture (falsify: drop the = or drag lines from HELP_LINES).
+frame_d=$(render populated.json --keys "?") || fail "help columns: render exited non-zero"
+assert_contains "$frame_d" "=            reset every column width to its automatic size" "help overlay documents ="
+assert_contains "$frame_d" "drag         a column boundary in a pane's header row resizes that column" "help overlay documents the drag"
+# --mouse parsing of the drag tokens (falsify: loosen the drag regex in parseMouseToken).
+if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --mouse "drag:35,2" 2>&1); then
+  fail "--mouse drag without ->X2 should be refused"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- '--mouse: bad event "drag:35,2"'; then pass; else fail "--mouse names the bad drag token whole: $out"; fi
+if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --mouse "move:12" 2>&1); then
+  fail "--mouse move without Y should be refused"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- '--mouse: bad event "move:12"'; then pass; else fail "--mouse names the bad move token: $out"; fi
+frame_d=$(render populated.json --mouse "drag:35,2->45,x") || fail "drag comma list: render exited non-zero"
+assert_row "$frame_d" '^│ STATE +KEY +ID {23}WHAT ' "a comma-separated list keeps the drag token whole (STATE is narrower here: x hid the blocked row, so the widest state word is decide)"
+assert_contains "$frame_d" "hidden scout-beta" "and reads the rest as keys"
 
 # ----------------------------------------------------------- wrapper checks
 # A fake herdr for the checks below, on HERDR_BIN_PATH and PATH: it logs every call to
