@@ -16,12 +16,18 @@ install upgrades by running the `bin/install.sh` that shipped in its own
 tarball, and every installer before step 1 below downloads and checks
 exactly those; the launcher then writes `firstmate-tui` beside `fm-board`
 (`ensure_new_command`). The rename is two steps. Step 1, in `bin/install.sh`:
-it asks for `firstmate-tui-<tag>.tar.gz` before `fm-board-<tag>.tar.gz`,
-accepts either layout inside the tarball (`bin/firstmate-tui.sh` with
-`bin/firstmate-tui/`, or the old pair, never a mix), points both commands at
-whichever launcher the tree has, and writes `layout=` into the install
-record; `tests/install.test.sh` checks it against a stand-in 0.3.0 tarball
-it builds. Step 2, not before every install has upgraded to a release that
+it reads the release's asset list (`/releases/tags/<tag>`) and downloads
+`firstmate-tui-<tag>.tar.gz` when the release has it, else
+`fm-board-<tag>.tar.gz`; when that read fails it tries the two names in that
+order and moves on from the first on any curl failure, never on one exit
+status (GitHub's redirected 404 reached the 0.2.5 installer as exit 56, not
+the 22 it waited for, and every 0.2.5 upgrade failed). It accepts either
+layout inside the tarball (`bin/firstmate-tui.sh` with `bin/firstmate-tui/`,
+or the old pair, never a mix), points both commands at whichever launcher
+the tree has, and writes `layout=` into the install record;
+`tests/install.test.sh` checks it against a stand-in 0.3.0 tarball it builds
+and walks a 0.2.5 install through the exit-56 shape (`tests/fake-curl.sh`,
+`FAKE_CURL_FAIL`). Step 2, not before every install has upgraded to a release that
 carries that installer (an install upgrading with an older installer still
 asks for the old asset name): flip the asset name in `scripts/package.sh`,
 the paths in the tarball and the launcher (`BOARD_DIR`, the relaunch and
