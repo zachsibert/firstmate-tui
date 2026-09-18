@@ -1,27 +1,62 @@
-# Publish a GitHub Release with the fm-board tarball whenever a tag v* is
-# pushed. The maintainer steps are in the README under "Releasing": bump the
-# version in bin/fm-board/package.json, tag vX.Y.Z (or vX.Y.Z-beta.N for a
-# prerelease), push the tag. scripts/package.sh refuses a tag that does not
-# match the package.json version, so a mistyped tag fails here and publishes
-# nothing. The same script builds the tarball tests/install.test.sh installs.
+# .github/workflows/release.yml - the one release path for fm-board.
+#
+# The version source is "version" in bin/fm-board/package.json; nobody tags by
+# hand. scripts/package.sh builds every tarball (the same script
+# tests/install.test.sh runs), and the README covers the flow under
+# "Releasing".
+#
+#   push to a branch other than main   a per-commit beta: package.sh --commit
+#                                      builds fm-board-v<version>-<sha7>.tar.gz
+#                                      and a prerelease tagged v<version>-<sha7>
+#                                      is created at that commit (0.1.0-d8b290e
+#                                      is version 0.1.0 at commit d8b290e); then
+#                                      betas beyond the newest 30 are deleted,
+#                                      oldest first
+#   push to main                       the release: when tag v<version> does not
+#                                      exist yet, build and create the release at
+#                                      that commit; when it does, log that the
+#                                      version is already released and stop with
+#                                      exit 0. Bumping the version in a PR and
+#                                      merging it is how the next release is cut
+#   pull_request closed                delete the betas (release and tag) of every
+#                                      commit in the PR, merged or not
+#   workflow_dispatch                  re-run the job for the branch it is run on
+#
+# The built-in token with contents: write creates and deletes releases and
+# tags. What the token itself does (creating the release's tag) starts no run.
+# One concurrency group per ref: two pushes to a branch build one after the
+# other, never at once. Lint with actionlint; tests/install.test.sh pins the
+# lines below that the installer and the README depend on.
 name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: ['**']
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
 
-# The built-in token only needs to create the release and upload its assets.
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 defaults:
   run:
     shell: bash
 
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  # Hash betas beyond this many are deleted after each new one, oldest first.
+  KEEP_BETAS: 30
+
 jobs:
-  release:
-    name: Publish ${{ github.ref_name }}
+  beta:
+    name: Beta ${{ github.ref_name }}
+    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -30,39 +65,155 @@ jobs:
         with:
           node-version: 20
 
+      - name: Name the build
+        id: name
+        run: |
+          version=$(node -p 'require("./bin/fm-board/package.json").version')
+          tag="v$version-${GITHUB_SHA::7}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --json tagName --jq .tagName >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "beta $tag already exists for commit $GITHUB_SHA; nothing to publish"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "building beta $tag from commit $GITHUB_SHA"
+          fi
+
       - name: Build the tarball and checksum
+        if: steps.name.outputs.exists == 'false'
         id: package
         run: |
-          bash scripts/package.sh "$GITHUB_REF_NAME" dist > package.out
+          bash scripts/package.sh --commit "$GITHUB_SHA" dist > package.out
           cat package.out
           cat package.out >> "$GITHUB_OUTPUT"
+          (cd dist && sha256sum -c -- *.tar.gz.sha256)
 
-      - name: Check the checksum file verifies the tarball
+      - name: Create the prerelease
+        if: steps.name.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.package.outputs.tag }}
+          VERSION: ${{ steps.package.outputs.version }}
+          TARBALL: ${{ steps.package.outputs.tarball }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          cd dist
-          sha256sum -c -- *.tar.gz.sha256
+          {
+            printf 'Beta build of fm-board %s from commit %s on branch %s.\n\n' "$VERSION" "$GITHUB_SHA" "$BRANCH"
+            printf 'Switch an install to it, or install it fresh:\n\n```sh\n'
+            printf 'fm-board upgrade --version %s\n' "$VERSION"
+            printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/bin/install.sh | bash -s -- --version %s\n' "$GITHUB_REPOSITORY" "$VERSION"
+            printf '```\n\nBack to the stable release: fm-board upgrade --stable\n\n'
+            printf 'The .sha256 file beside the tarball is the checksum the installer verifies. '
+            printf 'Betas are deleted when their pull request closes, and at most %s are kept.\n' "$KEEP_BETAS"
+          } > notes.md
+          gh release create "$TAG" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION" \
+            --notes-file notes.md \
+            "$TARBALL" "$CHECKSUM"
+          echo "published beta $TAG: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+
+      - name: Keep at most KEEP_BETAS hash betas
+        run: |
+          # Hash betas are the prereleases whose tag ends in -<7 hex>. Sorted by
+          # creation time, everything before the newest KEEP_BETAS goes.
+          betas=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.prerelease and (.tag_name | test("^v.*-[0-9a-f]{7}$"))) | "\(.created_at) \(.tag_name)"' \
+            | sort)
+          total=$(printf '%s\n' "$betas" | grep -c . || true)
+          if [ "$total" -le "$KEEP_BETAS" ]; then
+            echo "$total hash beta(s) exist, within the limit of $KEEP_BETAS; nothing pruned"
+            exit 0
+          fi
+          for tag in $(printf '%s\n' "$betas" | head -n "-$KEEP_BETAS" | cut -d' ' -f2); do
+            echo "deleting beta $tag (beyond the newest $KEEP_BETAS)"
+            gh release delete "$tag" --cleanup-tag --yes \
+              || echo "::warning::could not delete $tag; another run may have removed it already"
+          done
+
+  release:
+    name: Release ${{ github.ref_name }}
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Is this version released already?
+        id: check
+        run: |
+          version=$(node -p 'require("./bin/fm-board/package.json").version')
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "fm-board $version is already released as $tag; nothing to do. To cut the next release, bump the version in bin/fm-board/package.json in a PR and merge it."
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "tag $tag does not exist yet; releasing fm-board $version from commit $GITHUB_SHA"
+          fi
+
+      - name: Build the tarball and checksum
+        if: steps.check.outputs.released == 'false'
+        id: package
+        env:
+          TAG: ${{ steps.check.outputs.tag }}
+        run: |
+          bash scripts/package.sh "$TAG" dist > package.out
+          cat package.out
+          cat package.out >> "$GITHUB_OUTPUT"
+          (cd dist && sha256sum -c -- *.tar.gz.sha256)
 
       - name: Create the release
+        if: steps.check.outputs.released == 'false'
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.package.outputs.tag }}
-          PRERELEASE: ${{ steps.package.outputs.prerelease }}
+          VERSION: ${{ steps.package.outputs.version }}
           TARBALL: ${{ steps.package.outputs.tarball }}
           CHECKSUM: ${{ steps.package.outputs.checksum }}
         run: |
-          flags=()
-          if [ "$PRERELEASE" = true ]; then
-            flags+=(--prerelease)
-          fi
           {
-            printf 'Install or upgrade to this version:\n\n```sh\n'
-            printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/bin/install.sh | bash -s -- --version %s\n' "$GITHUB_REPOSITORY" "$TAG"
+            printf 'Install fm-board %s, or upgrade an install to it:\n\n```sh\n' "$VERSION"
+            printf 'fm-board upgrade\n'
+            printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/bin/install.sh | bash\n' "$GITHUB_REPOSITORY"
             printf '```\n\nThe .sha256 file beside the tarball is the checksum the installer verifies.\n'
           } > notes.md
           gh release create "$TAG" \
-            --verify-tag \
-            --title "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION" \
             --notes-file notes.md \
             --generate-notes \
-            "${flags[@]+"${flags[@]}"}" \
             "$TARBALL" "$CHECKSUM"
+          echo "published release $TAG: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+
+  cleanup:
+    name: Delete the betas of PR ${{ github.event.pull_request.number }}
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the prerelease and tag of every commit in the PR
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          shas=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits?per_page=100" --jq '.[].sha[:7]')
+          if [ -z "$shas" ]; then
+            echo "PR #$PR has no commits; nothing to delete"
+            exit 0
+          fi
+          betas=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.prerelease) | .tag_name')
+          deleted=0
+          for sha7 in $shas; do
+            for tag in $(printf '%s\n' "$betas" | grep -E -- "-$sha7\$" || true); do
+              echo "deleting beta $tag (commit $sha7 of PR #$PR)"
+              gh release delete "$tag" --cleanup-tag --yes \
+                || echo "::warning::could not delete $tag; another run may have removed it already"
+              deleted=$((deleted + 1))
+            done
+          done
+          echo "deleted $deleted beta(s) of PR #$PR; any beta of a commit no longer in the PR is pruned by the KEEP_BETAS limit"

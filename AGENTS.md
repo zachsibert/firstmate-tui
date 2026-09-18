@@ -70,18 +70,24 @@ the findings watermark belong to later milestones.
   `HERDR_BIN_PATH` inside its panes and PATH alone still reaches the captain's
   live server.
 - Bash (`bin/*.sh`, `scripts/*.sh`, `tests/*.sh`) must pass ShellCheck
-  0.11.0, the same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh bin/install.sh scripts/package.sh tests/fm-board.test.sh tests/install.test.sh`
+  0.11.0, the same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh bin/install.sh scripts/package.sh tests/fm-board.test.sh tests/install.test.sh tests/fake-curl.sh`
   when no local binary is installed). Every `rm` on a variable path takes
   the `${VAR:?}` guard so an empty variable fails instead of widening.
-- Distribution is GitHub Releases (README "Install" and "Releasing").
-  `scripts/package.sh` is the one place that builds the tarball: the release
-  workflow and `tests/install.test.sh` both run it, so a new file that must
-  ship, and the tag-equals-version check, are changes there. `bin/install.sh`
-  must stay runnable through `curl | bash`: everything inside `main()`, no
-  `BASH_SOURCE`, only curl, tar and sha256sum or shasum (grep and sed parse
-  the releases API), and it writes only under `--prefix` and `--bin-dir`.
-  No test creates a tag or a release; the captain cuts releases. Lint the
-  workflow with `actionlint` after changing it.
+- Distribution is GitHub Releases (README "Install" and "Releasing"). The
+  one version source is `version` in `bin/fm-board/package.json`, and
+  `.github/workflows/release.yml` is the only release path: a push to `main`
+  releases `v<version>` once, any other push publishes the prerelease
+  `v<version>-<sha7>`; nobody tags by hand, and no test creates a tag or a
+  release. `scripts/package.sh` is the one place that builds the tarball
+  (the workflow and `tests/install.test.sh` both run it), so a new file that
+  must ship, and the tag-equals-version check, are changes there.
+  `bin/install.sh` must stay runnable through `curl | bash`: everything
+  inside `main()`, no `BASH_SOURCE`, only curl, tar and sha256sum or shasum
+  (grep and sed parse the releases API), and it writes only under `--prefix`
+  and `--bin-dir`; it ships in the tarball because `fm-board upgrade` execs
+  the installed copy, so download, verify and swap have one implementation.
+  Tests reach GitHub through `tests/fake-curl.sh` on PATH, never the network.
+  Lint the workflow with `actionlint` after changing it.
 - Live herdr behavior is verified only in an isolated named session through
   firstmate's `bin/fm-herdr-lab.sh` (provision, run, teardown). Never drive
   the captain's `default` session from a test. Verified on herdr 0.8.2,

@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# tests/install.test.sh - the release tarball and the installer, offline.
+# tests/install.test.sh - the release tarball, the installer and upgrades, offline.
 #
 # scripts/package.sh builds the tarball the release workflow publishes
 # (.github/workflows/release.yml runs that script and nothing else to build
 # it), so this suite builds one into a scratch directory, installs it with
 # `bin/install.sh --from-file` into a scratch prefix and bin dir, and proves
-# the installed `fm-board` command renders a frame from a fixture. Nothing
-# reaches GitHub: no tag, no release, no download. --from-file is the switch
-# that keeps the installer off the network, and the installer is also run the
-# way `curl | bash` runs it, from stdin. Each check's comment names what would
-# make it fail.
+# the installed `fm-board` command renders a frame from a fixture. It then
+# builds a per-commit beta with `package.sh --commit` and swaps an install
+# between the stable build and the beta in both directions through `fm-board
+# upgrade`, with tests/fake-curl.sh standing in for GitHub: it serves the
+# releases API and the download URLs from a local directory, so the real
+# channel logic in install.sh (--stable, --pre, --version) runs offline.
+# Nothing reaches GitHub: no tag, no release, no download. Each check's
+# comment names what would make it fail.
 #
 # Needs node and npm (scripts/package.sh runs `npm ci --omit=dev` to vendor
 # neo-blessed), plus tar and shasum or sha256sum, which the installer needs
@@ -19,6 +22,7 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PACKAGE="$ROOT/scripts/package.sh"
 INSTALL="$ROOT/bin/install.sh"
+BOARD="$ROOT/bin/fm-board.sh"
 FIX="$ROOT/tests/fixtures"
 WORKFLOW="$ROOT/.github/workflows/release.yml"
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-board-install-test.XXXXXX")
@@ -54,11 +58,15 @@ assert_match() {
 assert_file() { if [ -f "$1" ]; then pass; else fail "$2: missing file $1"; fi; }
 assert_exec() { if [ -x "$1" ]; then pass; else fail "$2: not executable: $1"; fi; }
 assert_absent() { if [ -e "$1" ]; then fail "$2: unexpected path $1"; else pass; fi; }
+assert_equal() { if [ "$1" = "$2" ]; then pass; else fail "$3: expected '$2', got '$1'"; fi; }
 # assert_no_leftovers <dir> <label>: no staging or previous-install directory was left behind
 assert_no_leftovers() {
   local left
   left=$(find "$1" -maxdepth 1 -name '.fm-board-*' 2>/dev/null)
   if [ -z "$left" ]; then pass; else fail "$2: leftover directories: $left"; fi
+}
+file_sha() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
 # ------------------------------------------------------------- packaging
@@ -70,7 +78,7 @@ CHECKSUM="$TARBALL.sha256"
 if printf '%s\n' "$pkg_out" | grep -Evq '^[a-z]+=' ; then fail "package.sh stdout has a line that is not key=value: $pkg_out"; else pass; fi
 assert_contains "$pkg_out" "tag=$TAG" "package.sh reports the tag"
 assert_contains "$pkg_out" "version=$VERSION" "package.sh reports the package.json version"
-assert_contains "$pkg_out" "prerelease=false" "a plain vX.Y.Z tag is not a prerelease (falsify: test the version string for '-' instead of the tag)"
+assert_contains "$pkg_out" "prerelease=false" "a release build is not a prerelease (falsify: flag every build as one)"
 assert_contains "$pkg_out" "tarball=$TARBALL" "package.sh reports the tarball path"
 assert_contains "$pkg_out" "checksum=$CHECKSUM" "package.sh reports the checksum path"
 assert_file "$TARBALL" "the tarball exists"
@@ -80,6 +88,8 @@ listing=$(tar -tzf "$TARBALL")
 tops=$(printf '%s\n' "$listing" | sed 's#/.*##' | sort -u)
 if [ "$tops" = "fm-board-$TAG" ]; then pass; else fail "the tarball unpacks to one directory fm-board-$TAG, got: $(printf '%s' "$tops" | tr '\n' ' ') (falsify: tar the staging contents without the top directory)"; fi
 assert_contains "$listing" "fm-board-$TAG/bin/fm-board.sh" "the wrapper ships"
+assert_contains "$listing" "fm-board-$TAG/bin/install.sh" "the installer ships beside the wrapper, so fm-board upgrade runs the one that matches its version (falsify: drop the cp in package.sh)"
+if [ "$(printf '%s\n' "$listing" | grep -c 'install.sh')" -eq 1 ]; then pass; else fail "install.sh ships once, at bin/install.sh: $(printf '%s\n' "$listing" | grep 'install.sh' | tr '\n' ' ')"; fi
 assert_contains "$listing" "fm-board-$TAG/bin/fm-board/index.mjs" "the entry point ships"
 assert_contains "$listing" "fm-board-$TAG/bin/fm-board/package.json" "package.json ships (the installer reads the version from it)"
 assert_contains "$listing" "fm-board-$TAG/bin/fm-board/package-lock.json" "the lockfile ships"
@@ -89,7 +99,7 @@ for f in "$ROOT"/bin/fm-board/lib/*.mjs; do
 done
 assert_contains "$listing" "fm-board-$TAG/bin/fm-board/node_modules/neo-blessed/package.json" "production node_modules are vendored (falsify: drop npm ci from package.sh)"
 assert_contains "$listing" "fm-board-$TAG/README.md" "the README ships"
-for unwanted in "/tests/" "/docs/" "/scripts/" "/.git" "install.sh" ".gitignore" "/.claude/"; do
+for unwanted in "/tests/" "/docs/" "/scripts/" "/.git" ".gitignore" "/.claude/" "install-record"; do
   assert_not_contains "$listing" "$unwanted" "the tarball carries no $unwanted (falsify: tar the repository root)"
 done
 
@@ -118,6 +128,7 @@ PRE_TAG="v$PRE_VERSION"
 PRE_REPO="$SCRATCH/pre-repo"
 mkdir -p "$PRE_REPO/bin" "$PRE_REPO/scripts"
 cp "$ROOT/bin/fm-board.sh" "$PRE_REPO/bin/fm-board.sh"
+cp "$ROOT/bin/install.sh" "$PRE_REPO/bin/install.sh"
 cp -R "$ROOT/bin/fm-board" "$PRE_REPO/bin/fm-board"
 rm -rf -- "${PRE_REPO:?}/bin/fm-board/node_modules"
 cp "$PACKAGE" "$PRE_REPO/scripts/package.sh"
@@ -125,10 +136,46 @@ cp "$ROOT/README.md" "$PRE_REPO/README.md"
 sed -i.bak "s/\"version\": \"$VERSION\"/\"version\": \"$PRE_VERSION\"/" "$PRE_REPO/bin/fm-board/package.json" "$PRE_REPO/bin/fm-board/package-lock.json"
 rm -f -- "${PRE_REPO:?}/bin/fm-board/"*.bak
 if pre_out=$("$PRE_REPO/scripts/package.sh" "$PRE_TAG" "$SCRATCH/dist-pre" 2>"$SCRATCH/pre.err"); then pass; else fail "package.sh $PRE_TAG exited non-zero: $(cat "$SCRATCH/pre.err")"; fi
-assert_contains "$pre_out" "prerelease=true" "a tag with a -suffix is flagged as a prerelease for the workflow (falsify: drop the *-* case in package.sh)"
+assert_contains "$pre_out" "prerelease=true" "a version with a -suffix is flagged as a prerelease for the workflow (falsify: drop the *-* case in package.sh)"
 assert_contains "$pre_out" "version=$PRE_VERSION" "the prerelease version is reported"
 assert_file "$SCRATCH/dist-pre/fm-board-$PRE_TAG.tar.gz" "the prerelease tarball carries the full tag in its name"
 if "$PRE_REPO/scripts/package.sh" v0.2.0 "$SCRATCH/dist-pre-bad" >/dev/null 2>&1; then fail "v0.2.0 against version $PRE_VERSION should be refused"; else pass; fi
+
+# ------------------------------------------------------- per-commit build
+# `package.sh --commit <sha>` names itself: version <version>-<sha7>, tag
+# v<version>-<sha7>, always a prerelease. The staged package.json and lockfile
+# carry the full version so an installed beta reports what it is; the source
+# tree is left alone.
+COMMIT_SHA=d8b290e6b1d1c3a4f5e6d7c8b9a0f1e2d3c4b5a6
+SHA7=${COMMIT_SHA:0:7}
+BETA_VERSION="$VERSION-$SHA7"
+BETA_TAG="v$BETA_VERSION"
+if beta_out=$("$PACKAGE" --commit "$COMMIT_SHA" "$DIST" 2>"$SCRATCH/beta.err"); then pass; else fail "package.sh --commit exited non-zero: $(cat "$SCRATCH/beta.err")"; fi
+BETA_TARBALL="$DIST/fm-board-$BETA_TAG.tar.gz"
+BETA_CHECKSUM="$BETA_TARBALL.sha256"
+assert_contains "$beta_out" "tag=$BETA_TAG" "a per-commit build is tagged v<version>-<7-char sha> (falsify: use the full sha)"
+assert_contains "$beta_out" "version=$BETA_VERSION" "the reported version is <version>-<sha7>"
+assert_contains "$beta_out" "prerelease=true" "every per-commit build is a prerelease (falsify: test the source version for '-')"
+assert_contains "$beta_out" "tarball=$BETA_TARBALL" "the beta tarball carries the beta tag in its name"
+assert_file "$BETA_TARBALL" "the beta tarball exists"
+assert_file "$BETA_CHECKSUM" "the beta checksum file exists"
+staged_pkg=$(tar -xzOf "$BETA_TARBALL" "fm-board-$BETA_TAG/bin/fm-board/package.json")
+assert_contains "$staged_pkg" "\"version\": \"$BETA_VERSION\"" "the staged package.json carries the full beta version (falsify: skip the stamp)"
+staged_lock=$(tar -xzOf "$BETA_TARBALL" "fm-board-$BETA_TAG/bin/fm-board/package-lock.json")
+assert_contains "$staged_lock" "\"version\": \"$BETA_VERSION\"" "the staged lockfile carries the beta version too"
+assert_not_contains "$staged_lock" "\"version\": \"$VERSION\"" "no root version field in the staged lockfile still says $VERSION"
+assert_contains "$(cat "$ROOT/bin/fm-board/package.json")" "\"version\": \"$VERSION\"" "the source package.json is untouched (falsify: stamp the source tree instead of the staged copy)"
+assert_contains "$(tar -tzf "$BETA_TARBALL")" "fm-board-$BETA_TAG/bin/fm-board/node_modules/neo-blessed/package.json" "the beta tarball is vendored like a release"
+# A seven-character sha is enough; a non-sha is refused before anything is built.
+if out=$("$PACKAGE" --commit "$SHA7" "$SCRATCH/dist-short" 2>/dev/null); then pass; else fail "package.sh --commit with a 7-char sha should work"; fi
+assert_contains "$out" "tag=$BETA_TAG" "a short sha yields the same tag as the full one"
+if out=$("$PACKAGE" --commit notasha "$SCRATCH/dist-bad" 2>&1); then fail "--commit notasha should exit non-zero"; else pass; fi
+assert_contains "$out" "not a git sha" "the malformed-sha error says what a sha looks like"
+assert_absent "$SCRATCH/dist-bad/fm-board-v$VERSION-notasha.tar.gz" "nothing is built for a malformed sha"
+if out=$("$PACKAGE" --commit "$SHA7" 2>&1); then fail "--commit without an out dir should exit non-zero"; else pass; fi
+# A per-commit build of a source version that is itself a prerelease chains the suffixes.
+if out=$("$PRE_REPO/scripts/package.sh" --commit "$COMMIT_SHA" "$SCRATCH/dist-pre-commit" 2>/dev/null); then pass; else fail "package.sh --commit on a prerelease source version should work"; fi
+assert_contains "$out" "tag=v$PRE_VERSION-$SHA7" "a beta of a prerelease source version is v<version>-<suffix>-<sha7>"
 
 # -------------------------------------------------------------- install
 PREFIX="$SCRATCH/prefix"
@@ -139,14 +186,26 @@ assert_contains "$inst_out" "fm-board $VERSION installed" "the report names the 
 assert_contains "$inst_out" "files:   $PREFIX" "the report names the prefix"
 assert_contains "$inst_out" "command: $BIN/fm-board" "the report names the command"
 assert_contains "$inst_out" "$BIN is not on your PATH" "a bin dir that is not on PATH gets the one-line note (falsify: drop the PATH check)"
+assert_contains "$inst_out" "next: export FM_HOME" "a first install gets the next-step line"
 assert_file "$PREFIX/bin/fm-board.sh" "the wrapper is installed"
 assert_exec "$PREFIX/bin/fm-board.sh" "the wrapper is executable"
+assert_file "$PREFIX/bin/install.sh" "the installer is installed beside the wrapper"
+assert_exec "$PREFIX/bin/install.sh" "the installed installer is executable"
 assert_file "$PREFIX/bin/fm-board/index.mjs" "the entry point is installed"
 assert_file "$PREFIX/bin/fm-board/node_modules/neo-blessed/package.json" "the vendored dependency is installed"
 assert_file "$PREFIX/README.md" "the README is installed"
 assert_exec "$BIN/fm-board" "the fm-board command is executable"
 assert_contains "$(cat "$BIN/fm-board")" "$PREFIX/bin/fm-board.sh" "the command runs the installed wrapper, not the checkout (falsify: point the shim at the checkout)"
 assert_no_leftovers "$SCRATCH" "a successful install leaves no staging directory"
+# The install record names the prefix, bin dir and repository for fm-board
+# upgrade (falsify: write it after the swap, or leave a field out).
+assert_file "$PREFIX/install-record" "the install record is written under the prefix"
+record=$(cat "$PREFIX/install-record")
+assert_contains "$record" "prefix=$PREFIX" "the record names the prefix"
+assert_contains "$record" "bin_dir=$BIN" "the record names the bin dir"
+assert_contains "$record" "repo=zachsibert/firstmate-tui" "the record names the default repository"
+assert_contains "$record" "version=$VERSION" "the record names the installed version"
+assert_contains "$record" "installed_from=file $TARBALL" "the record names the tarball a --from-file install came from"
 
 # The installed command renders a frame from a fixture, from an unrelated
 # working directory (falsify: leave lib/ out of the tarball, or make the shim
@@ -171,6 +230,7 @@ assert_contains "$("$BIN/fm-board" --help 2>&1)" "INSTALLED-COPY-MARKER" "fm-boa
 touch "$PREFIX/stale-file"
 if up_out=$("$INSTALL" --from-file "$TARBALL" --prefix "$PREFIX" --bin-dir "$BIN" 2>&1); then pass; else fail "second install.sh run exited non-zero: $up_out"; fi
 assert_contains "$up_out" "installed (replaced $VERSION)" "a second run reports the version it replaced (falsify: read the old version after the move)"
+assert_not_contains "$up_out" "next: export FM_HOME" "an upgrade does not repeat the first-run line"
 assert_absent "$PREFIX/stale-file" "the previous install is replaced as a whole, not overlaid (falsify: extract over the existing prefix)"
 assert_not_contains "$("$BIN/fm-board" --help 2>&1)" "INSTALLED-COPY-MARKER" "the wrapper is the fresh copy after the upgrade"
 if frame=$(cd / && "$BIN/fm-board" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "installed fm-board after upgrade exited non-zero: $frame"; fi
@@ -243,32 +303,223 @@ if [ "$(tail -n 1 "$INSTALL")" = 'main "$@"' ]; then pass; else fail "install.sh
 # Flag errors and --help (falsify: drop the guard named in each label).
 if out=$("$INSTALL" --version v1.0.0 --pre 2>&1); then fail "--version with --pre should exit non-zero"; else pass; fi
 assert_contains "$out" "exclude each other" "--version and --pre are named as exclusive"
+if out=$("$INSTALL" --stable --pre 2>&1); then fail "--stable with --pre should exit non-zero"; else pass; fi
+assert_contains "$out" "exclude each other" "--stable and --pre are named as exclusive"
+if out=$("$INSTALL" --stable --version 1.0.0 2>&1); then fail "--stable with --version should exit non-zero"; else pass; fi
 if out=$("$INSTALL" --from-file "$SCRATCH/nope.tar.gz" --prefix "$SCRATCH/p" --bin-dir "$SCRATCH/b" 2>&1); then fail "a missing --from-file should exit non-zero"; else pass; fi
 assert_contains "$out" "no such tarball" "a missing tarball is named"
 if out=$("$INSTALL" --from-file "$TARBALL" --version v1.0.0 2>&1); then fail "--version with --from-file should exit non-zero"; else pass; fi
 assert_contains "$out" "no effect" "--version under --from-file is refused, not ignored"
+if out=$("$INSTALL" --from-file "$TARBALL" --stable 2>&1); then fail "--stable with --from-file should exit non-zero"; else pass; fi
+assert_contains "$out" "no effect" "--stable under --from-file is refused, not ignored"
 if out=$("$INSTALL" --bogus 2>&1); then fail "an unknown flag should exit non-zero"; else pass; fi
 assert_contains "$out" "unknown option --bogus" "the unknown flag is named"
 if out=$("$INSTALL" --prefix 2>&1); then fail "--prefix without a value should exit non-zero"; else pass; fi
 assert_contains "$out" "--prefix needs a directory" "--prefix without a value is named"
 if help=$("$INSTALL" --help 2>&1); then pass; else fail "--help should exit 0"; fi
-for flag in --version --pre --prefix --bin-dir --from-file --repo; do
+for flag in --stable --version --pre --prefix --bin-dir --from-file --repo; do
   assert_contains "$help" "$flag" "--help lists $flag"
 done
 
+# --------------------------------------------------- version and upgrade
+# `fm-board version` reports the version and its kind; `fm-board upgrade`
+# swaps an install between the stable build and a hash beta in both directions
+# by running the installed bin/install.sh against the install record. GitHub
+# is stood in for by tests/fake-curl.sh first on PATH: it serves
+# api/latest.json (the latest release), api/newest.json (the newest release,
+# prereleases included) and download/<tag>/<asset> from $MIRROR and logs each
+# URL to $CURL_LOG, so the real --stable, --pre and --version paths in
+# install.sh run and nothing reaches the network.
+MIRROR="$SCRATCH/mirror"
+mkdir -p "$MIRROR/api" "$MIRROR/download/$TAG" "$MIRROR/download/$BETA_TAG"
+cp "$TARBALL" "$CHECKSUM" "$MIRROR/download/$TAG/"
+cp "$BETA_TARBALL" "$BETA_CHECKSUM" "$MIRROR/download/$BETA_TAG/"
+printf '{\n  "tag_name": "%s",\n  "prerelease": false\n}\n' "$TAG" > "$MIRROR/api/latest.json"
+printf '[\n  {\n    "tag_name": "%s",\n    "prerelease": true\n  }\n]\n' "$BETA_TAG" > "$MIRROR/api/newest.json"
+FAKEBIN="$SCRATCH/fakebin"
+mkdir -p "$FAKEBIN"
+cp "$ROOT/tests/fake-curl.sh" "$FAKEBIN/curl"
+chmod +x "$FAKEBIN/curl"
+CURL_LOG="$SCRATCH/curl.log"
+# offline <command...>: run with the fake curl first on PATH and a fresh URL log
+offline() {
+  : > "$CURL_LOG"
+  env PATH="$FAKEBIN:$PATH" FAKE_CURL_ROOT="$MIRROR" FAKE_CURL_LOG="$CURL_LOG" "$@"
+}
+SWAP="$SCRATCH/swap"
+SWAP_PREFIX="$SWAP/prefix"
+SWAP_BIN="$SWAP/bin"
+FM="$SWAP_BIN/fm-board"
+# A view-state file where the board keeps it (outside the prefix, see
+# bin/fm-board.sh) must come through every swap byte for byte, and the wrapper
+# must never derive its default view-state path from its own location.
+VIEW_STATE="$SWAP/config/fm-board/view-state.json"
+mkdir -p "$(dirname "$VIEW_STATE")"
+printf '{"hiddenRows":["needs:1"],"hiddenPanes":[2]}\n' > "$VIEW_STATE"
+VIEW_STATE_SHA=$(file_sha "$VIEW_STATE")
+assert_not_contains "$(grep -F 'view-state' "$BOARD")" "\$ROOT" "the wrapper never puts view-state.json under its own directory (falsify: default --view-state to \$ROOT/...)"
+
+# From a git checkout there is no install record: version says so, upgrade
+# explains that git updates a checkout and exits non-zero without running the
+# installer (falsify: fall through to install.sh with default paths).
+if out=$("$BOARD" version 2>&1); then pass; else fail "fm-board.sh version from a checkout should exit 0: $out"; fi
+assert_contains "$out" "fm-board $VERSION (stable release)" "version from the checkout reports the source version as stable"
+assert_contains "$out" "not an installed copy" "version from the checkout says it is not an install"
+assert_equal "$("$BOARD" --version 2>&1)" "$out" "--version is the same as the version command"
+assert_equal "$("$BOARD" -V 2>&1)" "$out" "-V is the same as the version command"
+if out=$("$BOARD" version extra 2>&1); then fail "version with an argument should exit non-zero"; else pass; fi
+if out=$(cd / && offline "$BOARD" upgrade 2>&1); then fail "upgrade from a checkout should exit non-zero"; else pass; fi
+assert_contains "$out" "git checkout" "upgrade from a checkout names the checkout"
+assert_contains "$out" "git -C" "upgrade from a checkout gives the git command that updates it"
+assert_contains "$out" "$ROOT" "upgrade from a checkout names the checkout path"
+if [ -s "$CURL_LOG" ]; then fail "upgrade from a checkout must not touch the network: $(cat "$CURL_LOG")"; else pass; fi
+if out=$("$BOARD" upgrade --bogus 2>&1); then fail "an unknown upgrade flag should exit non-zero"; else pass; fi
+assert_contains "$out" "unknown upgrade option --bogus" "the unknown upgrade flag is named"
+if out=$("$BOARD" upgrade --version 2>&1); then fail "upgrade --version without a value should exit non-zero"; else pass; fi
+assert_contains "$out" "needs a value" "upgrade --version without a value is named"
+if out=$("$BOARD" upgrade --help 2>&1); then pass; else fail "upgrade --help should exit 0"; fi
+for flag in --stable --pre --version --from-file; do
+  assert_contains "$out" "$flag" "upgrade --help lists $flag"
+done
+
+# 1. First install, default channel: the latest release through the API, the
+# stable tarball and its checksum downloaded and verified.
+if out=$(offline "$INSTALL" --prefix "$SWAP_PREFIX" --bin-dir "$SWAP_BIN" 2>&1); then pass; else fail "install through the fake network exited non-zero: $out"; fi
+assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "the default channel asks GitHub for the latest release (falsify: default to --pre)"
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/fm-board-$TAG.tar.gz" "the stable tarball is downloaded from the release"
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/fm-board-$TAG.tar.gz.sha256" "its checksum is downloaded too"
+assert_contains "$out" "checksum verified" "the download is verified"
+assert_contains "$out" "fm-board $VERSION installed" "the stable version is installed"
+assert_contains "$(cat "$SWAP_PREFIX/install-record")" "installed_from=release $TAG" "the record names the release tag"
+if out=$("$FM" version 2>&1); then pass; else fail "installed fm-board version exited non-zero: $out"; fi
+assert_contains "$out" "fm-board $VERSION (stable release)" "version reports the stable release (falsify: call every version a beta)"
+assert_contains "$out" "installed at $SWAP_PREFIX" "version names the install prefix"
+assert_contains "$out" "from release $TAG" "version names the release it came from"
+assert_not_contains "$out" "beta" "a stable install is not called a beta"
+
+# The installed installer is the one that runs, not the checkout's: a marker
+# in the installed copy shows in the upgrade output (falsify: exec the
+# checkout's install.sh, or a copy fetched from the network).
+sed -i.bak 's/^main() {$/main() { log INSTALLED-INSTALLER-MARKER;/' "$SWAP_PREFIX/bin/install.sh" && rm -f -- "${SWAP_PREFIX:?}/bin/install.sh.bak"
+grep -Fq INSTALLED-INSTALLER-MARKER "$SWAP_PREFIX/bin/install.sh" || fail "test setup: the marker did not land in the installed install.sh"
+
+# 2. Stable to beta with --pre: the newest release through the API, the beta
+# tarball verified, the swap reported, and version reports the beta.
+if out=$(cd / && offline "$FM" upgrade --pre 2>&1); then pass; else fail "fm-board upgrade --pre exited non-zero: $out"; fi
+assert_contains "$out" "INSTALLED-INSTALLER-MARKER" "upgrade runs the install.sh that shipped with the install"
+assert_contains "$(cat "$CURL_LOG")" "/releases?per_page=1" "--pre asks for the newest release, prereleases included (falsify: reuse /latest)"
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/fm-board-$BETA_TAG.tar.gz" "the beta tarball is downloaded"
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/fm-board-$BETA_TAG.tar.gz.sha256" "the beta checksum is downloaded"
+assert_contains "$out" "checksum verified" "the beta download is verified before the swap"
+assert_contains "$out" "fm-board $BETA_VERSION installed (replaced $VERSION)" "the swap to the beta is reported with both versions"
+if out=$("$FM" version 2>&1); then pass; else fail "fm-board version after --pre exited non-zero: $out"; fi
+assert_contains "$out" "fm-board $BETA_VERSION (beta: $VERSION at commit $SHA7)" "version reports the beta with its base version and commit (falsify: drop the sha pattern)"
+assert_contains "$out" "from release $BETA_TAG" "version names the beta release it came from"
+assert_contains "$(cat "$SWAP_PREFIX/install-record")" "prefix=$SWAP_PREFIX" "the beta's record still names the same prefix"
+assert_contains "$(cat "$SWAP_PREFIX/install-record")" "bin_dir=$SWAP_BIN" "the beta's record still names the same bin dir"
+assert_contains "$(cat "$SWAP_PREFIX/install-record")" "version=$BETA_VERSION" "the record carries the beta version"
+assert_equal "$(file_sha "$VIEW_STATE")" "$VIEW_STATE_SHA" "view state outside the prefix survives the swap to the beta"
+assert_no_leftovers "$SWAP" "the swap to the beta leaves no staging or previous directory"
+if [ -z "$(find "$SWAP_PREFIX" -name 'view-state*' 2>/dev/null)" ]; then pass; else fail "the install carries no view-state file (falsify: ship one in the tarball)"; fi
+
+# 3. Beta back to stable with --stable: a lower version by sort order, and it
+# installs like any other (falsify: refuse a downgrade in install.sh).
+if out=$(cd / && offline "$FM" upgrade --stable 2>&1); then pass; else fail "fm-board upgrade --stable from a beta exited non-zero: $out"; fi
+assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "--stable asks for the latest release, never a prerelease"
+assert_contains "$out" "fm-board $VERSION installed (replaced $BETA_VERSION)" "the swap back to stable is reported"
+assert_contains "$("$FM" version 2>&1)" "fm-board $VERSION (stable release)" "version reports stable again after --stable"
+assert_equal "$(file_sha "$VIEW_STATE")" "$VIEW_STATE_SHA" "view state survives the swap back to stable"
+
+# 4. An exact beta by version, without the v: --version adds it (falsify: pass
+# the version to the download URL as typed).
+if out=$(cd / && offline "$FM" upgrade --version "$BETA_VERSION" 2>&1); then pass; else fail "fm-board upgrade --version $BETA_VERSION exited non-zero: $out"; fi
+assert_not_contains "$(cat "$CURL_LOG")" "api.github.com" "--version needs no API call"
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/fm-board-$BETA_TAG.tar.gz" "--version without the v downloads the v-tagged asset"
+assert_contains "$out" "fm-board $BETA_VERSION installed (replaced $VERSION)" "the exact beta replaces stable"
+assert_contains "$("$FM" version 2>&1)" "(beta: $VERSION at commit $SHA7)" "version reports the exact beta"
+
+# 5. A plain `fm-board upgrade` from a beta lands on the latest stable release.
+if out=$(cd / && offline "$FM" upgrade 2>&1); then pass; else fail "plain fm-board upgrade exited non-zero: $out"; fi
+assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "a plain upgrade is the stable channel (falsify: default to --pre)"
+assert_contains "$out" "installed (replaced $BETA_VERSION)" "a plain upgrade from a beta swaps to stable"
+assert_contains "$("$FM" version 2>&1)" "(stable release)" "version reports stable after a plain upgrade"
+
+# 6. An exact version with the v is accepted as typed.
+if out=$(cd / && offline "$FM" upgrade --version "$BETA_TAG" 2>&1); then pass; else fail "fm-board upgrade --version $BETA_TAG exited non-zero: $out"; fi
+assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/" "--version with the v downloads that tag"
+assert_contains "$("$FM" version 2>&1)" "fm-board $BETA_VERSION (beta" "version reports the beta after --version v..."
+
+# 7. A version that has no release fails before the swap and leaves the
+# install alone (falsify: swap in whatever was staged).
+touch "$SWAP_PREFIX/keep-me"
+if out=$(cd / && offline "$FM" upgrade --version 0.9.9-abcdef0 2>&1); then fail "upgrade to a version with no release should exit non-zero"; else pass; fi
+assert_contains "$out" "download failed" "the missing release is reported as a failed download"
+assert_file "$SWAP_PREFIX/keep-me" "a failed upgrade leaves the current install in place"
+assert_contains "$("$FM" version 2>&1)" "fm-board $BETA_VERSION" "the version is unchanged after a failed upgrade"
+assert_no_leftovers "$SWAP" "a failed upgrade leaves no staging directory"
+rm -f -- "${SWAP_PREFIX:?}/keep-me"
+
+# 8. Two channel flags are refused by the one implementation in install.sh;
+# --from-file passes through for a tarball already on disk.
+if out=$(cd / && offline "$FM" upgrade --stable --pre 2>&1); then fail "upgrade --stable --pre should exit non-zero"; else pass; fi
+assert_contains "$out" "exclude each other" "two channel flags are refused with the installer's message"
+if [ -s "$CURL_LOG" ]; then fail "refused flags must not reach the network: $(cat "$CURL_LOG")"; else pass; fi
+if out=$(cd / && offline "$FM" upgrade --from-file "$TARBALL" 2>&1); then pass; else fail "fm-board upgrade --from-file exited non-zero: $out"; fi
+assert_contains "$out" "installed (replaced $BETA_VERSION)" "--from-file swaps from the local tarball"
+if [ -s "$CURL_LOG" ]; then fail "--from-file must not touch the network: $(cat "$CURL_LOG")"; else pass; fi
+assert_contains "$("$FM" version 2>&1)" "(stable release)" "version reports stable after --from-file"
+assert_equal "$(file_sha "$VIEW_STATE")" "$VIEW_STATE_SHA" "view state survives every swap in this section"
+assert_no_leftovers "$SWAP" "the swap section leaves no staging or previous directory"
+# The command still renders after all the swaps.
+if frame=$(cd / && "$FM" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "fm-board after the swaps exited non-zero: $frame"; fi
+assert_contains "$frame" "Needs you (0)" "the swapped command renders"
+
+# 9. A moved install and a missing record are refused with a pointer to the
+# installer (falsify: install into the recorded prefix regardless).
+cp -R "$SWAP_PREFIX" "$SWAP/moved"
+if out=$(cd / && offline bash "$SWAP/moved/bin/fm-board.sh" upgrade 2>&1); then fail "upgrade from a moved install should exit non-zero"; else pass; fi
+assert_contains "$out" "was the install moved" "a moved install is named as the cause"
+rm -f -- "${SWAP:?}/moved/install-record"
+if out=$(cd / && offline bash "$SWAP/moved/bin/fm-board.sh" upgrade 2>&1); then fail "upgrade without a record should exit non-zero"; else pass; fi
+assert_contains "$out" "no install record" "a missing record is named"
+assert_contains "$out" "install.sh | bash" "a missing record points at the installer"
+assert_contains "$(bash "$SWAP/moved/bin/fm-board.sh" version 2>&1)" "not an installed copy" "version without a record says so"
+
 # ------------------------------------------------------------- workflow
 # Grep-level pins on the release workflow; actionlint is the structural check
-# (see README "Releasing").
+# (see README "Releasing"). Each pin names the behavior the README promises.
 wf=$(cat "$WORKFLOW")
-assert_contains "$wf" "scripts/package.sh" "the workflow builds with the script this suite ran (falsify: inline tar in the workflow)"
-assert_contains "$wf" "- 'v*'" "the workflow runs on v* tags"
+assert_contains "$wf" "scripts/package.sh --commit \"\$GITHUB_SHA\"" "a branch push builds a per-commit beta with package.sh --commit (falsify: inline tar in the workflow)"
+assert_contains "$wf" "scripts/package.sh \"\$TAG\"" "a main push builds the release with package.sh and the v<version> tag"
+assert_not_contains "$wf" "tags:" "no tag trigger: the workflow creates every tag itself (falsify: bring back the v* trigger)"
+assert_contains "$wf" "branches: ['**']" "every branch push runs the workflow"
+assert_contains "$wf" "github.ref != 'refs/heads/main'" "the beta job skips main"
+assert_contains "$wf" "github.ref == 'refs/heads/main'" "the release job runs on main only"
+assert_contains "$wf" "pull_request:" "a closed pull request runs the cleanup"
+assert_contains "$wf" "types: [closed]" "only the closed event, merged or not"
+assert_contains "$wf" "workflow_dispatch:" "a job can be re-run by hand"
+assert_contains "$wf" "concurrency:" "pushes to one ref never race"
+assert_contains "$wf" "group: release-\${{ github.ref }}" "the concurrency group is per ref"
 assert_contains "$wf" "contents: write" "the token permission is contents: write"
 assert_not_contains "$wf" "secrets." "no secret beyond the built-in token (falsify: add a PAT)"
 assert_contains "$wf" "github.token" "the built-in token is used"
-assert_contains "$wf" "gh release create" "the release is created with gh from the runner"
-assert_contains "$wf" "--prerelease" "a prerelease tag is marked as one"
-assert_contains "$wf" "steps.package.outputs.prerelease" "the prerelease flag comes from package.sh"
+assert_contains "$wf" "gh release create" "releases are created with gh from the runner"
+assert_contains "$wf" "--prerelease" "a beta is marked as a prerelease"
+assert_contains "$wf" "--target \"\$GITHUB_SHA\"" "the tag is created at the pushed commit, never by hand"
+assert_contains "$wf" "git ls-remote --exit-code --tags origin" "main checks whether v<version> exists before building"
+assert_contains "$wf" "already released" "an already released version is logged and skipped"
+assert_contains "$wf" "gh release delete" "betas are deleted with gh"
+assert_contains "$wf" "--cleanup-tag" "deleting a beta deletes its tag too"
+assert_contains "$wf" "KEEP_BETAS: 30" "at most 30 hash betas are kept"
+assert_contains "$wf" "pulls/\$PR/commits" "the cleanup walks the PR's commits"
 if printf '%s\n' "$wf" | grep -E '^[[:space:]]*-?[[:space:]]*uses:' | grep -Evq '@v[0-9]+[[:space:]]*$'; then fail "every action must be pinned to a major version tag: $(printf '%s\n' "$wf" | grep -E 'uses:' | tr -s ' ' | tr '\n' ' ')"; else pass; fi
+# The README documents the same numbers and commands (falsify: change the
+# retention in the workflow and not the README).
+readme=$(cat "$ROOT/README.md")
+assert_contains "$readme" "at most 30" "the README states the retention limit"
+for cmd in "fm-board upgrade --pre" "fm-board upgrade --stable" "fm-board upgrade --version" "fm-board version"; do
+  assert_contains "$readme" "$cmd" "the README documents $cmd"
+done
 
 printf '%s checks, %s failed\n' "$checks" "$fails"
 [ "$fails" -eq 0 ]
