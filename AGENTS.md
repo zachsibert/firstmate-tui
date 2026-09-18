@@ -209,7 +209,7 @@ milestones.
   is followed at once and never doubled; a tick that lands mid-refresh
   skipped) is tested by running the app with `--headless` against a stand-in
   whose snapshot sleeps and stopping it with a signal, so `--headless` must
-  never load `neo-blessed`. The title line's countdown, `refreshing…` and
+  never load `neo-blessed`. The title line's countdown, `refreshing...` (one ellipsis character on screen) and
   failure label render from a fixture `refresh` block (`index.mjs` documents
   it) because a one-shot render has no schedule; the panes' loading spinner
   comes from the same block (`refreshing: true` with no snapshot or `prs`

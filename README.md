@@ -232,7 +232,7 @@ The six panes, top to bottom; each pane's key is its number:
 5. **Findings**: the reports the agents wrote, newest first, from every home.
 6. **Landed**: finished work, newest first: merged pull requests and done tasks, with the pull request URL, report path or pane id in WHAT.
 
-The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing…` while one runs, and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
+The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing...` while one runs (the board prints the trailing dots as a single ellipsis character), and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
 Each pane title carries its key and its row count, as in `[1] Needs you (3)`.
 In the HERDR column, `pane lost` in red means herdr no longer has that agent's pane, and `unknown` in grey means herdr is disconnected so the board cannot tell.
 The bottom line lists the keys, and `?` shows them all.
