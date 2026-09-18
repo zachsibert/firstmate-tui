@@ -20,8 +20,11 @@
 //                 (OPEN, MERGED or CLOSED)
 //   refresh       the schedule for the title line, or null when nothing is
 //                 scheduled (a one-shot render): { nextAt, refreshing,
-//                 failedAt, failed }, the times in epoch seconds and `failed`
-//                 the last failure's text, kept until a later refresh succeeds
+//                 failedAt, failed, loadingFrame }, the times in epoch seconds,
+//                 `failed` the last failure's text, kept until a later refresh
+//                 succeeds, and loadingFrame the spinner's frame counter (the
+//                 app's 10 Hz tick count, a fixture's refresh.loading_frame;
+//                 never wall-clock, so a one-shot frame is deterministic)
 //   mtime(path)   epoch seconds of a file's last write, or null
 //
 // Options (second argument of buildModel):
@@ -32,9 +35,11 @@
 //   showHidden    list hidden rows anyway, marked "(hidden)" (the `H` toggle)
 //   hiddenPanes   Set of pane ids switched off with `1`-`5`
 //
-// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount } x5 ], meta },
+// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading } x5 ], meta },
 // where header is `Title (count[, n hidden])` plus ` (stale)` when that pane's
-// own data failed to refresh, and meta carries the title line's refresh label
+// own data failed to refresh, loading is null or { source, text } while the
+// pane still waits for its first data (paneLoading below; text is the spinner
+// line the renderer draws), and meta carries the title line's refresh label
 // ({ text, failed }) and herdr warning ('' while the link is up).
 // Every row carries tag, extra, id, text, repo, home, base, age (display
 // fields; base is the PR's base branch, drawn by Ready for review only) plus
@@ -908,6 +913,44 @@ function paneHeader(facts, pane, count, hiddenCount, showHidden) {
   return `${pane.title} (${count}${hiddenNote})${paneStale(facts, pane) ? ' (stale)' : ''}`;
 }
 
+// ------------------------------------------------------------------ Loading
+// The spinner's ten braille frames, in cycle order. The frame index is a
+// counter (facts.refresh.loadingFrame), never the clock, so a one-shot render
+// with a fixture's refresh.loading_frame always draws the same glyph.
+export const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+export function spinnerGlyph(frame) {
+  const n = Number.isInteger(frame) && frame >= 0 ? frame : 0;
+  return SPINNER_FRAMES[n % SPINNER_FRAMES.length];
+}
+
+// What a pane is still waiting for, or null: a pane is loading only while a
+// refresh is in flight and the source it draws from has never landed in this
+// session. Needs you, In flight, Findings and Landed wait on the fleet
+// snapshot; Ready for review waits on the GitHub fetch (with --no-prs it is
+// never loading: the pane shows the off state); In flight's HERDR column comes
+// from herdr, which its spinner names only once the snapshot has landed while
+// the herdr link is still connecting. A source that landed once never loads
+// again (an empty pane reads its empty text, a refreshing pane keeps its rows),
+// and a source whose first fetch failed shows the failure text, not the
+// spinner, until a later refresh lands it.
+function paneLoadingSource(facts, pane) {
+  if (!facts.refresh || !facts.refresh.refreshing) return null;
+  if (pane.id === 'review') {
+    const prs = facts.prs;
+    return prs && prs.enabled && !prs.fetchedAt && !prs.error ? 'GitHub checks' : null;
+  }
+  if (!facts.snapshot && !facts.snapshotError) return 'fleet snapshot';
+  if (pane.id === 'inflight' && facts.herdr && facts.herdr.state === 'connecting') return 'herdr';
+  return null;
+}
+
+function paneLoading(facts, pane) {
+  const source = paneLoadingSource(facts, pane);
+  if (!source) return null;
+  return { source, text: `${spinnerGlyph(facts.refresh.loadingFrame)} loading ${source}…` };
+}
+
 function asSet(value) {
   if (value instanceof Set) return value;
   return new Set(Array.isArray(value) ? value : []);
@@ -949,7 +992,7 @@ export function buildModel(facts, options = {}) {
   const builders = { needs: needsRows, review: reviewRows, inflight: inflightRows, findings: findingsRows, landed: landedRows };
   const panes = PANES.map((p, i) => {
     const { rows, hiddenCount } = applyHidden(p.id, builders[p.id](f, opts), opts);
-    return { id: p.id, title: p.title, key: String(i + 1), empty: p.empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden) };
+    return { id: p.id, title: p.title, key: String(i + 1), empty: p.empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden), loading: paneLoading(f, p) };
   });
   const homes = 1 + f.ledgers.length;
   return {

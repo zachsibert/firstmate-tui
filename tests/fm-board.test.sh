@@ -79,6 +79,10 @@
 #                   are absent from the herdr block (pane lost), a live one, a
 #                   main scout report and a secondmate landed report
 #   lost-disconnected.json  160x30, the same lost pane with herdr disconnected
+#   cold-start.json 120x40, the first refresh in flight with nothing landed:
+#                   no snapshot, no prs block, no herdr block, so every pane
+#                   shows its loading spinner; the landed, failed, frame and
+#                   narrow variants are derived from it at run time
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -1511,6 +1515,116 @@ assert_widths "$frame_h" 70 "narrow: the title line is still 70 columns"
 frame_h=$(render "$(variant populated.json settings-title '{"herdr": {"state": "disconnected", "detail": "closed"}}')" --install-root "$INSTALL" --keys ".") || fail "settings title: render exited non-zero"
 assert_row "$frame_h" '^ firstmate-tui · /fixture/firstmate · 3 homes +next refresh in 18s · herdr disconnected \(closed\) $' "settings page: the title line carries the countdown and the warning"
 assert_row "$frame_h" '^ Settings +$' "settings page: the page itself is drawn"
+
+# --------------------------------------------------------- loading spinner
+# assert_line <frame> <line number from 1> <extended regex> <label>: that one line matches
+assert_line() {
+  local got
+  got=$(printf '%s\n' "$1" | sed -n "${2}p")
+  if printf '%s\n' "$got" | grep -Eq -- "$3"; then pass; else fail "$4: line $2 is '$got', expected /$3/"; fi
+}
+# Cold start (cold-start.json, 120x40): the first refresh is in flight and nothing has landed, so
+# each pane body is one spinner line, the first braille frame and the source the pane waits on,
+# right under its column header, and no pane draws its empty text (falsify: drop paneLoading from
+# buildModel, the loading branch from renderPanes, or name one source for every pane).
+frame_ld=$(render cold-start.json) || fail "cold start: render exited non-zero"
+tags_ld=$(render cold-start.json --tags) || fail "cold start --tags: render exited non-zero"
+assert_row "$frame_ld" '^ fm-board · /fixture/firstmate · 1 home +refreshing… · herdr disconnected \(--no-herdr\) $' "cold start: the title line reads refreshing… (the block that puts the panes into the loading state)"
+assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start: Needs you, In flight, Findings and Landed each spin and name the fleet snapshot"
+assert_count "$frame_ld" "⠋ loading GitHub checks…" 1 "cold start: Ready for review alone names the GitHub checks"
+assert_line "$frame_ld" 4 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Needs you's first body line is the spinner"
+assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "cold start: Ready for review's first body line is the spinner"
+assert_line "$frame_ld" 12 '^│ ⠋ loading fleet snapshot… +│$' "cold start: In flight's first body line is the spinner"
+assert_line "$frame_ld" 34 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Findings' first body line is the spinner"
+assert_line "$frame_ld" 38 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Landed's first body line is the spinner"
+for empty_text in "no captain decisions, holds or blocked workers" "no recorded pull requests" "no workers in flight" "no scout reports" "nothing landed yet"; do
+  assert_not_contains "$frame_ld" "$empty_text" "cold start: the spinner replaces the empty text (falsify: draw the empty text beside the loading line)"
+done
+assert_contains "$frame_ld" "┌─ [3] In flight (0) ─" "cold start: the headers count zero rows and carry no stale marker"
+assert_count "$frame_ld" "(stale)" 0 "cold start: nothing has failed, so nothing is stale"
+assert_widths "$frame_ld" 120 "cold start: every line is still 120 columns"
+assert_contains "$tags_ld" "{blue-fg}⠋ loading fleet snapshot…" "cold start --tags: the spinner line is dimmed like the empty text (falsify: give it the row style)"
+# The snapshot landed, the PR fetch still running (populated.json with prs null and refreshing):
+# only Ready for review spins, above the recorded PR rows it already has from the snapshot, and the
+# four snapshot panes keep their rows (falsify: key the review pane on the snapshot, or drop the
+# rows under the loading line).
+frame_ld=$(render "$(variant populated.json snap-landed '{"prs": null, "refresh": {"refreshing": true}}')") || fail "snapshot landed: render exited non-zero"
+assert_count "$frame_ld" "loading" 1 "snapshot landed: one spinner on the board"
+assert_line "$frame_ld" 11 '^│ ⠋ loading GitHub checks… +│$' "snapshot landed: Ready for review's first body line is the spinner"
+assert_row "$frame_ld" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "snapshot landed: the recorded PR rows stay under the spinner"
+assert_contains "$frame_ld" "┌─ [2] Ready for review (2) ─" "snapshot landed: the header counts the recorded rows"
+assert_contains "$frame_ld" "┌─ [1] Needs you (4) ─" "snapshot landed: Needs you has its rows and no spinner"
+assert_row "$frame_ld" '^│ working +working +ship-alpha +harness busy \(claude-hook\)' "snapshot landed: In flight's rows are drawn"
+# --no-prs: Ready for review is never loading; it shows the off state, and a cold start's empty
+# review pane reads the empty text while the other four spin (falsify: drop the prs.enabled test
+# from paneLoadingSource).
+frame_ld=$(render "$(variant populated.json snap-landed-noprs '{"prs": null, "refresh": {"refreshing": true}}')" --no-prs) || fail "--no-prs refreshing: render exited non-zero"
+assert_count "$frame_ld" "loading" 0 "--no-prs: no spinner while the snapshot data is on screen"
+assert_row "$frame_ld" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +- +1m~ │$' "--no-prs: the recorded PR rows read the off state"
+frame_ld=$(render cold-start.json --no-prs) || fail "cold start --no-prs: render exited non-zero"
+assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start --no-prs: the four snapshot panes still spin"
+assert_not_contains "$frame_ld" "GitHub checks" "cold start --no-prs: Ready for review does not spin"
+assert_line "$frame_ld" 8 '^│ no recorded pull requests +│$' "cold start --no-prs: Ready for review reads its empty text"
+# Data on screen: a refresh over landed data spins nothing, so rows are never covered (falsify:
+# key the loading state on refreshing alone). The populated frame without a running refresh spins
+# nothing either.
+frame_ld=$(render "$(variant populated.json data-refreshing '{"refresh": {"refreshing": true}}')") || fail "data refreshing: render exited non-zero"
+assert_count "$frame_ld" "loading" 0 "data refreshing: no spinner over existing rows"
+assert_row "$frame_ld" '^ fm-board · /fixture/firstmate · 3 homes +refreshing… $' "data refreshing: the title line still says refreshing…"
+assert_count "$frame" "loading" 0 "populated: no spinner when no refresh runs"
+# The frame counter picks the glyph: loading_frame 3 is the fourth braille frame, 10 wraps to the
+# first, the default is the first, and a fraction is refused (falsify: drop the modulo from
+# spinnerGlyph, or read the clock instead of the counter).
+frame_ld=$(render "$(variant cold-start.json frame3 '{"refresh": {"refreshing": true, "loading_frame": 3}}')") || fail "loading_frame 3: render exited non-zero"
+assert_count "$frame_ld" "⠸ loading fleet snapshot…" 4 "loading_frame 3: the fourth braille glyph on the snapshot panes"
+assert_contains "$frame_ld" "⠸ loading GitHub checks…" "loading_frame 3: the same glyph on Ready for review"
+assert_not_contains "$frame_ld" "⠋" "loading_frame 3: the first glyph is gone"
+frame_ld=$(render "$(variant cold-start.json frame10 '{"refresh": {"refreshing": true, "loading_frame": 10}}')") || fail "loading_frame 10: render exited non-zero"
+assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "loading_frame 10: the cycle wraps to the first glyph"
+if out=$(render "$(variant cold-start.json frame-bad '{"refresh": {"refreshing": true, "loading_frame": 1.5}}')" 2>&1); then
+  fail "loading_frame 1.5 should exit non-zero"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq "refresh.loading_frame is not a whole number: 1.5"; then pass; else fail "loading_frame 1.5 is named in the error: $out"; fi
+# Narrow (70x24): the list layout draws the same line right under each section header (falsify:
+# drop the loading entry from flattenRows).
+frame_ld=$(render "$(variant cold-start.json narrow '{"cols": 70, "rows": 24}')") || fail "cold start narrow: render exited non-zero"
+assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "narrow cold start: the four snapshot sections spin"
+assert_line "$frame_ld" 3 '^── \[1\] Needs you \(0\) ─+$' "narrow cold start: the first section header"
+assert_line "$frame_ld" 4 '^ ⠋ loading fleet snapshot… +$' "narrow cold start: the spinner line follows the section header"
+assert_line "$frame_ld" 6 '^ ⠋ loading GitHub checks… +$' "narrow cold start: Ready for review's line names the GitHub checks"
+assert_not_contains "$frame_ld" "no workers in flight" "narrow cold start: no empty text beside the spinner"
+assert_widths "$frame_ld" 70 "narrow cold start: every line is 70 columns"
+# A failed first fetch shows the failure text, not the spinner: a PR fetch that failed before any
+# fetch landed leaves the recorded rows reading checks: fetch failed under a stale header, and a
+# snapshot that failed before any landed leaves the four panes stale with their empty text while
+# Ready for review, whose own fetch is still running, spins (falsify: drop the prs.error or the
+# snapshotError test from paneLoadingSource).
+frame_ld=$(render "$(variant populated.json pr-first-failed '{"prs": {"candidate_prs": null, "error": "exit 1"}, "refresh": {"refreshing": true}}')") || fail "PR first fetch failed: render exited non-zero"
+assert_count "$frame_ld" "loading" 0 "PR first fetch failed: no spinner"
+assert_contains "$frame_ld" "┌─ [2] Ready for review (2) (stale) ─" "PR first fetch failed: the review header is stale"
+assert_row "$frame_ld" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: fetch failed +- +1m~ │$' "PR first fetch failed: the rows read checks: fetch failed"
+frame_ld=$(render "$(variant cold-start.json snap-first-failed '{"snapshot_error": "exit 1"}')") || fail "snapshot first fetch failed: render exited non-zero"
+assert_count "$frame_ld" "loading fleet snapshot" 0 "snapshot first fetch failed: the snapshot panes do not spin"
+assert_count "$frame_ld" "(stale)" 4 "snapshot first fetch failed: the four snapshot panes are stale"
+assert_line "$frame_ld" 4 '^│ no captain decisions, holds or blocked workers +│$' "snapshot first fetch failed: Needs you reads its empty text"
+assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "snapshot first fetch failed: Ready for review still spins on its own fetch"
+# Herdr: once the snapshot has landed, In flight names herdr while the link is still connecting,
+# above the rows it already has, and only while a refresh runs; on a cold start the snapshot
+# comes first (falsify: drop the herdr branch from paneLoadingSource, or move it above the
+# snapshot test).
+frame_ld=$(render "$(variant populated.json herdr-connecting '{"herdr": {"state": "connecting"}, "refresh": {"refreshing": true}}')") || fail "herdr connecting: render exited non-zero"
+assert_count "$frame_ld" "loading" 1 "herdr connecting: one spinner on the board"
+assert_row "$frame_ld" '^│ ⠋ loading herdr… +│$' "herdr connecting: In flight names herdr"
+assert_before "$frame_ld" "In flight \(7\)" "⠋ loading herdr…" "herdr connecting: the line is in In flight"
+assert_before "$frame_ld" "⠋ loading herdr…" "working +working +ship-alpha" "herdr connecting: the rows follow the spinner line"
+assert_contains "$frame_ld" "┌─ [3] In flight (7) ─" "herdr connecting: the header still counts the rows"
+frame_ld=$(render "$(variant populated.json herdr-connecting-idle '{"herdr": {"state": "connecting"}}')") || fail "herdr connecting idle: render exited non-zero"
+assert_count "$frame_ld" "loading" 0 "herdr connecting with no refresh running: no spinner"
+frame_ld=$(render "$(variant cold-start.json cold-connecting '{"herdr": {"state": "connecting", "agents": []}}')") || fail "cold start connecting: render exited non-zero"
+assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start connecting: In flight names the snapshot first"
+assert_not_contains "$frame_ld" "loading herdr" "cold start connecting: herdr is not named before the snapshot lands"
 
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x40 the lines are: 0 title,

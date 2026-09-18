@@ -189,7 +189,7 @@ function renderPanes(model, cols, rows, view) {
   zones.push(null);
   const heights = paneHeights(
     rows,
-    model.panes.map((p) => paneDemand(p.rows.length)),
+    model.panes.map((p) => paneDemand(p.rows.length + (p.loading ? 1 : 0))),
     model.panes.map((p) => !p.hidden),
   );
   const inner = cols - 4; // two border cells and one space padding each side
@@ -215,12 +215,21 @@ function renderPanes(model, cols, rows, view) {
       body.push(headSegments(spec));
       bodyZones.push(paneZone);
     }
+    // While the pane waits for its first data the spinner line leads the body
+    // (in place of the empty text, or above the rows In flight already has
+    // while herdr is still connecting), dimmed like the placeholder text.
+    if (pane.loading) {
+      body.push([seg(fit(pane.loading.text, inner), 'empty')]);
+      bodyZones.push(paneZone);
+    }
     const roomForRows = height - body.length;
     let hiddenBelow = 0;
     let hiddenAbove = 0;
     if (pane.rows.length === 0) {
-      body.push([seg(fit(pane.empty, inner), 'empty')]);
-      bodyZones.push(paneZone);
+      if (!pane.loading) {
+        body.push([seg(fit(pane.empty, inner), 'empty')]);
+        bodyZones.push(paneZone);
+      }
     } else {
       const start = scrollStart(pane.rows.length, roomForRows, focused ? view.row : 0, view.scroll[idx] || 0);
       view.scrollOut[idx] = start;
@@ -259,13 +268,15 @@ function renderPanes(model, cols, rows, view) {
 }
 
 // Flattened list for narrow terminals: one section header per pane, one
-// scrolling body, shared column header under the title.
+// scrolling body, shared column header under the title. A loading pane gets
+// its spinner line right under its header, the same line the panes draw.
 export function flattenRows(model) {
   const out = [];
   model.panes.forEach((pane, paneIdx) => {
     if (pane.hidden) return;
     out.push({ kind: 'section', paneIdx, badge: paneBadge(pane), text: pane.header });
-    if (pane.rows.length === 0) out.push({ kind: 'empty', paneIdx, text: pane.empty });
+    if (pane.loading) out.push({ kind: 'empty', paneIdx, text: pane.loading.text });
+    else if (pane.rows.length === 0) out.push({ kind: 'empty', paneIdx, text: pane.empty });
     pane.rows.forEach((row, rowIdx) => out.push({ kind: 'row', paneIdx, rowIdx, row }));
   });
   return out;

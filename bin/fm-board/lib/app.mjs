@@ -24,6 +24,13 @@
 // map is already updated. With --no-prs, r says why the PR pane did not
 // change.
 //
+// Cold start: until the first snapshot and the first PR fetch land, the panes
+// have nothing to show, so each draws a spinner line naming what it waits on
+// (lib/model.mjs paneLoading). The spinner runs on its own 10 Hz timer
+// (syncSpinner) that starts when a rebuilt model has a loading pane and stops
+// when none is left, so the board redraws ten times a second only during
+// those few seconds; the frame index is a counter, never the clock.
+//
 // --headless runs this schedule with no terminal (tests/fm-board.test.sh does,
 // against a stand-in home, and stops it with a signal): nothing is drawn, no
 // key is read and neo-blessed is never loaded, so the suite needs only Node.
@@ -55,6 +62,7 @@ export { moveSelection } from './controller.mjs';
 
 const SNAPSHOT_DEBOUNCE_MS = 10000;
 const CLOCK_TICK_MS = 1000; // the title line's countdown moves once a second
+const SPINNER_TICK_MS = 100; // the loading spinner advances ten frames a second
 
 // The screen contract of lib/tui-blessed.mjs with no terminal behind it.
 function headlessScreen(opts) {
@@ -114,6 +122,8 @@ export async function runApp(opts) {
     refreshTimer: null, // the one timer to the next refresh (armRefreshTimer)
     nextRefreshAt: null, // epoch ms that timer is due, for the title line's countdown
     lastFailure: null, // { at: epoch seconds, text } of the last failed refresh, until one succeeds
+    loadingFrame: 0, // the spinner's frame counter, advanced by spinnerTimer while a pane is loading
+    spinnerTimer: null,
     debounceTimer: null,
     noticeTimer: null,
     viewing: false,
@@ -137,6 +147,7 @@ export async function runApp(opts) {
       refreshing: state.refreshing,
       failedAt: state.lastFailure ? state.lastFailure.at : null,
       failed: state.lastFailure ? state.lastFailure.text : null,
+      loadingFrame: state.loadingFrame,
     },
     mtime,
   });
@@ -149,7 +160,29 @@ export async function runApp(opts) {
       showHidden: state.view.showHidden,
       hiddenPanes: state.view.hiddenPanes,
     });
+    syncSpinner();
     return state.model;
+  };
+
+  // The spinner timer follows the model: it starts on the first rebuild that
+  // has a loading pane (the start refresh, before the snapshot lands) and
+  // stops on the first that has none (every source landed or failed once), so
+  // outside a cold start the board never redraws faster than the clock. Each
+  // tick advances the frame counter and draws; the draw rebuilds, which is
+  // how the timer sees the loading end. Unref'd like the clock: the refresh
+  // timer is what keeps a headless run alive.
+  const syncSpinner = () => {
+    const loading = Boolean(state.model && state.model.panes.some((p) => p.loading));
+    if (loading && !state.spinnerTimer) {
+      state.spinnerTimer = setInterval(() => {
+        state.loadingFrame += 1;
+        draw();
+      }, SPINNER_TICK_MS);
+      state.spinnerTimer.unref?.();
+    } else if (!loading && state.spinnerTimer) {
+      clearInterval(state.spinnerTimer);
+      state.spinnerTimer = null;
+    }
   };
 
   const draw = () => {

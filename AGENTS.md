@@ -116,7 +116,10 @@ the findings watermark belong to later milestones.
   whose snapshot sleeps and stopping it with a signal, so `--headless` must
   never load `neo-blessed`. The title line's countdown, `refreshing…` and
   failure label render from a fixture `refresh` block (`index.mjs` documents
-  it) because a one-shot render has no schedule. The Settings page
+  it) because a one-shot render has no schedule; the panes' loading spinner
+  comes from the same block (`refreshing: true` with no snapshot or `prs`
+  block, `loading_frame` for the glyph), and it counts ticks, never the
+  clock, so keep it that way or one-shot frames stop being deterministic. The Settings page
   is tested with `--install-root` at a fake prefix whose `bin/fm-board.sh` is
   `tests/fake-upgrade.sh` and with `--curl-cmd bash tests/fake-curl.sh` over
   `tests/fixtures/releases/api`; a one-shot render without `--curl-cmd`
