@@ -1,0 +1,122 @@
+{
+  "_comment": "Ready for review AGE sources. now is 2026-09-16T12:00:00Z = epoch 1789560000; six main-home tasks each record one PR on acme/api. Live candidates: 101 created_at 3h ago (AGE 3h, no marker); 102 no creation time (status-log age 2d~); 103 created_at in the future (falls back, 4h~); 104 created_at malformed (falls back, 30m~); 105 carries the camel-case createdAt 5d ago (5d); 107 has no task and created_at 2h ago (api#107, 2h); 108 has no task and no creation time (-, no marker since there is no age at all). Recorded PR 106 is not in the live list (unlisted, 45m~). With --no-prs every recorded row shows its status-log age with ~.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 40,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "pr-fresh",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "addressing review comments", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w3A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/api/pull/101", "source": "meta", "head": "fm/pr-fresh" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/pr-fresh.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Paginate the address API", "repo": "acme/api" }
+      },
+      {
+        "id": "pr-nodate",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "fixing the flaky test", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w3B:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/api/pull/102", "source": "meta", "head": "fm/pr-nodate" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/pr-nodate.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Cache the geocoder", "repo": "acme/api" }
+      },
+      {
+        "id": "pr-future",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "rebasing", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w3C:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/api/pull/103", "source": "meta", "head": "fm/pr-future" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/pr-future.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Rate-limit headers", "repo": "acme/api" }
+      },
+      {
+        "id": "pr-bad",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "writing the changelog", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w3D:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/api/pull/104", "source": "meta", "head": "fm/pr-bad" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/pr-bad.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Retry budget", "repo": "acme/api" }
+      },
+      {
+        "id": "pr-camel",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "waiting on CI", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w3E:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/api/pull/105", "source": "meta", "head": "fm/pr-camel" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/pr-camel.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Bulk lookup endpoint", "repo": "acme/api" }
+      },
+      {
+        "id": "pr-unlisted",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "splitting the migration", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w3F:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/api/pull/106", "source": "meta", "head": "fm/pr-unlisted" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/pr-unlisted.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Split the address migration", "repo": "acme/api" }
+      }
+    ],
+    "backlog": { "records": [] },
+    "scout_reports": [],
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "herdr": null,
+  "prs": {
+    "candidate_prs": [
+      { "num": "101", "repo": "acme/api", "task": "pr-fresh", "url": "https://github.com/acme/api/pull/101", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-16T09:00:00Z" },
+      { "num": "102", "repo": "acme/api", "task": "pr-nodate", "url": "https://github.com/acme/api/pull/102", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing" },
+      { "num": "103", "repo": "acme/api", "task": "pr-future", "url": "https://github.com/acme/api/pull/103", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-17T12:00:00Z" },
+      { "num": "104", "repo": "acme/api", "task": "pr-bad", "url": "https://github.com/acme/api/pull/104", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "yesterday" },
+      { "num": "105", "repo": "acme/api", "task": "pr-camel", "url": "https://github.com/acme/api/pull/105", "review": "APPROVED", "mergeable": "MERGEABLE", "checks": "passing", "createdAt": "2026-09-11T12:00:00Z" },
+      { "num": "107", "repo": "acme/api", "task": "-", "url": "https://github.com/acme/api/pull/107", "review": "none", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-16T10:00:00Z" },
+      { "num": "108", "repo": "acme/api", "task": "-", "url": "https://github.com/acme/api/pull/108", "review": "none", "mergeable": "MERGEABLE", "checks": "passing" }
+    ]
+  },
+  "mtimes": {
+    "/fixture/firstmate/state/pr-fresh.status": 1789559400,
+    "/fixture/firstmate/state/pr-nodate.status": 1789387200,
+    "/fixture/firstmate/state/pr-future.status": 1789545600,
+    "/fixture/firstmate/state/pr-bad.status": 1789558200,
+    "/fixture/firstmate/state/pr-camel.status": 1789556400,
+    "/fixture/firstmate/state/pr-unlisted.status": 1789557300
+  }
+}

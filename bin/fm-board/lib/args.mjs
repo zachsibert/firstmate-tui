@@ -11,12 +11,14 @@ options:
   --home <path>          add a secondmate home (repeatable). Default: FM_HOME plus
                          every home listed in FM_HOME/data/secondmates.md
   --refresh <seconds>    refresh cadence (default 30): every tick runs the fleet snapshot
-                         and, unless --no-prs, the live GitHub PR fetch together, so
-                         nothing on screen is older than this plus the slower script;
-                         a tick that lands while a refresh is still running is skipped
-  --no-prs               skip fm-bearings-snapshot.sh --include-prs (about 8 s, live
-                         GitHub through gh) so Ready for review shows recorded PR URLs
-                         only; --prs is accepted and does nothing (it is the default)
+                         and then, unless --no-prs, the live GitHub PR fetch (one gh pr
+                         list per candidate repository, all at once), so nothing on
+                         screen is older than this plus the two steps; a tick that
+                         lands while a refresh is still running is skipped
+  --no-prs               skip the live GitHub PR fetch (gh pr list; fm-bearings-snapshot.sh
+                         --include-prs when gh is not on PATH) so Ready for review shows
+                         recorded PR URLs only, with the file-time age marked ~; --prs
+                         is accepted and does nothing (it is the default)
   --no-herdr             skip the herdr overlay and the socket subscription
   --all-homes-needs      Needs you also lists every secondmate home's open decisions
                          (default: main home only; secondmate decisions flag their

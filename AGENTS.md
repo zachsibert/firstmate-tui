@@ -25,8 +25,11 @@ the findings watermark belong to later milestones.
   PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
   `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
   report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended)
-  and refreshing its own data (`r`: the snapshot and the live PR fetch
-  together, unless `--no-prs`). It never moves or closes a herdr pane; the captain splits
+  and refreshing its own data (`r`: the snapshot, then the live PR fetch
+  unless `--no-prs`; that fetch is the board's own read-only `gh pr list` per
+  candidate repository in `lib/sources.mjs`, copying `fm-bearings-snapshot.sh`'s
+  candidate and checks rules, with that script as the fallback when gh is not
+  on PATH). It never moves or closes a herdr pane; the captain splits
   panes himself, so do not bring back an `f` toggle or a `pane move` action.
   `enter` is the one key that opens a PR; do not bring back the separate `o`
   key the scout report's M2 row still lists. Answers, merges and dispatch stay
@@ -65,15 +68,17 @@ the findings watermark belong to later milestones.
   tests/fake-viewer.sh`, never a real browser or editor (a one-shot render
   without `--viewer-cmd` only reports the resolved viewer for that reason).
   The `r` key is tested against a stand-in home whose snapshot scripts only
-  log that they ran (see `render_live` in the test); the refresh schedule
-  (both scripts per tick, a tick that lands mid-refresh skipped) is tested by
-  running the app with `--headless` against a stand-in whose snapshot sleeps
-  and stopping it with a signal, so `--headless` must never load
-  `neo-blessed`. Nothing in the suite may
-  call a real herdr: if a test ever needs one, fake it and point
-  `HERDR_BIN_PATH` at the fake as well as PATH, because herdr sets
-  `HERDR_BIN_PATH` inside its panes and PATH alone still reaches the captain's
-  live server.
+  log that they ran, with `tests/fake-gh.sh` first on PATH as `gh` (see
+  `render_live` in the test): every live render must put that fake first on
+  PATH, because the board's own fetch otherwise calls the real GitHub CLI.
+  The refresh schedule (the snapshot, then the gh calls, per tick; a tick
+  that lands mid-refresh skipped) is tested by running the app with
+  `--headless` against a stand-in whose snapshot sleeps and stopping it with
+  a signal, so `--headless` must never load `neo-blessed`. Nothing in the
+  suite may call a real herdr or a real gh: if a test ever needs herdr, fake
+  it and point `HERDR_BIN_PATH` at the fake as well as PATH, because herdr
+  sets `HERDR_BIN_PATH` inside its panes and PATH alone still reaches the
+  captain's live server.
 - Bash (`bin/*.sh`, `scripts/*.sh`, `tests/*.sh`) must pass ShellCheck
   0.11.0, the same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/fm-board.sh bin/install.sh scripts/package.sh tests/fm-board.test.sh tests/install.test.sh tests/fake-curl.sh`
   when no local binary is installed). Every `rm` on a variable path takes

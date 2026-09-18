@@ -12,8 +12,8 @@
 //                  the frame is rendered (a PR open runs --opener-cmd when
 //                  given, and is only reported in the footer otherwise; a herdr
 //                  focus is reported, never run; r against a live home re-runs
-//                  the snapshot and the PR fetch (unless --no-prs) and against
-//                  a fixture only reports that it cannot; enter on a
+//                  the snapshot and then the PR fetch (unless --no-prs) and
+//                  against a fixture only reports that it cannot; enter on a
 //                  Findings row runs --viewer-cmd when given and otherwise only
 //                  reports the viewer the chain resolved to, naming the binary
 //                  found on PATH, so a test can shadow glow with a fake without
@@ -30,7 +30,8 @@
 //                 derived from snapshot.secondmate_current when absent),
 //     "herdr": { "state": "connected" | "disconnected" | ... (optional),
 //                "agents": [ { pane_id, agent_status, terminal_title_stripped } ] } | null,
-//     "prs": { "candidate_prs": [...] } | null,
+//     "prs": { "candidate_prs": [ { num, repo, task, url, review, mergeable,
+//                                   checks, created_at? } ] } | null,
 //     "mtimes": { "<absolute path>": epoch seconds } }
 // With --no-herdr the fixture's herdr block is still applied as an offline
 // overlay (header says "herdr fixture") so the join is testable without a
@@ -44,7 +45,7 @@ import { buildModel } from './lib/model.mjs';
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
-import { collectLedgers, discoverHomes, mtime, runBearingsPrs, runSnapshot } from './lib/sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, mtime, runSnapshot } from './lib/sources.mjs';
 import { focusProblem, handleKey, handleMouse, viewProblem } from './lib/controller.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer } from './lib/viewer.mjs';
@@ -105,9 +106,11 @@ async function factsLive(opts) {
   const fmHome = opts.fmHome.replace(/\/+$/, '');
   const now = () => Math.floor(Date.now() / 1000);
   const timeoutMs = opts.snapshotTimeout * 1000;
-  // Both scripts start together, as one tick of the app does.
-  const [snap, r] = await Promise.all([runSnapshot(fmHome, { timeoutMs }), opts.prs ? runBearingsPrs(fmHome, { timeoutMs }) : null]);
+  // The snapshot, then the PR fetch against the repositories it names, as one
+  // tick of the app does.
+  const snap = await runSnapshot(fmHome, { timeoutMs });
   const snapshot = snap.error ? null : snap.value;
+  const r = opts.prs ? await fetchPrs(fmHome, snapshot, { timeoutMs }) : null;
   const ledgers = collectLedgers(snapshot, discoverHomes(fmHome, opts.homes));
   const prs = r ? { enabled: true, fetchedAt: r.error ? null : now(), error: r.error, candidate_prs: r.candidate_prs } : { enabled: false };
   let herdr = { state: 'off', detail: '', agents: {} };
@@ -240,21 +243,24 @@ async function driveOnce(facts, opts, size) {
 }
 
 // The r key against a live home: the same refresh a tick of the app runs, the
-// snapshot and, unless --no-prs, the PR fetch, started together. Mutates facts
-// in place and resolves to the footer text.
+// snapshot and then, unless --no-prs, the PR fetch. Mutates facts in place and
+// resolves to the footer text (a fetch note, such as the script fallback, is
+// appended so a one-shot render shows it).
 async function refreshLive(facts, opts) {
   facts.now = Math.floor(Date.now() / 1000);
   const timeoutMs = opts.snapshotTimeout * 1000;
-  const [snap, r] = await Promise.all([runSnapshot(facts.fmHome, { timeoutMs }), opts.prs ? runBearingsPrs(facts.fmHome, { timeoutMs }) : null]);
+  const snap = await runSnapshot(facts.fmHome, { timeoutMs });
   if (snap.value && !snap.error) {
     facts.snapshot = snap.value;
     facts.snapshotAt = Math.floor(Date.now() / 1000);
     facts.snapshotError = null;
   } else facts.snapshotError = snap.error || 'snapshot failed';
   facts.ledgers = collectLedgers(facts.snapshot, discoverHomes(facts.fmHome, opts.homes));
-  if (!r) return 'PR checks off: start without --no-prs';
+  if (!opts.prs) return 'PR checks off: start without --no-prs';
+  const r = await fetchPrs(facts.fmHome, facts.snapshot, { timeoutMs });
   facts.prs = { enabled: true, fetchedAt: r.error ? facts.prs.fetchedAt : Math.floor(Date.now() / 1000), error: r.error, candidate_prs: r.error ? facts.prs.candidate_prs : r.candidate_prs };
-  return r.error ? `PR fetch: ${r.error}` : 'refreshed: snapshot and PR checks';
+  if (r.error) return `PR fetch: ${r.error}`;
+  return r.note ? `refreshed: snapshot and PR checks · ${r.note}` : 'refreshed: snapshot and PR checks';
 }
 
 async function main() {

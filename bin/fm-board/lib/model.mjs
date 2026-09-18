@@ -10,9 +10,12 @@
 //   ledgers[]     one per secondmate home: { id, home, remote, cached, summary,
 //                 error, generatedAt } where summary is fm-secondmate-home-summary.v1
 //   herdr         { state, detail, agents: { <pane-id>: { agent_status, title } } }
-//   prs           { enabled, fetchedAt, error, candidate_prs[] } from
-//                 fm-bearings-snapshot.sh --json --include-prs (enabled unless
-//                 --no-prs; fetchedAt is null until the first fetch of a session lands)
+//   prs           { enabled, fetchedAt, error, candidate_prs[] } from the live
+//                 PR fetch in lib/sources.mjs (enabled unless --no-prs; fetchedAt
+//                 is null until the first fetch of a session lands). A candidate
+//                 is {num, repo, task, url, review, mergeable, checks} plus
+//                 created_at (ISO 8601, from gh's createdAt; absent from the
+//                 fm-bearings-snapshot.sh fallback)
 //   mtime(path)   epoch seconds of a file's last write, or null
 //
 // Options (second argument of buildModel):
@@ -26,7 +29,9 @@
 // Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount } x5 ], meta }.
 // Every row carries tag, extra, id, text, repo, home, age (display fields) plus
 // name (the undecorated id for notices), homeId (main or the secondmate id),
-// hideKey (pane:home:name, plus the completion date for Landed), ageSeconds,
+// hideKey (pane:home:name, plus the completion date for Landed), ageSeconds
+// (numeric; `age` is its short form, with a trailing `~` when ageFallback says
+// the row wanted a better source and got the file-time age instead),
 // paneId (herdr pane id when the row has one), lost (that pane is absent from
 // a connected herdr), unknown (herdr is disconnected, so absence is unproved),
 // focusable, url (a PR URL the row can open, or null), reportPath (Findings:
@@ -133,10 +138,13 @@ function makeRow(fields) {
     expanded: false,
     flag: false,
     hidden: false,
+    ageFallback: false,
     ...fields,
   };
   row.name = fields.name ?? row.id;
-  row.age = fmtAge(row.ageSeconds);
+  // The marker is display only: ageSeconds stays numeric for ordering, and a
+  // row with no age at all reads "-" with no marker.
+  row.age = fmtAge(row.ageSeconds) + (row.ageFallback && row.ageSeconds !== null && row.ageSeconds !== undefined ? '~' : '');
   row.repo = row.repo || '-';
   row.url = row.url && /^https?:\/\//.test(row.url) ? row.url : null;
   return row;
@@ -346,9 +354,30 @@ function unlistedChecks(prs) {
   return { tag: 'PR', note: 'checks: fetching' };
 }
 
+// When the PR was opened, as epoch seconds, from a candidate's created_at
+// (gh's createdAt; createdAt itself is accepted too). A value that does not
+// parse, or lies in the future, counts as absent so the row falls back.
+function prCreatedAt(c, now) {
+  const created = parseTime(c.created_at ?? c.createdAt);
+  return created === null || created > now ? null : created;
+}
+
+// AGE in Ready for review: the time since the PR was opened when the live
+// fetch carries it, else the task's status-log age marked `~` (fetch off,
+// failed, PR not in the fetched set, no creation time, or one that does not
+// parse). The marker tells the two sources apart at a glance: a PR age is a
+// GitHub fact, the file-time age is only how long since the worker last wrote.
+function reviewAge(facts, taskById, taskId, created) {
+  if (created !== null) return { ageSeconds: facts.now - created, ageFallback: false };
+  const task = taskById.get(taskId);
+  return { ageSeconds: task ? statusLogAge(facts, task) : null, ageFallback: true };
+}
+
 function reviewRows(facts) {
   const rows = [];
   const recorded = recordedPrs(facts);
+  const snap = facts.snapshot || {};
+  const taskById = new Map((Array.isArray(snap.tasks) ? snap.tasks : []).map((t) => [t.id, t]));
   const prs = facts.prs || { enabled: false };
   const unlisted = unlistedChecks(prs);
   const seen = new Set();
@@ -368,6 +397,7 @@ function reviewRows(facts) {
           text: parts.join(' · '),
           repo: c.repo,
           url: c.url,
+          ...reviewAge(facts, taskById, taskId, prCreatedAt(c, facts.now)),
         }),
       );
     }
@@ -383,6 +413,7 @@ function reviewRows(facts) {
         text: `${r.url} · ${unlisted.note}`,
         repo: pr ? pr.repo : '-',
         url: r.url,
+        ...reviewAge(facts, taskById, r.task, null),
       }),
     );
   }
