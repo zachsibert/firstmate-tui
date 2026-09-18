@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# tests/fm-board.test.sh - behavior tests for fm-board through its executable
-# interface: `bin/fm-board.sh --render-once --fixture <json> --no-herdr` prints
+# tests/fm-board.test.sh - behavior tests for firstmate-tui through its
+# executable interface: `bin/firstmate-tui.sh --render-once --fixture <json>
+# --no-herdr` prints
 # one frame, and every assertion reads that frame. No firstmate home, herdr
 # server or TTY is needed. Row assertions are anchored regexes over one frame
 # line (`+` absorbs column padding) so they pin column order and content, not
@@ -43,7 +44,7 @@
 # and fails, and the suite asserts it was never called.
 # The Settings page (`.`) is checked with --install-root pointing at a fake
 # install prefix (a package.json version, an install-record and
-# tests/fake-upgrade.sh as its bin/fm-board.sh, which logs its argv and prints
+# tests/fake-upgrade.sh as its bin/firstmate-tui.sh, which logs its argv and prints
 # installer-like lines) or at a directory with no record for the checkout
 # case, and with `--curl-cmd bash tests/fake-curl.sh` serving the releases API
 # from tests/fixtures/releases/api, so no upgrade, download or GitHub call is
@@ -57,7 +58,7 @@
 # so the library's input path is covered end to end: one carriage return on
 # a PR row is one opener call, one on a Settings entry is one pending
 # prompt, under each TERM the host has terminfo for. It is skipped with a
-# note without python3 or bin/fm-board/node_modules.
+# note without python3 or bin/firstmate-tui/node_modules.
 #
 # Fixtures (tests/fixtures/):
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
@@ -97,7 +98,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-BOARD="$ROOT/bin/fm-board.sh"
+BOARD="$ROOT/bin/firstmate-tui.sh"
 FIX="$ROOT/tests/fixtures"
 FAKE_OPENER="bash $ROOT/tests/fake-opener.sh"
 FAKE_VIEWER="bash $ROOT/tests/fake-viewer.sh"
@@ -176,7 +177,7 @@ assert_lines() {
 assert_widths() {
   local bad
   bad=$(printf '%s\n' "$1" | node --input-type=module -e "
-    import { width } from '$ROOT/bin/fm-board/lib/text.mjs';
+    import { width } from '$ROOT/bin/firstmate-tui/lib/text.mjs';
     let src = '';
     process.stdin.on('data', (d) => (src += d));
     process.stdin.on('end', () => {
@@ -577,7 +578,7 @@ printf '#!/bin/sh\n' > "$chain_dir/a/glow"; chmod +x "$chain_dir/a/glow"
 printf '#!/bin/sh\n' > "$chain_dir/b/vim"; chmod +x "$chain_dir/b/vim"
 : > "$chain_dir/b/glow" # present but not executable: skipped
 chain=$(node --input-type=module -e "
-  import { resolveViewer } from '$ROOT/bin/fm-board/lib/viewer.mjs';
+  import { resolveViewer } from '$ROOT/bin/firstmate-tui/lib/viewer.mjs';
   const d = '$chain_dir';
   const show = (env, cmd = null) => { const r = resolveViewer({ env, cmd }); console.log(r.source + ' ' + r.argv.join(' ')); };
   show({ PATH: d + '/a:' + d + '/b', EDITOR: 'nano' });
@@ -828,7 +829,7 @@ frame_f=$(render populated.json --keys "f") || fail "keys f: render exited non-z
 if [ "$frame_f" = "$frame" ]; then pass; else fail "f changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_f") | head -n 5)"; fi
 assert_not_contains "$frame_f" "firstmate pane" "f leaves no firstmate-pane notice"
 assert_not_contains "$frame" " f " "footer offers no f key"
-if grep -Fq -- "-firstmate" "$ROOT/bin/fm-board/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
+if grep -Fq -- "-firstmate" "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
 
 # ------------------------------------------------------------------ PR ages
 # Ready for review's AGE is the time since the PR was opened when the live fetch carries created_at,
@@ -958,7 +959,7 @@ WT_SM_DIR="$SCRATCH/wt-secondmate"
 git init -q "$WT_DIR" && git -C "$WT_DIR" remote add origin git@github.com:acme/wt.git
 git init -q "$WT_SM_DIR" && git -C "$WT_SM_DIR" remote add origin https://github.com/acme/mate-only.git
 unit_out=$(node --input-type=module -e "
-  import { checksState, projectPr, repoSlug, candidateRepos, keepFetchedPr, GH_PR_FIELDS } from '$ROOT/bin/fm-board/lib/sources.mjs';
+  import { checksState, projectPr, repoSlug, candidateRepos, keepFetchedPr, GH_PR_FIELDS } from '$ROOT/bin/firstmate-tui/lib/sources.mjs';
   const out = [];
   out.push(['none', checksState([])], ['none-null', checksState(null)]);
   out.push(['passing', checksState([{ status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
@@ -1060,7 +1061,7 @@ ln -s "$(command -v node)" "$NOGH_BIN/node"
 ln -s "$(command -v bash)" "$NOGH_BIN/bash"
 ln -s "$(command -v cat)" "$NOGH_BIN/cat"
 rm -f "${FETCH_LOG:?}"
-frame_r=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$NOGH_BIN" "$NOGH_BIN/node" "$ROOT/bin/fm-board/index.mjs" --render-once --no-herdr --keys "r") || fail "refresh without gh: render exited non-zero"
+frame_r=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$NOGH_BIN" "$NOGH_BIN/node" "$ROOT/bin/firstmate-tui/index.mjs" --render-once --no-herdr --keys "r") || fail "refresh without gh: render exited non-zero"
 assert_fetch_log "prs --json --include-prs
 prs --json --include-prs
 snapshot
@@ -1077,7 +1078,8 @@ if [ -f "$FETCH_LOG" ]; then fail "a fixture render ran a snapshot script: $(cat
 # ------------------------------------------------------------- settings page
 # The `.` page. Install identity comes from --install-root: INSTALL is a fake prefix (package.json
 # version 0.1.0, an install-record naming acme/fm-board-test, tests/fake-upgrade.sh as its
-# bin/fm-board.sh), CHECKOUT the same tree with a .git file and no record. Release data comes from
+# bin/firstmate-tui.sh), INSTALL_OLD the same install laid out the 0.2.x way (bin/fm-board.sh beside
+# bin/fm-board/), CHECKOUT the same tree with a .git file and no record. Release data comes from
 # `--curl-cmd bash tests/fake-curl.sh` over REL (tests/fixtures/releases/api: 0.2.0 is the latest
 # stable release, three prereleases out of publish order in the list), REL_CURRENT (the same list
 # with 0.1.0 as the latest) or REL_NONE (nothing behind the API). The fake upgrade logs its argv to
@@ -1090,17 +1092,23 @@ mkdir -p "$REL_CURRENT/api" "$REL_NONE/api"
 cp "$REL/api/releases.json" "$REL_CURRENT/api/releases.json"
 sed 's/v0\.2\.0/v0.1.0/g; s/2026-09-17T14:02:11Z/2026-09-15T12:01:30Z/' "$REL/api/latest.json" > "$REL_CURRENT/api/latest.json"
 INSTALL="$SCRATCH/install"
+INSTALL_OLD="$SCRATCH/install-old"
 CHECKOUT="$SCRATCH/checkout"
 UPGRADE_LOG="$SCRATCH/upgrade.log"
 CURL_LOG="$SCRATCH/curl.log"
-mkdir -p "$INSTALL/bin/fm-board" "$CHECKOUT/bin/fm-board"
-printf '{\n  "name": "fm-board",\n  "version": "0.1.0"\n}\n' > "$INSTALL/bin/fm-board/package.json"
-cp "$INSTALL/bin/fm-board/package.json" "$CHECKOUT/bin/fm-board/package.json"
+mkdir -p "$INSTALL/bin/firstmate-tui" "$INSTALL_OLD/bin/fm-board" "$CHECKOUT/bin/firstmate-tui"
+printf '{\n  "name": "fm-board",\n  "version": "0.1.0"\n}\n' > "$INSTALL/bin/firstmate-tui/package.json"
+cp "$INSTALL/bin/firstmate-tui/package.json" "$CHECKOUT/bin/firstmate-tui/package.json"
 printf 'gitdir: /nowhere\n' > "$CHECKOUT/.git"
 printf '# written by fm-board install.sh and read by fm-board upgrade; do not edit\nprefix=%s\nbin_dir=%s/bin-dir\nrepo=acme/fm-board-test\nversion=0.1.0\ninstalled_from=release v0.1.0\n' "$INSTALL" "$SCRATCH" > "$INSTALL/install-record"
-cp "$ROOT/tests/fake-upgrade.sh" "$INSTALL/bin/fm-board.sh"
-cp "$ROOT/tests/fake-upgrade.sh" "$CHECKOUT/bin/fm-board.sh"
-chmod +x "$INSTALL/bin/fm-board.sh" "$CHECKOUT/bin/fm-board.sh"
+cp "$ROOT/tests/fake-upgrade.sh" "$INSTALL/bin/firstmate-tui.sh"
+cp "$ROOT/tests/fake-upgrade.sh" "$CHECKOUT/bin/firstmate-tui.sh"
+chmod +x "$INSTALL/bin/firstmate-tui.sh" "$CHECKOUT/bin/firstmate-tui.sh"
+# The 0.2.x layout: the same version, record and fake launcher, at the old names.
+cp "$INSTALL/bin/firstmate-tui/package.json" "$INSTALL_OLD/bin/fm-board/package.json"
+sed "s#^prefix=.*#prefix=$INSTALL_OLD#" "$INSTALL/install-record" > "$INSTALL_OLD/install-record"
+cp "$ROOT/tests/fake-upgrade.sh" "$INSTALL_OLD/bin/fm-board.sh"
+chmod +x "$INSTALL_OLD/bin/fm-board.sh"
 # A fake curl on PATH that logs and fails, for the check that a render without --curl-cmd never
 # reaches for the real one.
 # shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_CURL_LOG at run time, not here
@@ -1221,8 +1229,8 @@ assert_no_upgrade "only a lower-case y confirms"
 # with the restart line and the relaunch entry (falsify: pass --stable for the upgrade entry, spawn
 # install.sh directly, or drop finishUpgrade).
 frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,y") || fail "upgrade y: render exited non-zero"
-assert_upgrade_log "upgrade --version 0.2.0" "y runs bash <prefix>/bin/fm-board.sh upgrade --version 0.2.0, once"
-assert_row "$frame_s" '^ install: downloading fm-board-v0\.2\.0\.tar\.gz from acme/fm-board-test release v0\.2\.0 +$' "upgrade: the download line is on the page"
+assert_upgrade_log "upgrade --version 0.2.0" "y runs bash <prefix>/bin/firstmate-tui.sh upgrade --version 0.2.0, once"
+assert_row "$frame_s" '^ install: downloading firstmate-tui-v0\.2\.0\.tar\.gz from acme/fm-board-test release v0\.2\.0 +$' "upgrade: the download line is on the page"
 assert_row "$frame_s" '^ install: checksum verified +$' "upgrade: the verify line is on the page"
 assert_row "$frame_s" '^ install: firstmate-tui 0\.2\.0 installed \(replaced 0\.1\.0\) +$' "upgrade: the swap line is on the page"
 assert_before "$frame_s" 'install: downloading' 'install: checksum verified' "upgrade: lines keep their order (1)"
@@ -1232,7 +1240,7 @@ assert_row "$frame_s" '^ ▸ Relaunch now +quit and start 0\.2\.0 \(R\) +$' "upg
 assert_not_contains "$frame_s" "Upgrade to 0.2.0" "upgrade: the upgrade entry gives way to the relaunch entry"
 assert_contains "$frame_s" "installed 0.2.0; R relaunches the board" "upgrade: the footer notice sums it up"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,enter,y,R") || fail "upgrade R: render exited non-zero"
-assert_contains "$frame_s" "would relaunch: exit 75 makes bin/fm-board.sh run start the installed copy again; --render-once never exits 75" "R after a success asks for the relaunch, which a one-shot render only reports"
+assert_contains "$frame_s" "would relaunch: exit 75 makes bin/firstmate-tui.sh run start the installed copy again; --render-once never exits 75" "R after a success asks for the relaunch, which a one-shot render only reports"
 assert_upgrade_log "upgrade --version 0.2.0" "R runs no second upgrade"
 frame_s=$(render_settings "$REL" "$INSTALL" ".,R") || fail "R early: render exited non-zero"
 assert_not_contains "$frame_s" "would relaunch" "R before any success does nothing (falsify: drop the result check from the R case)"
@@ -1240,7 +1248,7 @@ assert_not_contains "$frame_s" "would relaunch" "R before any success does nothi
 # in the 0.1.0 installer's, which a 0.1.0 install's own upgrade still prints (falsify: match only one
 # name in installedVersionFromOutput).
 parsed=$(node --input-type=module -e "
-  import { installedVersionFromOutput } from '$ROOT/bin/fm-board/lib/settings.mjs';
+  import { installedVersionFromOutput } from '$ROOT/bin/firstmate-tui/lib/settings.mjs';
   console.log(installedVersionFromOutput(['install: checksum verified', 'install: firstmate-tui 0.2.1 installed (replaced 0.2.0)']));
   console.log(installedVersionFromOutput(['install: fm-board 0.2.1 installed']));
   console.log(installedVersionFromOutput(['install: checksum verified']));
@@ -1252,7 +1260,7 @@ if [ "$(printf '%s\n' "$parsed" | grep -c '^0\.2\.1$')" -eq 2 ] && [ "$(printf '
 # runUpgrade, or lock the page after a failure).
 frame_s=$(FM_BOARD_TEST_UPGRADE_EXIT=2 render_settings "$REL" "$INSTALL" ".,enter,y") || fail "upgrade fail: render exited non-zero"
 assert_upgrade_log "upgrade --version 0.2.0" "the failing upgrade ran once"
-assert_row "$frame_s" "^ install: error: checksum mismatch for fm-board-v0\.2\.0\.tar\.gz: expected 'abc', got 'def' +\$" "failure: the installer's error line is shown verbatim"
+assert_row "$frame_s" "^ install: error: checksum mismatch for firstmate-tui-v0\.2\.0\.tar\.gz: expected 'abc', got 'def' +\$" "failure: the installer's error line is shown verbatim"
 assert_contains "$frame_s" " upgrade failed (exit 2); the output above says why." "failure: the exit status is named"
 assert_not_contains "$frame_s" "restart to use" "failure: nothing says restart"
 assert_not_contains "$frame_s" "Relaunch now" "failure: no relaunch entry"
@@ -1275,6 +1283,17 @@ frame_s=$(render_settings "$REL" "$INSTALL" ".,j,enter,j,j,j,enter,y") || fail "
 assert_upgrade_log "upgrade --stable" "Back to stable: y runs the launcher's --stable path"
 assert_row "$frame_s" '^ Settings +$' "a success from the Betas menu returns to the main menu"
 assert_row "$frame_s" '^ ▸ Relaunch now ' "a success from the Betas menu offers the relaunch"
+
+# An install root laid out the 0.2.x way (bin/fm-board.sh beside bin/fm-board/, what
+# `firstmate-tui upgrade --version 0.2.5` leaves behind) is read the same: the version comes from
+# bin/fm-board/package.json and y runs that tree's bin/fm-board.sh, the only launcher it has
+# (falsify: fix the package.json and launcher paths in readInstall to bin/firstmate-tui).
+frame_s=$(render_settings "$REL" "$INSTALL_OLD" ".") || fail "old layout: render exited non-zero"
+assert_row "$frame_s" '^ firstmate-tui 0\.1\.0 \(stable release\) +$' "old layout: the version is read from bin/fm-board/package.json"
+assert_contains "$frame_s" " installed at $INSTALL_OLD (from release v0.1.0) · repository acme/fm-board-test" "old layout: the record is read"
+assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "old layout: the upgrade is offered"
+frame_s=$(render_settings "$REL" "$INSTALL_OLD" ".,enter,y") || fail "old layout y: render exited non-zero"
+assert_upgrade_log "upgrade --version 0.2.0" "old layout: y runs bash <prefix>/bin/fm-board.sh upgrade, the launcher that tree has"
 
 # enter and a double-click on the same entry are one path: settingsKeyAction answers the same
 # { type: 'activate', cursor, action } object settingsMouseAction answers, so the confirm frame is byte
@@ -1310,7 +1329,7 @@ assert_no_upgrade "enter on Back to stable runs nothing before y"
 # picture of the old double delivery is ".,enter,enter", which does cancel, as any key pressed after the
 # prompt opened should.
 adapter_keys=$(node --input-type=module -e "
-  import { normalizeKey } from '$ROOT/bin/fm-board/lib/tui-blessed.mjs';
+  import { normalizeKey } from '$ROOT/bin/firstmate-tui/lib/tui-blessed.mjs';
   const press = [['\r', { name: 'enter', sequence: '\r' }], ['\r', { name: 'return', sequence: '\r' }]];
   console.log(JSON.stringify(press.map(([ch, key]) => normalizeKey(ch, key)).filter((k) => k !== null)));
   console.log(JSON.stringify(normalizeKey('\n', { name: 'linefeed', sequence: '\n' })));
@@ -1326,10 +1345,12 @@ assert_no_upgrade "enter twice runs nothing"
 # A checkout (no install record): the page says so with the git command the launcher prints, offers
 # no upgrade and no Back to stable, lists the betas read-only and asks the default repository
 # (falsify: drop the checkout guard from settingsEntries, or make readInstall default to a record).
-frame_s=$(render_settings "$REL" "$CHECKOUT" ".") || fail "checkout: render exited non-zero"
+# 200 columns: the git line names the checkout path and the package directory, and a long TMPDIR
+# (macOS) pushes it past the fixture's 160 and into the ellipsis.
+frame_s=$(render_settings "$REL" "$CHECKOUT" "." --cols 200) || fail "checkout: render exited non-zero"
 assert_row "$frame_s" '^ firstmate-tui 0\.1\.0 \(stable release\) +$' "checkout: the running version"
 assert_contains "$frame_s" " running from a checkout at $CHECKOUT (no install record); update it with git:" "checkout: the page says it is a checkout"
-assert_contains "$frame_s" "   git -C $CHECKOUT pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)" "checkout: the git command the launcher prints"
+assert_contains "$frame_s" "   git -C $CHECKOUT pull   (then (cd bin/firstmate-tui && npm ci) when the lockfile changed)" "checkout: the git command the launcher prints"
 assert_not_contains "$frame_s" "installed at" "checkout: no install line"
 assert_row "$frame_s" '^ latest stable  0\.2\.0 · published 2026-09-17 · newer than this checkout; git pull updates it +$' "checkout: the latest line points at git instead of an upgrade"
 assert_not_contains "$frame_s" "Upgrade to" "checkout: no upgrade action"
@@ -1737,7 +1758,7 @@ assert_opened "$(printf 'https://github.com/acme/widgets/pull/41\nhttps://github
 # second click of a fast double-click is not lost to the library's one-report parse; a single report
 # is left alone (falsify: return the match for one report too).
 adapter=$(node --input-type=module -e "
-  import { normalizeMouse, splitMouseReports } from '$ROOT/bin/fm-board/lib/tui-blessed.mjs';
+  import { normalizeMouse, splitMouseReports } from '$ROOT/bin/firstmate-tui/lib/tui-blessed.mjs';
   const show = (label, v) => console.log(label + ' ' + JSON.stringify(v === undefined ? null : v));
   const ev = (action, raw, type, button = 'left') => normalizeMouse({ action, button, x: 30, y: 10, raw: [raw, 63, 43, ''], type });
   show('x10-press', ev('mousedown', 32, 'X10'));
@@ -1779,7 +1800,7 @@ else
 fi
 if printf '%s\n' "$out" | grep -Fq -- '--mouse: bad event "rclick:30,11"'; then pass; else fail "--mouse names rclick as an unsupported event: $out"; fi
 buttons=$(node --input-type=module -e "
-  import { mouseAction } from '$ROOT/bin/fm-board/lib/controller.mjs';
+  import { mouseAction } from '$ROOT/bin/firstmate-tui/lib/controller.mjs';
   const zones = Array.from({ length: 40 }, (_, y) => (y === 5 ? { kind: 'row', pane: 0, row: 2 } : null));
   const model = { panes: [{ id: 'needs', hidden: false, hiddenCount: 0, rows: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] }], meta: {} };
   const view = { pane: 0, row: 0, frame: { cols: 160, rows: 40, zones }, lastClick: null, showHidden: false };
@@ -2109,7 +2130,7 @@ else
 fi
 if printf '%s\n' "$out" | grep -Fq -- "--detached applies to 'open' only"; then pass; else fail "run --detached names open in its error: $out"; fi
 # --help documents the in-place default and the detached flag (falsify: restore the old open
-# line in the header comment of bin/fm-board.sh).
+# line in the header comment of bin/firstmate-tui.sh).
 help=$("$BOARD" --help 2>/dev/null)
 if printf '%s\n' "$help" | grep -Fq -- "open --detached"; then pass; else fail "wrapper --help lists open --detached"; fi
 # The usage page leads with the bare command and `open` as one thing, running in this
@@ -2129,8 +2150,8 @@ if printf '%s\n' "$help" | grep -Fq -- "Press ? inside the"; then pass; else fai
 if printf '%s\n' "$help" | grep -Fq -- "running from a checkout at $ROOT"; then pass; else fail "wrapper --help from a checkout names the checkout (falsify: read the install record without testing for it)"; fi
 # The manifest's palette action has no terminal to run in, so it carries --detached; the pane
 # entry keeps running the board in place (falsify: edit either command in herdr-plugin.toml).
-if grep -Fq -- '"open", "--detached"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml open action carries --detached"; fi
-if grep -Fq -- '"../fm-board.sh", "open"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml pane entry runs the board in place with the public subcommand"; fi
+if grep -Fq -- '"open", "--detached"]' "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml open action carries --detached"; fi
+if grep -Fq -- '"../firstmate-tui.sh", "open"]' "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml pane entry runs the board in place with the public subcommand"; fi
 if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --view-state 2>&1); then
   fail "--view-state without a value should exit non-zero"
 else
@@ -2183,11 +2204,11 @@ assert_lines "$(cat "$NODE_LOG" 2>/dev/null)" 1 "exit 3 runs the board once and 
 # gesture runs under TERM=xterm-256color, screen and tmux-256color, whichever terminfo the host has,
 # because the board runs inside herdr. The driver waits for the PR row's URL, not the pane header, since
 # the header is drawn over the loading spinner before the snapshot lands. Needs python3 and the board's
-# node_modules (npm ci in bin/fm-board); without them the section is skipped with a note, not failed.
+# node_modules (npm ci in bin/firstmate-tui); without them the section is skipped with a note, not failed.
 PTY="$ROOT/tests/pty-keys.py"
 PTY_URL=https://github.com/acme/widgets/pull/41
 PTY_TRACE="$SCRATCH/pty-opener-trace.log"
-if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/fm-board/node_modules/neo-blessed" ]; then
+if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modules/neo-blessed" ]; then
   run_pty() { # <term> <name> <actions...>: the interactive board on a pty against the stand-in home, with every fake wired
     local term=$1 name=$2
     shift 2
@@ -2231,7 +2252,7 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/fm-board/node_modules/n
   pty_ok lf "pty: LF alone leaves the board running until q"
   assert_not_opened "pty: LF alone (ctrl-j) opens nothing"
 else
-  echo "note: the pseudo-terminal section was skipped; it needs python3 on PATH and bin/fm-board/node_modules (npm ci in bin/fm-board)"
+  echo "note: the pseudo-terminal section was skipped; it needs python3 on PATH and bin/firstmate-tui/node_modules (npm ci in bin/firstmate-tui)"
 fi
 
 printf '%s checks, %s failed\n' "$checks" "$fails"

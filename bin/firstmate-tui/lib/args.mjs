@@ -36,8 +36,8 @@ options:
   --curl-cmd <argv>      command the Settings page (.) fetches the GitHub releases API
                          with (default: curl); quoted string, split on whitespace. In
                          --render-once nothing is fetched without it
-  --install-root <dir>   where the Settings page looks for bin/fm-board/package.json,
-                         install-record and bin/fm-board.sh (default: the directory two
+  --install-root <dir>   where the Settings page looks for bin/firstmate-tui/package.json,
+                         install-record and bin/firstmate-tui.sh (default: the directory two
                          levels above this package: the install prefix, or the checkout;
                          test mode points it at a fake prefix)
   --render-once          print one frame to stdout and exit (test mode)

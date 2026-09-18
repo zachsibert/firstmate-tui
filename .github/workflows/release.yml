@@ -1,6 +1,6 @@
 # .github/workflows/release.yml - the one release path for firstmate-tui.
 #
-# The version source is "version" in bin/fm-board/package.json; nobody tags by
+# The version source is "version" in bin/firstmate-tui/package.json; nobody tags by
 # hand. scripts/package.sh builds every tarball (the same script
 # tests/install.test.sh runs), and the README covers the flow under
 # "Releasing".
@@ -14,13 +14,12 @@
 #   push to a branch other than main   a per-commit beta, named against the
 #                                      version the next merge will release:
 #                                      package.sh --commit builds
-#                                      fm-board-v<next>-<sha7>.tar.gz (the asset
-#                                      keeps that name for 0.1.0 upgrades; see
-#                                      scripts/package.sh) and a prerelease
-#                                      tagged v<next>-<sha7> is created at that
-#                                      commit (0.2.5-d8b290e is version 0.2.5 at
-#                                      commit d8b290e); then betas beyond the
-#                                      newest 30 are deleted, oldest first
+#                                      firstmate-tui-v<next>-<sha7>.tar.gz and
+#                                      a prerelease tagged v<next>-<sha7> is
+#                                      created at that commit (0.2.5-d8b290e is
+#                                      version 0.2.5 at commit d8b290e); then
+#                                      betas beyond the newest 30 are deleted,
+#                                      oldest first
 #   push to main                       the release: when the picked version is
 #                                      package.json's, build and create the
 #                                      release at that commit; otherwise write
@@ -84,12 +83,12 @@ jobs:
           # (scripts/next-version.sh against the repository's tags), stamped
           # into this checkout only: an unbumped branch builds 0.2.5-<sha7>
           # once v0.2.4 exists, not a second 0.2.4-<sha7>.
-          version=$(node -p 'require("./bin/fm-board/package.json").version')
+          version=$(node -p 'require("./bin/firstmate-tui/package.json").version')
           mapfile -t tags < <(git ls-remote --tags --refs origin 'refs/tags/v*' | sed 's#.*refs/tags/##')
           next=$(bash scripts/next-version.sh "$version" ${tags[@]+"${tags[@]}"})
           if [ "$next" != "$version" ]; then
             echo "package.json says $version, which is released already; this beta is built as $next"
-            (cd bin/fm-board && npm version "$next" --no-git-tag-version >/dev/null)
+            (cd bin/firstmate-tui && npm version "$next" --no-git-tag-version >/dev/null)
           fi
           tag="v$next-${GITHUB_SHA::7}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -170,7 +169,7 @@ jobs:
         run: |
           # Every merge to main is a release: package.json's version when its
           # tag is free, else the next free patch (scripts/next-version.sh).
-          version=$(node -p 'require("./bin/fm-board/package.json").version')
+          version=$(node -p 'require("./bin/firstmate-tui/package.json").version')
           mapfile -t tags < <(git ls-remote --tags --refs origin 'refs/tags/v*' | sed 's#.*refs/tags/##')
           next=$(bash scripts/next-version.sh "$version" ${tags[@]+"${tags[@]}"})
           {
@@ -198,8 +197,8 @@ jobs:
           # releases instead, carrying this commit's changes.
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          (cd bin/fm-board && npm version "$VERSION" --no-git-tag-version >/dev/null)
-          git add bin/fm-board/package.json bin/fm-board/package-lock.json
+          (cd bin/firstmate-tui && npm version "$VERSION" --no-git-tag-version >/dev/null)
+          git add bin/firstmate-tui/package.json bin/firstmate-tui/package-lock.json
           git commit -m "Release $VERSION [skip ci]"
           git push origin HEAD:main
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

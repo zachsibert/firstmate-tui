@@ -1,6 +1,6 @@
 {
   "name": "firstmate-tui",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "private": true,
   "description": "firstmate-tui: read-only herdr-hosted terminal board over the firstmate fleet snapshot",
   "type": "module",

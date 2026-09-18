@@ -7,7 +7,7 @@
 # The release workflow (.github/workflows/release.yml) and the install test
 # (tests/install.test.sh) both run this script, so the tarball a test installs
 # is the tarball a release publishes. The one version source is the "version"
-# in bin/fm-board/package.json.
+# in bin/firstmate-tui/package.json.
 #
 # A release build takes the tag: it must be "v" plus that version (v0.2.0);
 # anything else exits 2, which is how a wrong tag fails the release before
@@ -18,21 +18,22 @@
 # touched. Every per-commit build is a prerelease.
 #
 # Output files in <out-dir>:
-#   fm-board-<tag>.tar.gz         unpacks to one directory, firstmate-tui-<tag>/,
-#                                 holding bin/fm-board.sh, bin/install.sh (so
-#                                 `firstmate-tui upgrade` can run the installer
-#                                 that matches its own version), bin/fm-board/
-#                                 with its production node_modules (npm ci
-#                                 --omit=dev, so an install needs no npm step),
-#                                 README.md, and LICENSE when the repository
-#                                 has one
-#   fm-board-<tag>.tar.gz.sha256  its SHA-256 in sha256sum / shasum format
+#   firstmate-tui-<tag>.tar.gz         unpacks to one directory,
+#                                      firstmate-tui-<tag>/, holding
+#                                      bin/firstmate-tui.sh, bin/install.sh (so
+#                                      `firstmate-tui upgrade` can run the
+#                                      installer that matches its own version),
+#                                      bin/firstmate-tui/ with its production
+#                                      node_modules (npm ci --omit=dev, so an
+#                                      install needs no npm step), README.md,
+#                                      and LICENSE when the repository has one
+#   firstmate-tui-<tag>.tar.gz.sha256  its SHA-256 in sha256sum / shasum format
 #
-# The asset keeps the name fm-board-<tag>.tar.gz, and the paths inside it keep
-# bin/fm-board.sh and bin/fm-board/, because a 0.1.0 install upgrades by
-# downloading and checking exactly those names; only the top-level directory
-# carries the new name, since every installer strips it. Rename the asset once
-# no 0.1.0 install remains (AGENTS.md).
+# Up to 0.2.x the asset was fm-board-<tag>.tar.gz with bin/fm-board.sh and
+# bin/fm-board/ inside; the 0.2.5 installer asks for this name first and
+# accepts either layout, which is why the rename waited for every install to
+# reach 0.2.5 (AGENTS.md). bin/install.sh still falls back to the old name and
+# layout so an install can go back to a 0.2.x release.
 #
 # stdout is key=value lines for the workflow ($GITHUB_OUTPUT): tag, version
 # (the version the staged copy reports), prerelease (true when the version has
@@ -65,7 +66,7 @@ case "${1:-}" in
 esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PKG="$ROOT/bin/fm-board/package.json"
+PKG="$ROOT/bin/firstmate-tui/package.json"
 
 command -v npm >/dev/null 2>&1 || die "npm is required to vendor the production dependencies"
 command -v node >/dev/null 2>&1 || die "node is required"
@@ -73,7 +74,7 @@ command -v node >/dev/null 2>&1 || die "node is required"
 # ------------------------------------------------------------------ naming
 source_version=$(node -p 'require(process.argv[1]).version' "$PKG") || die "could not read version from $PKG"
 printf '%s' "$source_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
-  || die "bin/fm-board/package.json version '$source_version' is not X.Y.Z or X.Y.Z-<prerelease>"
+  || die "bin/firstmate-tui/package.json version '$source_version' is not X.Y.Z or X.Y.Z-<prerelease>"
 if [ -n "$commit" ]; then
   # A per-commit build: the seven-character short sha is the version suffix.
   printf '%s' "$commit" | grep -Eq '^[0-9a-f]{7,40}$' \
@@ -86,7 +87,7 @@ else
   printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
     || die "tag '$tag' is not of the form vX.Y.Z or vX.Y.Z-<prerelease> (for example v0.2.0 or v0.2.0-beta.1)"
   [ "$tag" = "v$source_version" ] \
-    || die "tag $tag does not match bin/fm-board/package.json version $source_version (expected v$source_version): bump the version or fix the tag"
+    || die "tag $tag does not match bin/firstmate-tui/package.json version $source_version (expected v$source_version): bump the version or fix the tag"
   version=$source_version
 fi
 prerelease=false
@@ -97,22 +98,22 @@ esac
 # ---------------------------------------------------------------- staging
 # `name` is the directory inside the tarball; `asset` is the tarball's own name.
 name="firstmate-tui-$tag"
-asset="fm-board-$tag"
-stage=$(mktemp -d "${TMPDIR:-/tmp}/fm-board-package.XXXXXX")
+asset="firstmate-tui-$tag"
+stage=$(mktemp -d "${TMPDIR:-/tmp}/firstmate-tui-package.XXXXXX")
 trap 'rm -rf -- "${stage:?}"' EXIT
 mkdir -p "$stage/$name/bin"
-cp "$ROOT/bin/fm-board.sh" "$stage/$name/bin/fm-board.sh"
+cp "$ROOT/bin/firstmate-tui.sh" "$stage/$name/bin/firstmate-tui.sh"
 cp "$ROOT/bin/install.sh" "$stage/$name/bin/install.sh"
-cp -R "$ROOT/bin/fm-board" "$stage/$name/bin/fm-board"
+cp -R "$ROOT/bin/firstmate-tui" "$stage/$name/bin/firstmate-tui"
 # A checkout may carry a dev install; the tarball gets a fresh production one.
-rm -rf -- "${stage:?}/$name/bin/fm-board/node_modules" "${stage:?}/$name/bin/fm-board/.gitignore"
+rm -rf -- "${stage:?}/$name/bin/firstmate-tui/node_modules" "${stage:?}/$name/bin/firstmate-tui/.gitignore"
 cp "$ROOT/README.md" "$stage/$name/README.md"
 [ -f "$ROOT/LICENSE" ] && cp "$ROOT/LICENSE" "$stage/$name/LICENSE"
-(cd "$stage/$name/bin/fm-board" && npm ci --omit=dev --no-audit --no-fund --loglevel=error 1>&2) \
+(cd "$stage/$name/bin/firstmate-tui" && npm ci --omit=dev --no-audit --no-fund --loglevel=error 1>&2) \
   || die "npm ci --omit=dev failed"
-[ -f "$stage/$name/bin/fm-board/node_modules/neo-blessed/package.json" ] \
+[ -f "$stage/$name/bin/firstmate-tui/node_modules/neo-blessed/package.json" ] \
   || die "npm ci did not produce node_modules/neo-blessed"
-chmod +x "$stage/$name/bin/fm-board.sh" "$stage/$name/bin/install.sh"
+chmod +x "$stage/$name/bin/firstmate-tui.sh" "$stage/$name/bin/install.sh"
 
 # A per-commit build stamps its full version into the staged copy, after npm
 # ci so the lockfile check ran against the source version it was written for.
@@ -128,8 +129,8 @@ if [ "$version" != "$source_version" ]; then
       if (json.packages && json.packages[""]) json.packages[""].version = version;
       fs.writeFileSync(path, JSON.stringify(json, null, 2) + "\n");
     }
-  ' "$stage/$name/bin/fm-board" "$version" || die "could not stamp version $version into the staged package.json"
-  staged=$(node -p 'require(process.argv[1]).version' "$stage/$name/bin/fm-board/package.json")
+  ' "$stage/$name/bin/firstmate-tui" "$version" || die "could not stamp version $version into the staged package.json"
+  staged=$(node -p 'require(process.argv[1]).version' "$stage/$name/bin/firstmate-tui/package.json")
   [ "$staged" = "$version" ] || die "staged package.json reports $staged, expected $version"
 fi
 

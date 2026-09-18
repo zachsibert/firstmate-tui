@@ -19,26 +19,25 @@
 # upgrade. Nothing else is touched: no shell rc file, no herdr config, nothing
 # outside --prefix and --bin-dir; the board's view state lives outside both.
 #
-# Two names, on purpose. The release asset is fm-board-<tag>.tar.gz today,
-# and the launcher and package inside it are bin/fm-board.sh and bin/fm-board/,
-# after the command's name up to 0.1.0. An install upgrades by running the
-# copy of this script that shipped in its own tarball, so a release can only
-# be reached by installs whose installer downloads and checks what that
-# release carries. The rename therefore takes two releases:
-#   1. this installer reads the release's asset list from the GitHub API and
-#      downloads firstmate-tui-<tag>.tar.gz when the release has it, else
-#      fm-board-<tag>.tar.gz; when that list cannot be read it tries the two
-#      names in that order and moves on from the first on any curl failure
-#      (see fetch). It accepts either layout inside the tarball
-#      (bin/firstmate-tui.sh with bin/firstmate-tui/, or bin/fm-board.sh with
-#      bin/fm-board/), writes the commands to run whichever launcher the
-#      tree has, and notes the layout in the install record (layout=);
-#   2. once every install has upgraded to a release that carries this
-#      installer, the asset and the paths inside it switch to firstmate-tui
-#      (0.3.0: scripts/package.sh, the launcher, the workflow, the tests).
-# Until then the tarball keeps the old name and layout, because an install
-# that is still on an older installer looks for exactly those. The default
-# prefix stays ~/.local/share/fm-board. AGENTS.md carries the plan.
+# Two names, on purpose. Since 0.3.0 the release asset is
+# firstmate-tui-<tag>.tar.gz and the launcher and package inside it are
+# bin/firstmate-tui.sh and bin/firstmate-tui/. Up to 0.2.x they were
+# fm-board-<tag>.tar.gz, bin/fm-board.sh and bin/fm-board/, after the
+# command's name up to 0.1.0. An install upgrades by running the copy of this
+# script that shipped in its own tarball, so this installer keeps both names:
+# it reads the release's asset list from the GitHub API and downloads
+# firstmate-tui-<tag>.tar.gz when the release has it, else
+# fm-board-<tag>.tar.gz (which is how `firstmate-tui upgrade --version 0.2.5`
+# goes back to a 0.2.x release); when that list cannot be read it tries the
+# two names in that order and moves on from the first on any curl failure
+# (see fetch). It accepts either layout inside the tarball
+# (bin/firstmate-tui.sh with bin/firstmate-tui/, or bin/fm-board.sh with
+# bin/fm-board/, never a mix), writes the commands to run whichever launcher
+# the tree has, and notes the layout in the install record (layout=). The
+# 0.2.5 installer was the first to know both names, so an install older than
+# 0.2.5, whose installer downloads the old name only, reaches 0.3.0 by
+# upgrading to 0.2.5 first. The default prefix stays ~/.local/share/fm-board.
+# AGENTS.md carries the history.
 #
 # The install record, <prefix>/install-record, is one key=value file naming
 # the prefix, the bin dir, the repository, what was installed and the layout.
@@ -197,9 +196,9 @@ package_version() { # <package.json>: the "version" field, no node needed
 # write_command <bin dir> <name> <prefix> <launcher>: the command that runs
 # <prefix>/<launcher> (bin/firstmate-tui.sh or bin/fm-board.sh, whichever the
 # install has), written whole to a temporary name and moved into place.
-# bin/fm-board.sh carries a write_command of its own so a launcher upgraded
-# by the 0.1.0 installer can add the firstmate-tui command itself; the shim
-# text must stay byte for byte the same here and there
+# bin/firstmate-tui.sh carries a write_command of its own so a launcher whose
+# bin dir has only the fm-board command can add the firstmate-tui command
+# itself; the shim text must stay byte for byte the same here and there
 # (tests/install.test.sh compares the two).
 write_command() {
   local bin_dir=$1 name=$2 prefix=$3 launcher=$4 shim_tmp

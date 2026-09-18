@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# bin/fm-board.sh - launcher for firstmate-tui, the read-only herdr-hosted board
+# bin/firstmate-tui.sh - launcher for firstmate-tui, the read-only herdr-hosted board
 # over the firstmate fleet. The installer writes it into the bin dir as the
-# `firstmate-tui` command (and, for one release, as the `fm-board` alias it
-# used to be called); from a checkout, run this file. The file keeps its old
-# name because a 0.1.0 install upgrades by downloading a tarball with
-# bin/fm-board.sh in it; see AGENTS.md.
+# `firstmate-tui` command (and, for one more release, as the `fm-board` alias
+# it used to be called); from a checkout, run this file. Up to 0.2.x this
+# file was bin/fm-board.sh beside bin/fm-board/; bin/install.sh still accepts
+# a tarball of that layout, so an install can go back to one (see AGENTS.md).
 #
 #   firstmate-tui [open] [flags]       run the board in the current terminal: the
 #                                      board starts in the pane this command was
@@ -43,7 +43,7 @@
 #                                      (test mode; stop it with a signal)
 #
 # --detached is the wrapper's own flag and applies to `open` only. Every other
-# flag is passed through to bin/fm-board/index.mjs unchanged, after `open` or
+# flag is passed through to bin/firstmate-tui/index.mjs unchanged, after `open` or
 # with no subcommand alike; see `firstmate-tui --help` for the list (--home,
 # --refresh, --no-prs, --no-herdr, --no-mouse, --all-homes-needs,
 # --opener-cmd, --viewer-cmd, --view-state, --curl-cmd, --install-root,
@@ -52,10 +52,11 @@
 # the default).
 #
 # When this copy runs from an install (an install-record beside bin/) whose
-# recorded bin dir has an `fm-board` command but no `firstmate-tui` yet, which
-# is what a 0.1.0 install looks like right after `fm-board upgrade` brought it
-# here, the launcher writes the `firstmate-tui` command there (the same shim
-# bin/install.sh writes) and says so on stderr once.
+# recorded bin dir has an `fm-board` command but no `firstmate-tui` yet (a bin
+# dir that lost the command, or an install that reached 0.2.5 through the
+# 0.1.0 installer and never ran), the launcher writes the `firstmate-tui`
+# command there (the same shim bin/install.sh writes) and says so on stderr
+# once.
 #
 # FM_HOME resolution: the FM_HOME environment variable, else the one-line file
 # "$HERDR_PLUGIN_CONFIG_DIR/fm-home" (written once by the captain when the
@@ -78,13 +79,13 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-BOARD_DIR="$ROOT/fm-board"
+BOARD_DIR="$ROOT/firstmate-tui"
 ENTRY="$BOARD_DIR/index.mjs"
 PLUGIN_ID="firstmate.board"
 NAME=firstmate-tui
 OLD_NAME=fm-board
 # The board exits with this status on the relaunch key of its Settings page
-# (RELAUNCH_EXIT in bin/fm-board/lib/settings.mjs); run_board answers it.
+# (RELAUNCH_EXIT in bin/firstmate-tui/lib/settings.mjs); run_board answers it.
 RELAUNCH_STATUS=75
 
 die() {
@@ -93,10 +94,10 @@ die() {
 }
 
 # ------------------------------------------------------- version, upgrade
-# An install is <prefix>/bin/fm-board.sh plus <prefix>/install-record, the
+# An install is <prefix>/bin/firstmate-tui.sh plus <prefix>/install-record, the
 # key=value file bin/install.sh writes (prefix, bin_dir, repo, version,
 # installed_from). A checkout has no record. The version is the "version" in
-# bin/fm-board/package.json: X.Y.Z is a stable release, X.Y.Z-<7 hex> is a
+# bin/firstmate-tui/package.json: X.Y.Z is a stable release, X.Y.Z-<7 hex> is a
 # per-commit beta (the release workflow stamps the short commit sha), and any
 # other -suffix is some other prerelease.
 PREFIX_DIR="$(dirname "$ROOT")"
@@ -184,9 +185,9 @@ show_version() {
 }
 
 # write_command <bin dir> <name>: the shim bin/install.sh writes into the bin
-# dir, one line that runs this install's bin/fm-board.sh. Kept identical to
-# the installer's write_command so a shim written here and one written there
-# cannot be told apart.
+# dir, one line that runs this install's bin/firstmate-tui.sh. Kept identical
+# to the installer's write_command so a shim written here and one written
+# there cannot be told apart (tests/install.test.sh compares the two).
 write_command() {
   local bin_dir=$1 name=$2 shim_tmp
   shim_tmp="$bin_dir/.$name.$$"
@@ -199,16 +200,16 @@ write_command() {
     fi
     printf '# The board lives in %s; run "%s upgrade" to upgrade,\n' "$PREFIX_DIR" "$NAME"
     printf '# or delete that directory and the %s and %s commands here to uninstall.\n' "$NAME" "$OLD_NAME"
-    printf 'exec bash %q "$@"\n' "$PREFIX_DIR/bin/fm-board.sh"
+    printf 'exec bash %q "$@"\n' "$PREFIX_DIR/bin/firstmate-tui.sh"
   } > "$shim_tmp" || return 1
   chmod +x "$shim_tmp" && mv -f "$shim_tmp" "$bin_dir/$name"
 }
 
-# A 0.1.0 install that ran `fm-board upgrade` was upgraded by the 0.1.0
-# installer, which only knows the `fm-board` command. Finish the rename here:
-# when the recorded bin dir has `fm-board` and no `firstmate-tui`, write the
-# `firstmate-tui` command and say so once. A checkout has no record and a
-# fresh install has both commands, so this is a no-op for them.
+# Finish the command rename when an installer older than 0.2.5, which only
+# knew the `fm-board` command, wrote the bin dir: when the recorded bin dir
+# has `fm-board` and no `firstmate-tui`, write the `firstmate-tui` command and
+# say so once. A checkout has no record and an install written by the 0.2.5
+# installer or later has both commands, so this is a no-op for them.
 ensure_new_command() {
   [ -f "$RECORD" ] || return 0
   local bin_dir
@@ -248,7 +249,7 @@ run_upgrade() {
   done
   if [ ! -f "$RECORD" ]; then
     if [ -e "$PREFIX_DIR/.git" ]; then
-      die "this $NAME is a git checkout at $PREFIX_DIR, not an installed copy; upgrade is for installs. Update the checkout with git:  git -C $(printf '%q' "$PREFIX_DIR") pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)"
+      die "this $NAME is a git checkout at $PREFIX_DIR, not an installed copy; upgrade is for installs. Update the checkout with git:  git -C $(printf '%q' "$PREFIX_DIR") pull   (then (cd bin/firstmate-tui && npm ci) when the lockfile changed)"
     fi
     die "no install record at $RECORD, so this copy was not put here by install.sh; install one with:  curl -fsSL $INSTALL_URL | bash"
   fi
@@ -470,7 +471,7 @@ open_detached() {
     pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
     [ -n "$wsid" ] && [ -n "$pane" ] || die "workspace create returned no ids: $out"
     local cmd
-    cmd=$(printf 'exec env FM_HOME=%q bash %q open --herdr-cmd %q' "$FM_HOME" "$ROOT/fm-board.sh" "$herdr_cmd")
+    cmd=$(printf 'exec env FM_HOME=%q bash %q open --herdr-cmd %q' "$FM_HOME" "$ROOT/firstmate-tui.sh" "$herdr_cmd")
     herdr_run pane run "$pane" "$cmd" >/dev/null 2>&1 || die "pane run failed in $pane"
     printf 'route=workspace workspace=%s pane=%s\n' "$wsid" "$pane"
   fi
@@ -513,7 +514,7 @@ run_board() {
   node "$ENTRY" "${pass[@]+"${pass[@]}"}"
   local status=$?
   if [ "$status" -eq "$RELAUNCH_STATUS" ]; then
-    exec bash "$ROOT/fm-board.sh" run "${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}"
+    exec bash "$ROOT/firstmate-tui.sh" run "${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}"
   fi
   exit "$status"
 }
