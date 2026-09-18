@@ -1,10 +1,19 @@
-// lib/controller.mjs - key handling shared by the interactive app and the
-// --render-once --keys test driver. keyAction() is pure: it maps a key on the
-// current selection to one action. handleKey() applies that action to the view
-// and calls back into the host for anything that touches the outside world
-// (herdr focus, the browser opener, the report viewer, a refresh, saving
-// view state, quitting), so a test can drive the same
-// code with fakes and read the resulting frame.
+// lib/controller.mjs - key and mouse handling shared by the interactive app
+// and the --render-once --keys / --mouse test driver. keyAction() and
+// mouseAction() are pure: they map a key, or a mouse event on the last drawn
+// frame, to one action object. handleKey() and handleMouse() apply that action
+// to the view through one applyAction() and call back into the host for
+// anything that touches the outside world (herdr focus, the browser opener,
+// the report viewer, a refresh, saving view state, quitting), so a test can
+// drive the same code with fakes and read the resulting frame.
+//
+// Mouse (lib/tui-blessed.mjs translates the terminal's events; --mouse feeds
+// the same objects): a left click selects the row under the pointer and
+// focuses its pane, a click on a pane title or its empty space focuses the
+// pane; two left clicks on one row within DBLCLICK_MS are a double-click and
+// do what enter does there; the wheel moves the selection WHEEL_ROWS rows in
+// the focused pane. Only the left button acts: herdr keeps the right button
+// for its own pane menu, so nothing here is bound to it.
 //
 // Actions on a row:
 //   enter   group row: expand or collapse; Ready for review, Landed or Needs
@@ -22,12 +31,15 @@
 //   r       refresh (the snapshot and the PR checks, unless --no-prs)
 //   ?       help       q / ctrl-c  quit
 
-import { PANES } from './layout.mjs';
+import { hitTest, PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
 
 const OPEN_PANES = new Set(['review', 'needs', 'landed']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
 const VIEW_PANES = new Set(['findings']);
+
+export const DBLCLICK_MS = 400;
+export const WHEEL_ROWS = 3;
 
 function paneCount(model, i) {
   const pane = model.panes[i];
@@ -188,6 +200,39 @@ export function keyAction(model, view, key) {
   }
 }
 
+// A mouse event, from the terminal adapter or the --mouse list:
+//   { type: 'down' | 'up' | 'wheel', button: 'left' | 'right' | 'middle',
+//     x, y, dir: 'up' | 'down', time }
+// x and y count cells from 0 at the top-left; time is milliseconds on any
+// one clock. view.frame is the last drawn frame's { cols, rows, zones }
+// (renderFrame) and view.lastClick the previous left click on a row
+// { pane, row, time }, which is how a double-click is recognized here rather
+// than by the terminal library. Actions: select (pane focus and cursor, also
+// for a title or empty space), activate (a double-click: the enter action for
+// that row), wheel, none. Only the left button acts.
+export function mouseAction(model, view, ev) {
+  if (!ev || ev.type === 'up' || allPanesHidden(model)) return { type: 'none' };
+  if (ev.type === 'wheel') return { type: 'wheel', dir: ev.dir === 'up' ? -1 : 1 };
+  if (ev.type !== 'down' || ev.button !== 'left') return { type: 'none' };
+  const hit = hitTest(view.frame, ev.x, ev.y);
+  if (!hit) return { type: 'none' };
+  const pane = model.panes[hit.pane];
+  if (!pane || pane.hidden) return { type: 'none' };
+  if (hit.kind !== 'row') return { type: 'select', pane: hit.pane, row: hit.pane === view.pane ? view.row : 0 };
+  const last = view.lastClick;
+  const since = last && Number.isFinite(last.time) && Number.isFinite(ev.time) ? ev.time - last.time : NaN;
+  if (last && last.pane === hit.pane && last.row === hit.row && since >= 0 && since <= DBLCLICK_MS) {
+    return { type: 'activate', pane: hit.pane, row: hit.row, action: keyAction(model, { ...view, pane: hit.pane, row: hit.row }, 'enter') };
+  }
+  return { type: 'select', pane: hit.pane, row: hit.row, click: { pane: hit.pane, row: hit.row, time: ev.time } };
+}
+
+function clampSelection(ctx) {
+  const v = moveSelection(ctx.model, ctx.view, null);
+  ctx.view.pane = v.pane;
+  ctx.view.row = v.row;
+}
+
 // ctx: { view, model, rebuild(), notice(text, bad), open(row), focus(row),
 //        viewReport(row), refresh(), persist(), quit() }.
 // rebuild() must replace ctx.model from the current view (the expanded set,
@@ -200,13 +245,42 @@ export function handleKey(ctx, key) {
     if (key === 'ctrl-c') ctx.quit();
     return;
   }
-  const clamp = () => {
-    const v = moveSelection(ctx.model, view, null);
-    view.pane = v.pane;
-    view.row = v.row;
-  };
-  const action = keyAction(ctx.model, view, key);
+  applyAction(ctx, keyAction(ctx.model, view, key));
+}
+
+export function handleMouse(ctx, ev) {
+  const { view } = ctx;
+  if (!ev || ev.type === 'up') return;
+  if (view.help) {
+    if (ev.type === 'down') view.help = false;
+    return;
+  }
+  applyAction(ctx, mouseAction(ctx.model, view, ev));
+}
+
+function applyAction(ctx, action) {
+  const { view } = ctx;
+  const clamp = () => clampSelection(ctx);
   switch (action.type) {
+    case 'select':
+      view.pane = action.pane;
+      view.row = action.row;
+      view.lastClick = action.click || null;
+      clamp();
+      return;
+    case 'activate':
+      view.pane = action.pane;
+      view.row = action.row;
+      view.lastClick = null;
+      clamp();
+      applyAction(ctx, action.action);
+      return;
+    case 'wheel': {
+      const count = paneCount(ctx.model, view.pane);
+      if (count > 0) view.row = Math.max(0, Math.min(count - 1, view.row + action.dir * WHEEL_ROWS));
+      view.lastClick = null;
+      return;
+    }
     case 'quit':
       ctx.quit();
       return;
@@ -303,7 +377,7 @@ export function handleKey(ctx, key) {
       ctx.notice('all panes shown');
       return;
     case 'move': {
-      const v = moveSelection(ctx.model, view, key);
+      const v = moveSelection(ctx.model, view, action.key);
       view.pane = v.pane;
       view.row = v.row;
       return;

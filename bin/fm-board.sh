@@ -30,8 +30,9 @@
 #   firstmate-tui help                 the usage page (also -h, --help); an unknown
 #                                      subcommand prints it to stderr and exits 2
 #   firstmate-tui --render-once [--fixture <json>] [--no-herdr] [--cols N] [--rows N]
-#                               [--keys <list>] [--expand <all|ids>] [--opener-cmd <argv>]
-#                               [--viewer-cmd <argv>] [--view-state <file>] [--tags]
+#                               [--keys <list>] [--mouse <list>] [--expand <all|ids>]
+#                               [--opener-cmd <argv>] [--viewer-cmd <argv>]
+#                               [--view-state <file>] [--tags]
 #                                      print one frame to stdout and exit
 #   firstmate-tui --headless [flags]   run the refresh schedule with no terminal
 #                                      (test mode; stop it with a signal)
@@ -39,10 +40,10 @@
 # --detached is the wrapper's own flag and applies to `open` only. Every other
 # flag is passed through to bin/fm-board/index.mjs unchanged, after `open` or
 # with no subcommand alike; see `firstmate-tui --help` for the list (--home,
-# --refresh, --no-prs, --no-herdr, --all-homes-needs, --opener-cmd,
-# --viewer-cmd, --view-state, --herdr-cmd, --herdr-socket, --snapshot-timeout,
-# --keys, --expand, --tags, --headless; --prs is accepted and does nothing,
-# live PR data being the default).
+# --refresh, --no-prs, --no-herdr, --no-mouse, --all-homes-needs,
+# --opener-cmd, --viewer-cmd, --view-state, --herdr-cmd, --herdr-socket,
+# --snapshot-timeout, --keys, --mouse, --expand, --tags, --headless; --prs is
+# accepted and does nothing, live PR data being the default).
 #
 # When this copy runs from an install (an install-record beside bin/) whose
 # recorded bin dir has an `fm-board` command but no `firstmate-tui` yet, which
@@ -136,11 +137,14 @@ common flags, after `open` or with no subcommand:
   --home <path>          add a secondmate home (repeatable; the default is FM_HOME plus
                          every home in FM_HOME/data/secondmates.md)
   --no-herdr             run without herdr: no live agent state, no pane placement
+  --no-mouse             ignore the mouse (click, double-click, wheel) and leave the
+                         terminal's own text selection alone
 
 more flags, same places: --all-homes-needs, --opener-cmd <argv>, --viewer-cmd <argv>,
   --view-state <path>, --herdr-cmd <argv>, --herdr-socket <path>, --snapshot-timeout <s>;
   test mode: --render-once, --fixture <json>, --cols N, --rows N, --keys <list>,
-  --expand <all|ids>, --tags, --headless. The README's Launch section explains each one.
+  --mouse <list>, --expand <all|ids>, --tags, --headless. The README's Launch section
+  explains each one.
 
 The board reads the firstmate home in FM_HOME (export it first). Press ? inside the
 board for the keys.
@@ -290,7 +294,7 @@ while [ "$#" -gt 0 ]; do
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
-    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--expand|--opener-cmd|--viewer-cmd)
+    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
   esac
