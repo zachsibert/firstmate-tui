@@ -8,10 +8,10 @@
 #   firstmate-tui upgrade [flags]   the same, from an install: runs the copy of
 #                                   this script that shipped in the tarball
 #
-# Downloads fm-board-<tag>.tar.gz and its .sha256 from the release, verifies
-# the checksum, unpacks the tarball into --prefix and writes a `firstmate-tui`
-# command into --bin-dir that runs the installed bin/fm-board.sh, plus
-# `fm-board`, the command's former name, as an alias for one release.
+# Downloads the release tarball and its .sha256, verifies the checksum,
+# unpacks the tarball into --prefix and writes a `firstmate-tui` command into
+# --bin-dir that runs the installed launcher, plus `fm-board`, the command's
+# former name, as an alias for one release.
 # Re-running upgrades in place: the download is verified and unpacked beside
 # the prefix first, then the previous install is replaced as a whole and the
 # commands are rewritten. Versions are never compared, so moving from a beta
@@ -19,16 +19,27 @@
 # upgrade. Nothing else is touched: no shell rc file, no herdr config, nothing
 # outside --prefix and --bin-dir; the board's view state lives outside both.
 #
-# The asset name (fm-board-<tag>.tar.gz), the default prefix
-# (~/.local/share/fm-board) and the paths inside the tarball (bin/fm-board.sh,
-# bin/fm-board/) keep the old name on purpose: a 0.1.0 install upgrades by
-# running its own copy of this script, which downloads and checks exactly
-# those, and the new launcher then adds the `firstmate-tui` command beside
-# `fm-board` (see bin/fm-board.sh). They can be renamed once no 0.1.0 install
-# remains.
+# Two names, on purpose. The release asset is fm-board-<tag>.tar.gz today,
+# and the launcher and package inside it are bin/fm-board.sh and bin/fm-board/,
+# after the command's name up to 0.1.0. An install upgrades by running the
+# copy of this script that shipped in its own tarball, so a release can only
+# be reached by installs whose installer downloads and checks what that
+# release carries. The rename therefore takes two releases:
+#   1. this installer asks for firstmate-tui-<tag>.tar.gz first and falls
+#      back to fm-board-<tag>.tar.gz when the release has no asset under the
+#      new name; it accepts either layout inside the tarball
+#      (bin/firstmate-tui.sh with bin/firstmate-tui/, or bin/fm-board.sh with
+#      bin/fm-board/), writes the commands to run whichever launcher the
+#      tree has, and notes the layout in the install record (layout=);
+#   2. once every install has upgraded to a release that carries this
+#      installer, the asset and the paths inside it switch to firstmate-tui
+#      (0.3.0: scripts/package.sh, the launcher, the workflow, the tests).
+# Until then the tarball keeps the old name and layout, because an install
+# that is still on an older installer looks for exactly those. The default
+# prefix stays ~/.local/share/fm-board. AGENTS.md carries the plan.
 #
 # The install record, <prefix>/install-record, is one key=value file naming
-# the prefix, the bin dir, the repository and what was installed.
+# the prefix, the bin dir, the repository, what was installed and the layout.
 # `firstmate-tui upgrade` reads it and runs this script again with those values.
 #
 # Needs curl (for the download), tar, and sha256sum or shasum. The installed
@@ -56,7 +67,8 @@ usage: install.sh [--stable | --pre | --version <version>] [--prefix <dir>]
                         (default: $XDG_DATA_HOME/fm-board, i.e. ~/.local/share/fm-board)
   --bin-dir <dir>       where the firstmate-tui command goes, with fm-board, its
                         former name, beside it as an alias (default: ~/.local/bin)
-  --from-file <tar.gz>  install this local tarball instead of downloading one;
+  --from-file <tar.gz>  install this local tarball instead of downloading one
+                        (firstmate-tui-<tag>.tar.gz or fm-board-<tag>.tar.gz);
                         a <tar.gz>.sha256 beside it is verified when present
   --repo <owner/name>   GitHub repository to download from
                         (default: zachsibert/firstmate-tui)
@@ -92,8 +104,19 @@ sha256_of() {
   fi
 }
 
-fetch() { # <url> <destination file>
-  curl -fsSL --retry 3 --retry-delay 1 -o "$2" "$1" || die "download failed: $1"
+# fetch <url> <destination file>: status 0 when downloaded. Status 22, curl's
+# own status for an HTTP error under -f, means the URL is not there (GitHub
+# answers 404 for an asset a release does not have), so the caller may try
+# another name; curl does not retry a 404. Any other failure (no connection,
+# a broken transfer) is an error here and now.
+fetch() {
+  local status=0
+  curl -fsSL --retry 3 --retry-delay 1 -o "$2" "$1" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    22) rm -f -- "${2:?}"; return 22 ;;
+    *) die "download failed: $1 (curl exit $status)" ;;
+  esac
 }
 
 # The GitHub releases API is JSON; the installer needs less than the board
@@ -128,14 +151,29 @@ resolve_tag() {
   printf '%s' "$tag"
 }
 
+# tree_layout <dir>: the layout of the install or unpacked tarball under
+# <dir>, named after its launcher: firstmate-tui (bin/firstmate-tui.sh and
+# bin/firstmate-tui/) or fm-board (bin/fm-board.sh and bin/fm-board/), the
+# new name first. Prints nothing and returns 1 when <dir> has neither.
+tree_layout() {
+  local layout
+  for layout in "$NAME" "$OLD_NAME"; do
+    if [ -f "$1/bin/$layout.sh" ]; then
+      printf '%s' "$layout"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # check_prefix <dir>: the prefix is either absent, empty, or a previous install
 check_prefix() {
   local prefix=$1
   [ "$prefix" != / ] && [ "$prefix" != "${HOME%/}" ] || die "refusing to install into $prefix"
   [ -e "$prefix" ] || return 0
   [ -d "$prefix" ] || die "$prefix exists and is not a directory"
-  if [ ! -f "$prefix/bin/fm-board.sh" ] && [ -n "$(ls -A "$prefix")" ]; then
-    die "$prefix exists and is not a $NAME install (no bin/fm-board.sh in it); pick another --prefix"
+  if ! tree_layout "$prefix" >/dev/null && [ -n "$(ls -A "$prefix")" ]; then
+    die "$prefix exists and is not a $NAME install (no bin/$NAME.sh or bin/$OLD_NAME.sh in it); pick another --prefix"
   fi
 }
 
@@ -143,13 +181,15 @@ package_version() { # <package.json>: the "version" field, no node needed
   sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
 }
 
-# write_command <bin dir> <name> <prefix>: the command that runs the installed
-# bin/fm-board.sh, written whole to a temporary name and moved into place.
-# bin/fm-board.sh carries the same function so a launcher upgraded by the
-# 0.1.0 installer can add the firstmate-tui command itself; keep the two
-# identical.
+# write_command <bin dir> <name> <prefix> <launcher>: the command that runs
+# <prefix>/<launcher> (bin/firstmate-tui.sh or bin/fm-board.sh, whichever the
+# install has), written whole to a temporary name and moved into place.
+# bin/fm-board.sh carries a write_command of its own so a launcher upgraded
+# by the 0.1.0 installer can add the firstmate-tui command itself; the shim
+# text must stay byte for byte the same here and there
+# (tests/install.test.sh compares the two).
 write_command() {
-  local bin_dir=$1 name=$2 prefix=$3 shim_tmp
+  local bin_dir=$1 name=$2 prefix=$3 launcher=$4 shim_tmp
   shim_tmp="$bin_dir/.$name.$$"
   {
     printf '#!/usr/bin/env bash\n'
@@ -160,7 +200,7 @@ write_command() {
     fi
     printf '# The board lives in %s; run "%s upgrade" to upgrade,\n' "$prefix" "$NAME"
     printf '# or delete that directory and the %s and %s commands here to uninstall.\n' "$NAME" "$OLD_NAME"
-    printf 'exec bash %q "$@"\n' "$prefix/bin/fm-board.sh"
+    printf 'exec bash %q "$@"\n' "$prefix/$launcher"
   } > "$shim_tmp"
   chmod +x "$shim_tmp"
   mv -f "$shim_tmp" "$bin_dir/$name"
@@ -228,12 +268,23 @@ main() {
     log "installing from $from_file"
   else
     tag=$(resolve_tag "$repo" "$version" "$pre")
-    local asset="fm-board-$tag.tar.gz"
     local base="https://github.com/$repo/releases/download/$tag"
+    local new_asset="$NAME-$tag.tar.gz" old_asset="$OLD_NAME-$tag.tar.gz" asset
     installed_from="release $tag"
-    log "downloading $asset from $repo release $tag"
-    fetch "$base/$asset" "$tmp/$asset"
-    fetch "$base/$asset.sha256" "$tmp/$asset.sha256"
+    # The asset's new name first, its former name when the release has no
+    # asset under the new one (see the header). fetch stops the install
+    # itself on any failure that is not a missing asset.
+    log "downloading $new_asset from $repo release $tag"
+    if fetch "$base/$new_asset" "$tmp/$new_asset"; then
+      asset=$new_asset
+    elif fetch "$base/$old_asset" "$tmp/$old_asset"; then
+      asset=$old_asset
+      log "release $tag has no $new_asset; downloaded $old_asset, the asset's former name, instead"
+    else
+      die "download failed: release $tag of $repo has neither $new_asset nor $old_asset (looked under $base)"
+    fi
+    fetch "$base/$asset.sha256" "$tmp/$asset.sha256" \
+      || die "download failed: $base/$asset.sha256 (the release has $asset but not its checksum)"
     tarball="$tmp/$asset"
     checksum="$tmp/$asset.sha256"
   fi
@@ -262,14 +313,23 @@ main() {
   rm -rf -- "${staging:?}"
   mkdir "$staging"
   tar -xzf "$tarball" -C "$staging" --strip-components=1 || die "could not unpack $(basename "$tarball")"
-  [ -f "$staging/bin/fm-board.sh" ] || die "the tarball has no bin/fm-board.sh; not a $NAME release"
-  [ -f "$staging/bin/fm-board/node_modules/neo-blessed/package.json" ] \
-    || die "the tarball has no vendored node_modules/neo-blessed; not a $NAME release"
-  chmod +x "$staging/bin/fm-board.sh"
+  # Either layout (see the header), and nothing in between: the launcher and
+  # the package directory beside it carry the same name.
+  local layout launcher pkg_dir
+  layout=$(tree_layout "$staging") \
+    || die "the tarball has neither bin/$NAME.sh nor bin/$OLD_NAME.sh; not a $NAME release"
+  launcher="bin/$layout.sh"
+  pkg_dir="bin/$layout"
+  [ -f "$staging/$pkg_dir/node_modules/neo-blessed/package.json" ] \
+    || die "the tarball has $launcher but no vendored $pkg_dir/node_modules/neo-blessed; not a $NAME release"
+  chmod +x "$staging/$launcher"
   [ ! -f "$staging/bin/install.sh" ] || chmod +x "$staging/bin/install.sh"
-  local new_version old_version=''
-  new_version=$(package_version "$staging/bin/fm-board/package.json")
-  [ -f "$prefix/bin/fm-board/package.json" ] && old_version=$(package_version "$prefix/bin/fm-board/package.json")
+  local new_version old_version='' old_layout=''
+  new_version=$(package_version "$staging/$pkg_dir/package.json")
+  # The version being replaced is read from the previous install's own layout.
+  old_layout=$(tree_layout "$prefix") || old_layout=''
+  [ -n "$old_layout" ] && [ -f "$prefix/bin/$old_layout/package.json" ] \
+    && old_version=$(package_version "$prefix/bin/$old_layout/package.json")
 
   # The install record goes into the staged tree, so it is swapped in with the
   # rest and an install never carries a record from a different location.
@@ -280,6 +340,7 @@ main() {
     printf 'repo=%s\n' "$repo"
     printf 'version=%s\n' "${new_version:-?}"
     printf 'installed_from=%s\n' "$installed_from"
+    printf 'layout=%s\n' "$layout"
   } > "$staging/install-record"
 
   # -------------------------------------------------------------- place
@@ -294,8 +355,8 @@ main() {
   previous=''
 
   mkdir -p "$bin_dir"
-  write_command "$bin_dir" "$NAME" "$prefix"
-  write_command "$bin_dir" "$OLD_NAME" "$prefix"
+  write_command "$bin_dir" "$NAME" "$prefix" "$launcher"
+  write_command "$bin_dir" "$OLD_NAME" "$prefix" "$launcher"
 
   # ------------------------------------------------------------- report
   if [ -n "$old_version" ]; then
