@@ -23,8 +23,9 @@ export const HELP_LINES = [
   '  x            hide the selected row from view (x on a shown hidden row unhides it)',
   '  X            unhide every row in the current pane',
   '  H            toggle showing hidden rows, greyed and marked (hidden)',
-  '  1 - 5        show or hide a pane: 1 Needs you  2 Ready for review  3 In flight',
-  '               4 Findings  5 Landed            0            show every pane',
+  '  1 - 5        show or hide a pane; each pane title carries its key: [1] Needs you',
+  '               [2] Ready for review  [3] In flight  [4] Findings  [5] Landed',
+  '  0            show every pane (with all five hidden the board lists these keys)',
   '  r            refresh now: the snapshot, and the PR checks when --prs is on',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
@@ -92,10 +93,16 @@ function headSegments(spec) {
   return [seg(parts.join(''), 'colhead')];
 }
 
+// The toggle key of a pane, shown btop-style before its title: `[1]`.
+export function paneBadge(pane) {
+  return `[${pane.key}]`;
+}
+
 function titleLine(model, cols, view) {
   const m = model.meta;
   const home = cols >= 100 ? m.fmHome : m.fmHome.split('/').filter(Boolean).slice(-1)[0] || m.fmHome;
-  const hiddenPanes = m.hiddenPanes && m.hiddenPanes.length ? ` · panes hidden: ${m.hiddenPanes.join(',')}` : '';
+  const allHidden = m.hiddenPanes && m.hiddenPanes.length === model.panes.length;
+  const hiddenPanes = allHidden ? ' · all panes hidden' : m.hiddenPanes && m.hiddenPanes.length ? ` · panes hidden: ${m.hiddenPanes.join(',')}` : '';
   const left = ` fm-board · ${home} · ${m.homes} home${m.homes === 1 ? '' : 's'}${hiddenPanes}`;
   const right = `${m.snapshot} · ${m.herdr} `;
   const gap = cols - width(left) - width(right);
@@ -158,9 +165,13 @@ function renderPanes(model, cols, rows, view) {
     const focused = view.pane === idx;
     const spec = columns(cols, inner, pane.id, tagWidth);
     const borderStyle = focused ? 'border-focus' : 'border';
-    const topText = `┌${H} ${truncate(pane.header, cols - 6)} `;
-    const top = `${topText}${H.repeat(Math.max(0, cols - 1 - width(topText)))}┐`;
-    lines.push(line([seg(top, borderStyle)], cols));
+    // `[1] Needs you (4) · ...`: the toggle key leads the title as its own dim
+    // segment, so the plain frame reads the badge and --tags can grey it.
+    const badge = paneBadge(pane);
+    const lead = `┌${H} `;
+    const topText = ` ${truncate(pane.header, cols - width(lead) - width(badge) - 4)} `;
+    const top = `${topText}${H.repeat(Math.max(0, cols - 1 - width(lead) - width(badge) - width(topText)))}┐`;
+    lines.push(line([seg(lead, borderStyle), seg(badge, 'badge'), seg(top, borderStyle)], cols));
     const height = heights[idx];
     const body = [];
     if (height >= 2) body.push(headSegments(spec));
@@ -200,7 +211,7 @@ export function flattenRows(model) {
   const out = [];
   model.panes.forEach((pane, paneIdx) => {
     if (pane.hidden) return;
-    out.push({ kind: 'section', paneIdx, text: pane.header });
+    out.push({ kind: 'section', paneIdx, badge: paneBadge(pane), text: pane.header });
     if (pane.rows.length === 0) out.push({ kind: 'empty', paneIdx, text: pane.empty });
     pane.rows.forEach((row, rowIdx) => out.push({ kind: 'row', paneIdx, rowIdx, row }));
   });
@@ -222,8 +233,10 @@ function renderList(model, cols, rows, view) {
   for (const entry of flat.slice(start, start + height)) {
     if (entry.kind === 'section') {
       const focused = entry.paneIdx === view.pane;
-      const text = `${H}${H} ${truncate(entry.text, cols - 4)} `;
-      lines.push(line([seg(`${text}${H.repeat(Math.max(0, cols - width(text)))}`, focused ? 'border-focus' : 'border')], cols));
+      const style = focused ? 'border-focus' : 'border';
+      const lead = `${H}${H} `;
+      const text = ` ${truncate(entry.text, cols - width(lead) - width(entry.badge) - 2)} `;
+      lines.push(line([seg(lead, style), seg(entry.badge, 'badge'), seg(`${text}${H.repeat(Math.max(0, cols - width(lead) - width(entry.badge) - width(text)))}`, style)], cols));
     } else if (entry.kind === 'empty') {
       lines.push(line([seg(' ', 'row'), seg(fit(entry.text, inner), 'empty')], cols));
     } else {
@@ -231,6 +244,42 @@ function renderList(model, cols, rows, view) {
     }
   }
   while (lines.length < height + 2) lines.push(line([], cols));
+  lines.push(footerLine(model, cols, view));
+  return lines;
+}
+
+// Every pane hidden: instead of an empty grid, a centered key page between the
+// title line and the footer that names the key bringing each pane back, the
+// way btop does when all its boxes are off. Pure like the rest: model plus
+// view state in, lines out.
+export function allPanesHidden(model) {
+  return model.panes.length > 0 && model.panes.every((p) => p.hidden);
+}
+
+export function landingEntries(model) {
+  const entries = [{ key: '', text: 'all panes hidden', style: 'heading' }, null];
+  for (const pane of model.panes) entries.push({ key: pane.key, text: pane.title });
+  entries.push({ key: '0', text: 'show all' }, null, { key: 'r', text: 'refresh' }, { key: '?', text: 'help' }, { key: 'q', text: 'quit' });
+  return entries;
+}
+
+function renderLanding(model, cols, rows, view) {
+  const lines = [titleLine(model, cols, view)];
+  const entries = landingEntries(model);
+  const blockW = Math.min(cols, Math.max(...entries.map((e) => (e ? width(e.key ? `${e.key}  ${e.text}` : e.text) : 0))));
+  const left = Math.max(0, Math.floor((cols - blockW) / 2));
+  const body = rows - 2;
+  const top = Math.max(0, Math.floor((body - entries.length) / 2));
+  for (let i = 0; i < body; i += 1) {
+    const entry = i >= top ? entries[i - top] : undefined;
+    if (!entry) {
+      lines.push(line([], cols));
+      continue;
+    }
+    const pad = seg(' '.repeat(left), 'row');
+    if (entry.key) lines.push(line([pad, seg(entry.key, 'help'), seg(`  ${truncate(entry.text, cols - left - width(entry.key) - 2)}`, 'row')], cols));
+    else lines.push(line([pad, seg(truncate(entry.text, cols - left), entry.style || 'row')], cols));
+  }
   lines.push(footerLine(model, cols, view));
   return lines;
 }
@@ -259,7 +308,8 @@ function overlayHelp(lines, cols) {
 // also carries `expanded`, `hidden`, `hiddenPanes` and `showHidden`, which only
 // buildModel reads)
 // Returns { lines, cols, rows, mode, scroll } where scroll holds the start
-// offsets actually used so the app can keep them for the next frame.
+// offsets actually used so the app can keep them for the next frame. mode is
+// 'panes', 'list' (narrow) or 'landing' (every pane hidden: the key page).
 export function renderFrame(model, size, view = {}) {
   const cols = Math.max(MIN_COLS, size.cols | 0);
   const rows = Math.max(MIN_ROWS, size.rows | 0);
@@ -273,8 +323,11 @@ export function renderFrame(model, size, view = {}) {
     noticeBad: Boolean(view.noticeBad),
     stale: Boolean(view.stale),
   };
-  const mode = layoutMode(cols);
-  let lines = mode === 'list' ? renderList(model, cols, rows, v) : renderPanes(model, cols, rows, v);
+  const mode = allPanesHidden(model) ? 'landing' : layoutMode(cols);
+  let lines;
+  if (mode === 'landing') lines = renderLanding(model, cols, rows, v);
+  else if (mode === 'list') lines = renderList(model, cols, rows, v);
+  else lines = renderPanes(model, cols, rows, v);
   if (v.help) lines = overlayHelp(lines, cols);
   return { lines, cols, rows, mode, scroll: v.scrollOut };
 }

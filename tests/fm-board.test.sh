@@ -185,6 +185,20 @@ assert_before "$frame" "Ready for review \(2\)" "In flight \(7\)" "pane order 2"
 assert_before "$frame" "In flight \(7\)" "Findings \(3\)" "pane order 3"
 assert_before "$frame" "Findings \(3\)" "Landed \(4\)" "pane order 4"
 
+# Every pane title leads with its toggle key, btop-style (falsify: drop the badge segment from the
+# top border in renderPanes, or change paneBadge).
+assert_contains "$frame" "┌─ [1] Needs you (4) · snapshot 12s ago" "badge on Needs you"
+assert_contains "$frame" "┌─ [2] Ready for review (2) · snapshot 12s ago" "badge on Ready for review"
+assert_contains "$frame" "┌─ [3] In flight (7) · snapshot 12s ago" "badge on In flight"
+assert_contains "$frame" "┌─ [4] Findings (3) · snapshot 12s ago" "badge on Findings"
+assert_contains "$frame" "┌─ [5] Landed (4) · snapshot 12s ago" "badge on Landed"
+assert_count "$frame" "┌─ [" 5 "exactly five badges, one per pane"
+# With --tags the badge is its own grey segment between the border segments (falsify: give the badge the
+# border style, or drop `badge` from STYLE_TAGS).
+tags=$(render populated.json --tags) || fail "populated --tags: render exited non-zero"
+assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[2\]\{/grey-fg\}\{blue-fg\} Ready for review \(2\)' "--tags: the badge is grey and the title keeps the border color"
+assert_count "$tags" "{grey-fg}[" 5 "--tags: five grey badges"
+
 # Freshness header on every pane (falsify: drop herdrLabel() from paneHeader in lib/model.mjs).
 assert_count "$frame" "snapshot 12s ago · herdr fixture" 6 "title plus five pane headers carry snapshot age and herdr state"
 assert_contains "$frame" "checks not fetched" "review header says checks not fetched without --prs"
@@ -298,6 +312,10 @@ frame_k=$(render populated.json --keys "?") || fail "keys ?: render exited non-z
 assert_contains "$frame_k" "enter        Ready for review, Landed or a Needs-you PR row: open the PR in the browser" "help overlay documents enter on Landed"
 assert_not_contains "$frame_k" "open the PR of the selected row" "help overlay no longer documents o"
 assert_contains "$frame_k" "l / right    expand the selected In flight group" "help overlay documents l/right"
+# The help lists the pane keys the way the badges show them (falsify: change the 1 - 5 lines in HELP_LINES).
+assert_contains "$frame_k" "each pane title carries its key: [1] Needs you" "help overlay ties the 1-5 keys to the title badges"
+assert_contains "$frame_k" "[2] Ready for review  [3] In flight  [4] Findings  [5] Landed" "help overlay lists every badge"
+assert_contains "$frame_k" "0            show every pane (with all five hidden the board lists these keys)" "help overlay documents 0 and the landing page"
 
 # Opening a PR: enter in Ready for review, on a Needs-you PR row and on a Landed row with a PR,
 # through the injected opener only (falsify: drop the url field from reviewRows, the merge? row or
@@ -362,9 +380,14 @@ assert_lines "$frame_empty" 40 "empty frame is 40 lines"
 
 # ---------------------------------------------------------------- narrow
 frame_narrow=$(render narrow.json) || fail "narrow: render exited non-zero"
-assert_row "$frame_narrow" '^── Needs you \(1\) · snapshot 12s ago · herdr fixture ─+$' "narrow: section header padded with dashes"
-assert_contains "$frame_narrow" "── In flight (2)" "narrow: in-flight section"
-assert_contains "$frame_narrow" "── Landed (1)" "narrow: landed section"
+# Section headers carry the same key badge as the pane titles (falsify: drop `badge` from the section
+# entry in flattenRows, or the badge segment in renderList).
+assert_row "$frame_narrow" '^── \[1\] Needs you \(1\) · snapshot 12s ago · herdr fixture ─+$' "narrow: section header with its badge, padded with dashes"
+assert_contains "$frame_narrow" "── [2] Ready for review (0)" "narrow: review section badge"
+assert_contains "$frame_narrow" "── [3] In flight (2)" "narrow: in-flight section badge"
+assert_contains "$frame_narrow" "── [4] Findings (0)" "narrow: findings section badge"
+assert_contains "$frame_narrow" "── [5] Landed (1)" "narrow: landed section badge"
+assert_count "$frame_narrow" "── [" 5 "narrow: five badges, one per section"
 assert_not_contains "$frame_narrow" "┌" "narrow: no pane borders"
 assert_row "$frame_narrow" '^ STATE +ID +WHAT +HOME +$' "narrow: single shared column header without REPO, AGE or HERDR"
 assert_row "$frame_narrow" '^ hold +decide-vendor +Pick the vendor for t… main +$' "narrow: hold row in list mode, text truncated to the flex column"
@@ -577,14 +600,90 @@ assert_contains "$frame_p" "In flight (7)" "four panes hidden: In flight remains
 assert_lines "$frame_p" 40 "four panes hidden: still 40 lines"
 assert_widths "$frame_p" 160 "four panes hidden: lines are 160 columns"
 assert_row "$frame_p" '^│ decide +1 live +!▸ hyperion ' "four panes hidden: In flight rows render in the freed space"
+# The last pane goes too: with every pane hidden the grid gives way to the landing page, a centered key
+# list between the title line and the footer (falsify: bring back a shown <= 1 guard in toggle-pane, or
+# drop the landing branch from renderFrame).
 frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "panes last: render exited non-zero"
-assert_contains "$frame_p" "at least one pane stays visible" "the last visible pane cannot be hidden (falsify: drop the shown <= 1 guard)"
-assert_count "$frame_p" "┌─" 1 "the last visible pane is still drawn"
+assert_count "$frame_p" "┌─" 0 "all panes hidden: no pane frame is drawn"
+assert_not_contains "$frame_p" "Needs you (" "all panes hidden: no pane header"
+assert_not_contains "$frame_p" "In flight (" "all panes hidden: no pane header for the last one hidden"
+assert_row "$frame_p" '^ +all panes hidden +$' "landing page heading"
+assert_row "$frame_p" '^ +1  Needs you +$' "landing page: 1 brings Needs you back"
+assert_row "$frame_p" '^ +2  Ready for review +$' "landing page: 2 brings Ready for review back"
+assert_row "$frame_p" '^ +3  In flight +$' "landing page: 3 brings In flight back"
+assert_row "$frame_p" '^ +4  Findings +$' "landing page: 4 brings Findings back"
+assert_row "$frame_p" '^ +5  Landed +$' "landing page: 5 brings Landed back"
+assert_row "$frame_p" '^ +0  show all +$' "landing page: 0 shows all"
+assert_row "$frame_p" '^ +r  refresh +$' "landing page: r"
+assert_row "$frame_p" '^ +\?  help +$' "landing page: ?"
+assert_row "$frame_p" '^ +q  quit +$' "landing page: q"
+assert_before "$frame_p" '^ +all panes hidden +$' '^ +1  Needs you +$' "landing page: heading first"
+assert_before "$frame_p" '^ +5  Landed +$' '^ +0  show all +$' "landing page: 0 after the five panes"
+assert_before "$frame_p" '^ +0  show all +$' '^ +r  refresh +$' "landing page: r after 0"
+assert_contains "$frame_p" "3 homes · all panes hidden " "all panes hidden: the title says so instead of listing five numbers (falsify: drop allHidden from titleLine)"
+assert_not_contains "$frame_p" "panes hidden: 1,2,3,4,5" "all panes hidden: the title does not list the five numbers"
+assert_contains "$frame_p" "pane hidden: In flight · every pane hidden; 1-5 or 0 shows them" "hiding the last pane leaves a notice naming the way back"
+assert_row "$frame_p" '^ j/k .* q quit +pane hidden' "the footer stays on the landing page"
+assert_lines "$frame_p" 40 "landing page: the frame is still 40 lines"
+assert_widths "$frame_p" 160 "landing page: lines are 160 columns"
+for id in needs review inflight findings landed; do
+  assert_file_contains "$vs" "\"$id\"" "all five pane ids are persisted ($id)"
+done
+# A restart with an all-hidden file lands on the page again (falsify: drop hidden_panes from loadViewState,
+# or make the landing depend on view.notice).
+frame_p=$(render populated.json --view-state "$vs") || fail "panes landing reload: render exited non-zero"
+assert_row "$frame_p" '^ +all panes hidden +$' "after a restart the landing page is shown"
+assert_count "$frame_p" "┌─" 0 "after a restart no pane is drawn"
+assert_not_contains "$frame_p" "pane hidden:" "after a restart there is no toggle notice"
+# Keys on the landing page: 1-5 and 0 act as always; a key that would move or act on a row nobody can see
+# only repeats the reminder and runs nothing; an unbound key such as o stays silent (falsify: drop
+# LANDING_KEYS or ROW_KEYS from keyAction, or the !pane.hidden term on the row lookup).
+frame_o=$(render_open populated.json "1,2,3,4,5,enter") || fail "landing enter: render exited non-zero"
+assert_not_opened "enter on the landing page opens nothing"
+assert_contains "$frame_o" "all panes hidden · 1-5 shows a pane, 0 shows all" "enter on the landing page only reminds"
+frame_o=$(render_open populated.json "1,2,3,4,5,j,tab,enter") || fail "landing move+enter: render exited non-zero"
+assert_not_opened "moving on the landing page then enter opens nothing"
+frame_p=$(render populated.json --keys "1,2,3,4,5,o") || fail "landing o: render exited non-zero"
+assert_not_contains "$frame_p" "all panes hidden · 1-5 shows a pane" "o on the landing page is the same silent no-op as elsewhere"
+assert_row "$frame_p" '^ +all panes hidden +$' "o on the landing page leaves the page in place"
+frame_p=$(render populated.json --view-state "$vs" --keys "x") || fail "landing x: render exited non-zero"
+assert_contains "$frame_p" "all panes hidden · 1-5 shows a pane, 0 shows all" "x on the landing page only reminds"
+assert_file_contains "$vs" '"hidden": []' "x on the landing page hides no row"
+frame_p=$(render populated.json --view-state "$vs" --keys "?") || fail "landing ?: render exited non-zero"
+assert_contains "$frame_p" "fm-board keys" "? opens the help over the landing page"
+frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "landing 3: render exited non-zero"
+assert_count "$frame_p" "┌─" 1 "3 on the landing page brings In flight back alone"
+assert_contains "$frame_p" "┌─ [3] In flight (7)" "the returned pane carries its badge"
+assert_contains "$frame_p" "pane shown: In flight" "3 on the landing page leaves the usual notice"
+assert_contains "$frame_p" "· panes hidden: 1,2,4,5" "one pane back: the title lists the four still hidden"
+assert_file_contains "$vs" '"hidden_panes": [' "the returned pane is persisted"
 frame_p=$(render populated.json --view-state "$vs" --keys "0") || fail "panes 0: render exited non-zero"
 assert_count "$frame_p" "┌─" 5 "0 shows every pane again"
 assert_contains "$frame_p" "all panes shown" "0 leaves a notice"
 assert_not_contains "$frame_p" "panes hidden" "0 clears the title note"
 assert_file_contains "$vs" '"hidden_panes": []' "0 empties the persisted list"
+# The same in one sitting and without a file: 1,2,3,4,5 lands, 0 restores (falsify: make the landing
+# depend on the view-state file).
+frame_p=$(render populated.json --keys "1,2,3,4,5") || fail "panes 1-5: render exited non-zero"
+assert_row "$frame_p" '^ +all panes hidden +$' "1,2,3,4,5 in one sitting lands on the page"
+assert_count "$frame_p" "┌─" 0 "1,2,3,4,5: nothing else is drawn"
+frame_p=$(render populated.json --keys "1,2,3,4,5,0") || fail "panes 1-5,0: render exited non-zero"
+assert_count "$frame_p" "┌─" 5 "0 after 1,2,3,4,5 restores all five"
+assert_not_contains "$frame_p" "all panes hidden" "0 after 1,2,3,4,5 leaves the landing page"
+# A hand-written all-hidden file is enough to land (falsify: require the ids in a particular order, or
+# only honor a file the board wrote itself).
+vs_all="$SCRATCH/view-state-all.json"
+printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":["landed","findings","inflight","review","needs"]}\n' > "$vs_all"
+frame_p=$(render populated.json --view-state "$vs_all") || fail "panes hand-written all-hidden: render exited non-zero"
+assert_row "$frame_p" '^ +all panes hidden +$' "a hand-written all-hidden view-state file renders the landing page"
+assert_count "$frame_p" "┌─" 0 "hand-written all-hidden file: no pane drawn"
+# The landing page replaces the narrow list too (falsify: pick the layout mode before the all-hidden check).
+frame_p=$(render narrow.json --keys "1,2,3,4,5") || fail "panes narrow landing: render exited non-zero"
+assert_row "$frame_p" '^ +all panes hidden +$' "narrow: the landing page replaces the list"
+assert_not_contains "$frame_p" "── [" "narrow: no section header on the landing page"
+assert_not_contains "$frame_p" " STATE " "narrow: no column header on the landing page"
+assert_widths "$frame_p" 70 "narrow landing page: lines are 70 columns"
+assert_lines "$frame_p" 24 "narrow landing page: 24 lines"
 # Hiding the selected pane moves the selection to the next shown pane (falsify: drop the shown() clamp in
 # moveSelection): 1 hides Needs you, then enter opens the first Ready for review PR.
 frame_o=$(render_open populated.json "1,enter") || fail "panes selection: render exited non-zero"
