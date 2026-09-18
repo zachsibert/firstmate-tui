@@ -104,7 +104,7 @@ MY_APPROVAL='[{"state":"APPROVED","author":{"login":"captain"}}]'
 
 # pr <repo> <number> <title> <head> <author> <state> <createdAt> <mergedAt json> <closedAt json> <labels json> <reviews json> <checks json> [reviewDecision] [isDraft]
 pr() {
-  printf '{"number":%s,"title":"%s","url":"https://github.com/%s/pull/%s","headRefName":"%s","baseRefName":"main","reviewDecision":"%s","mergeable":"MERGEABLE","isDraft":%s,"state":"%s","createdAt":"%s","mergedAt":%s,"closedAt":%s,"author":{"login":"%s"},"repository":{"nameWithOwner":"%s"},"labels":{"nodes":%s},"latestReviews":{"nodes":%s},"commits":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}' \
+  printf '{"number":%s,"title":"%s","url":"https://github.com/%s/pull/%s","headRefName":"%s","baseRefName":"main","reviewDecision":"%s","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":%s,"state":"%s","createdAt":"%s","mergedAt":%s,"closedAt":%s,"author":{"login":"%s"},"repository":{"nameWithOwner":"%s"},"labels":{"nodes":%s},"latestReviews":{"nodes":%s},"commits":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}' \
     "$2" "$3" "$1" "$2" "$4" "${13:-REVIEW_REQUIRED}" "${14:-false}" "$6" "$7" "$8" "$9" "$5" "$1" "${10}" "${11}" "${12}"
 }
 

@@ -1,7 +1,8 @@
 // lib/sources.mjs - every read the board performs against firstmate homes and
 // GitHub. Read-only by contract: it runs the fleet snapshot script, reads
-// ledgers, stats files and asks GitHub through `gh api graphql` (and, once at
-// startup, `gh api user` for the captain's login). It never writes into
+// ledgers, stats files, reads the verbs of a task's status log and asks
+// GitHub through `gh api graphql` (and, once at startup, `gh api user` for
+// the captain's login). It never writes into
 // FM_HOME, a project or a state directory, and every command is an argv
 // spawn, never a shell string.
 
@@ -67,6 +68,26 @@ export function mtime(path) {
   } catch {
     return null;
   }
+}
+
+// The verbs of a task's status log (`state/<id>.status`, one `verb: text`
+// line per event), in file order, lower-cased: ['working', 'done', 'working'].
+// null when the file cannot be read, so the model can tell "no done line"
+// from "no log". lib/model.mjs reads it to tell a task repairing its PR (a
+// `done:` line, then `working:` again) from one on its first pass.
+export function statusVerbs(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  const verbs = [];
+  for (const line of text.split('\n')) {
+    const m = /^([A-Za-z][A-Za-z-]*):/.exec(line);
+    if (m) verbs.push(m[1].toLowerCase());
+  }
+  return verbs;
 }
 
 function isDir(path) {
@@ -205,7 +226,10 @@ export const GH_PR_SORT = 'sort:updated-desc';
 // (each a CheckRun { status, conclusion } or a StatusContext { state }, the
 // two shapes checksState reads); latestReviews is one review per reviewer,
 // from which the identity's own APPROVED or CHANGES_REQUESTED is taken.
-export const GH_PR_FIELDS = 'number title url headRefName baseRefName reviewDecision mergeable isDraft state createdAt mergedAt closedAt author { login } repository { nameWithOwner } labels(first: 30) { nodes { name } } latestReviews(first: 30) { nodes { state author { login } } } commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state } } } } } } }';
+// mergeStateStatus is GitHub's merge-box word (CLEAN, DIRTY, BLOCKED,
+// UNSTABLE, BEHIND, HAS_HOOKS, DRAFT, UNKNOWN); with `mergeable` it tells a
+// PR that is ready for the captain from one that conflicts with its base.
+export const GH_PR_FIELDS = 'number title url headRefName baseRefName reviewDecision mergeable mergeStateStatus isDraft state createdAt mergedAt closedAt author { login } repository { nameWithOwner } labels(first: 30) { nodes { name } } latestReviews(first: 30) { nodes { state author { login } } } commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state } } } } } } }';
 export const SEARCH_GRAPHQL = `query($q: String!, $n: Int!) { search(query: $q, type: ISSUE, first: $n) { issueCount nodes { ... on PullRequest { ${GH_PR_FIELDS} } } } }`;
 
 // owner/name from a GitHub URL or remote (https://github.com/o/r/pull/1,
@@ -253,6 +277,7 @@ export function projectPr(pr, repo) {
     base: text(pr.baseRefName),
     review: pr.reviewDecision ?? 'none',
     mergeable: pr.mergeable ?? 'UNKNOWN',
+    merge_state: text(pr.mergeStateStatus) ? String(pr.mergeStateStatus).toUpperCase() : null,
     checks: checksState(rollup),
     created_at: text(pr.createdAt),
     draft: pr.isDraft === true,
@@ -580,8 +605,10 @@ export function collectLedgers(snapshot, homes) {
         active_children: rec.active_children || [],
         endpoints: rec.endpoints || [],
         decisions_open: rec.decisions_open || [],
+        holds: Array.isArray(rec.holds) ? rec.holds : [],
         landed: Array.isArray(rec.landed) ? rec.landed : [],
         queued: Array.isArray(rec.queued) ? rec.queued : [],
+        contributions: rec.contributions && typeof rec.contributions === 'object' ? rec.contributions : null,
       };
       ledger.cached = true;
       ledger.generatedAt = rec.freshness && rec.freshness.observed_at ? Math.floor(Date.parse(rec.freshness.observed_at) / 1000) || null : null;

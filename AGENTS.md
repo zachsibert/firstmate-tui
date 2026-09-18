@@ -114,6 +114,17 @@ milestones.
   be stale while the other is fresh (`mergePrs` in `lib/model.mjs` is the one
   place that folds a fetch into the previous facts). A fixture's `prs.identity`
   absent stands for a known login; `null` is the unknown identity.
+- Needs you's `review` row, In flight's `repairing PR` state and My PRs'
+  `READY` / `REPAIRING` words are one set of definitions in `lib/model.mjs`
+  (`parkedForCaptain`, `isRepairing`, `prReadiness`, `fleetPrTasks`); change
+  them together. Two facts they need are not in the fleet snapshot: whether a
+  working task once said done (the board reads the status log's verbs through
+  `facts.statusVerbs`, the one place it reads a log's lines; a fixture's
+  `status_logs` map stands in) and a secondmate child's PR (the ledger's
+  `contributions.captain[]`, from firstmate's `fm-contributions.sh`; its
+  `active_children` and `endpoints` carry no PR field). GitHub's
+  `mergeStateStatus` is fetched as `merge_state`; `ready` means mergeable and
+  not DIRTY, so BLOCKED (a required review missing) counts as ready.
 - `lib/tui-blessed.mjs` is the only importer of `neo-blessed`. Anything the
   terminal library must do goes through the screen contract at the top of
   that file. That includes the mouse: adding the screen's mouse listener is
