@@ -48,11 +48,20 @@ milestones.
 - The board reads firstmate homes and never writes into `FM_HOME`, a project
   or a `state/` directory. Its files are the pane record under
   `${XDG_STATE_HOME:-~/.local/state}/fm-board/` (or `HERDR_PLUGIN_STATE_DIR`),
-  `view-state.json` (hidden rows and panes; `lib/viewstate.mjs` names the
-  location chain and refuses a path inside `FM_HOME`) and `config.json` beside
+  `view-state.json` (hidden rows and panes, and since 0.5.0 the selection:
+  focused pane, row by hide key with its index as the fallback, expanded
+  groups, scroll; `lib/viewstate.mjs` names the location chain and refuses a
+  path inside `FM_HOME`), `config.json` beside
   it (`lib/config.mjs`, the same chain, passed by the launcher as `--config`
   the way `--view-state` is): the GitHub login the two PR panes are built
-  around and the Teammates' PRs label rules. The board writes `config.json` once,
+  around and the Teammates' PRs label rules, and `state-cache.json` beside
+  both (`lib/cache.mjs`: the last facts drawn, written after a clean refresh
+  and on quit, drawn at once on the next launch with `(cached Nm ago)` on
+  every pane title until that pane's live source lands; `facts.cached` in
+  `lib/model.mjs` carries the per-source flags and `lib/app.mjs` clears
+  them). The cache holds only what came from outside (snapshot, ledgers, PR
+  data with its identity, herdr agents), never view state or the refresh
+  bookkeeping, and a failed refresh never overwrites it. The board writes `config.json` once,
   from `EXAMPLE_CONFIG`, when no file is there, and never again; the test
   suite pins that constant byte for byte to `docs/config.example.json`, so
   change both together. Hiding is view state because firstmate retires Done
@@ -178,7 +187,12 @@ milestones.
   skipped with a note without them. Add a fixture under `tests/fixtures/` when a new data shape appears,
   and name in the test comment what would make the check fail. Key behavior
   is tested through `--render-once --keys <list>` (and `--expand`,
-  `--view-state`, `--tags`); a PR open must go to `--opener-cmd bash
+  `--view-state`, `--tags`, `--cache`: a one-shot render restores a saved
+  selection and never records one, so scripted key lists start from a known
+  place and renders sharing a view-state file stay independent; it reads a
+  state cache only with `--cache <file>` and writes that file only when
+  nothing in the frame came from it, which is how the suite builds a cache
+  from `populated.json` and restores it over `cold-start.json`); a PR open must go to `--opener-cmd bash
   tests/fake-opener.sh` and a report view to `--viewer-cmd bash
   tests/fake-viewer.sh`, never a real browser or editor (a one-shot render
   without `--viewer-cmd` only reports the resolved viewer for that reason).
@@ -209,7 +223,7 @@ milestones.
   is followed at once and never doubled; a tick that lands mid-refresh
   skipped) is tested by running the app with `--headless` against a stand-in
   whose snapshot sleeps and stopping it with a signal, so `--headless` must
-  never load `neo-blessed`. The title line's countdown, `refreshing…` and
+  never load `neo-blessed`. The title line's countdown, `refreshing...` and
   failure label render from a fixture `refresh` block (`index.mjs` documents
   it) because a one-shot render has no schedule; the panes' loading spinner
   comes from the same block (`refreshing: true` with no snapshot or `prs`

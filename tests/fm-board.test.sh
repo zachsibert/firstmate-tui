@@ -24,7 +24,10 @@
 # against the frame the app would have drawn, so no terminal library and no
 # pointer is involved; what the adapter itself makes of the library's mouse
 # events is checked by calling its pure functions. Hidden rows and panes go to
-# `--view-state <temp file>`, the config file to `--config <temp file>` or a
+# `--view-state <temp file>` (a saved selection in that file is restored, never
+# recorded, by a one-shot render), the state cache to `--cache <temp file>` (a
+# render over a fixture that has everything writes it, a cold-start fixture
+# reads it), the config file to `--config <temp file>` or a
 # temporary XDG_CONFIG_HOME. The r key is checked against a stand-in firstmate
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
 # that they ran and print canned JSON, with tests/fake-gh.sh first on PATH as
@@ -2426,6 +2429,263 @@ frame_ld=$(render "$(variant cold-start.json cold-connecting '{"herdr": {"state"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start connecting: In flight names the snapshot first"
 assert_not_contains "$frame_ld" "loading herdr" "cold start connecting: herdr is not named before the snapshot lands"
 
+# ------------------------------------------------------- state cache
+# The state cache (lib/cache.mjs): with --cache <file> a one-shot render reads it before the frame
+# the way the app does at launch and, when none of the rendered facts came from it and nothing
+# failed, writes them back as a clean tick of the app does; so the populated render below builds
+# the cache with the real serializer and the cold-start renders restore from it. Without the flag
+# a render reads and writes no cache (checked further down).
+mkdir -p "$SCRATCH/cache"
+CACHE="$SCRATCH/cache/state-cache.json"
+frame_c=$(render populated.json --cache "$CACHE") || fail "cache build: render exited non-zero"
+assert_file_contains "$CACHE" '"schema": "fm-board-state-cache.v1"' "a clean render writes the cache with its schema (falsify: drop the write from finish)"
+assert_file_contains "$CACHE" '"fetched_at": "2026-09-16T12:00:00.000Z"' "the cache is stamped with the fixture's clock, when its data landed"
+assert_file_contains "$CACHE" '"fm_home": "/fixture/firstmate"' "the cache names the home its data describes"
+assert_file_contains "$CACHE" '"login": "captain"' "the cache carries the identity the PR panes were built around"
+assert_count "$frame_c" "cached" 0 "the render that wrote the cache draws no cached marker"
+# A fresh cache at a cold start: every pane draws its cached rows at once, marked with the age of
+# the data, the title line reads refreshing… (the launch refresh runs as ever) and nothing spins
+# (falsify: drop restoreFromCache from driveOnce, paneCached from buildModel, or the marker from
+# paneHeader).
+fx_cc=$(variant cold-start.json cached '{"now": "2026-09-16T12:12:00Z"}')
+frame_c=$(render "$fx_cc" --cache "$CACHE") || fail "cache cold start: render exited non-zero"
+assert_row "$frame_c" '^ firstmate-tui · /fixture/firstmate · 3 homes +refreshing… · herdr disconnected \(--no-herdr\) $' "cached launch: the title line reads refreshing… over the cached data and counts the cached homes"
+assert_count "$frame_c" "(cached 12m ago)" 6 "cached launch: all six pane titles carry the age of the cached data"
+assert_contains "$frame_c" "┌─ [1] Needs you (4) (cached 12m ago) ─" "cached launch: Needs you counts its cached rows and carries the marker"
+assert_contains "$frame_c" "┌─ [2] My PRs (3) (cached 12m ago) ─" "cached launch: My PRs draws the cached PR rows"
+assert_contains "$frame_c" "┌─ [3] Teammates' PRs (0) (cached 12m ago) ─" "cached launch: an empty cached pane carries the marker too"
+assert_count "$frame_c" "loading" 0 "cached launch: no spinner anywhere (falsify: key paneLoadingSource on refreshing alone)"
+assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "cached launch: a cached PR row is on screen with its columns"
+assert_row "$frame_c" '^│ blocked +- +scout-beta +blocked: gh auth expired ' "cached launch: a cached Needs you row is on screen"
+assert_widths "$frame_c" 120 "cached launch: every line is still 120 columns"
+# The cached rows are live for the cursor: j selects the second Needs you row (falsify: draw the
+# cached rows as the empty text).
+tags_c=$(render "$fx_cc" --cache "$CACHE" --tags --keys "j") || fail "cache select: render exited non-zero"
+assert_row "$tags_c" '\{inverse\}decide +\{/inverse\}' "cached launch: j selects the second cached row"
+# The marker's age has the AGE column's shape (fmtAge): seconds under a minute, minutes under an
+# hour, hours from there (falsify: format the age by hand in paneCached).
+frame_c=$(render "$(variant cold-start.json cached-s '{"now": "2026-09-16T12:00:40Z"}')" --cache "$CACHE") || fail "cache 40s: render exited non-zero"
+assert_count "$frame_c" "(cached 40s ago)" 6 "cached launch: under a minute the age reads in seconds"
+frame_c=$(render "$(variant cold-start.json cached-h '{"now": "2026-09-16T14:00:00Z"}')" --cache "$CACHE" --cache-max-age 86400) || fail "cache 2h: render exited non-zero"
+assert_count "$frame_c" "(cached 2h ago)" 6 "cached launch: from an hour on the age reads in hours (a raised --cache-max-age keeps the cache)"
+# Stale: data older than --cache-max-age (default 3600 s) is not drawn and the frame is today's
+# cold start, spinner by spinner and without a notice; the flag moves the line (falsify: drop the
+# maxAge check from parseStateCache, or read the flag as milliseconds).
+fx_st=$(variant cold-start.json stale '{"now": "2026-09-16T13:00:01Z"}')
+frame_c=$(render "$fx_st" --cache "$CACHE") || fail "cache stale: render exited non-zero"
+assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "stale cache: the four snapshot panes spin as on a cold start"
+assert_count "$frame_c" "⠋ loading GitHub checks…" 1 "stale cache: My PRs spins on its own fetch"
+assert_count "$frame_c" "cached" 0 "stale cache: no cached marker and no notice"
+assert_line "$frame_c" 4 '^│ ⠋ loading fleet snapshot… +│$' "stale cache: Needs you's first body line is the spinner"
+frame_c=$(render "$fx_st" --cache "$CACHE" --cache-max-age 3602) || fail "cache max-age: render exited non-zero"
+assert_count "$frame_c" "(cached 1h ago)" 6 "--cache-max-age 3602 keeps the same cache"
+# --no-cache: a fresh cache is not read (falsify: drop the opts.cache check in driveOnce).
+frame_c=$(render "$fx_cc" --cache "$CACHE" --no-cache) || fail "cache --no-cache: render exited non-zero"
+assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "--no-cache: the cold start spins although the cache is fresh"
+assert_count "$frame_c" "cached" 0 "--no-cache: no cached marker"
+# A damaged cache (bad JSON), one that is not an object, one with another schema and one written
+# for another home are each ignored with a footer notice, never an error; the board cold-starts
+# (falsify: let parseStateCache throw, or drop the notice from driveOnce). 200 columns so the path
+# in the notice is not cut.
+printf '{"schema": "fm-board-state-cache.v1", "fetched_at": ' > "$SCRATCH/cache/bad.json"
+frame_c=$(render "$fx_cc" --cache "$SCRATCH/cache/bad.json" --cols 200) || fail "cache corrupt: render exited non-zero"
+assert_contains "$frame_c" "state cache ignored: $SCRATCH/cache/bad.json: bad JSON" "a corrupt cache is named in the footer"
+assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "a corrupt cache leaves the cold start spinning"
+printf '[1, 2]\n' > "$SCRATCH/cache/array.json"
+frame_c=$(render "$fx_cc" --cache "$SCRATCH/cache/array.json" --cols 200) || fail "cache array: render exited non-zero"
+assert_contains "$frame_c" "state cache ignored: $SCRATCH/cache/array.json: not an object" "a cache that is not an object is named in the footer"
+printf '{"schema": "fm-board-state-cache.v2", "fetched_at": "2026-09-16T12:00:00Z", "snapshot": {}}\n' > "$SCRATCH/cache/schema.json"
+frame_c=$(render "$fx_cc" --cache "$SCRATCH/cache/schema.json" --cols 200) || fail "cache schema: render exited non-zero"
+assert_contains "$frame_c" "state cache ignored: $SCRATCH/cache/schema.json: unexpected schema \"fm-board-state-cache.v2\"" "another schema is named in the footer"
+assert_count "$frame_c" "cached" 0 "another schema: nothing is drawn from it"
+sed 's#"fm_home": "/fixture/firstmate"#"fm_home": "/elsewhere/firstmate"#' "$CACHE" > "$SCRATCH/cache/other-home.json"
+frame_c=$(render "$fx_cc" --cache "$SCRATCH/cache/other-home.json" --cols 200) || fail "cache other home: render exited non-zero"
+assert_contains "$frame_c" "state cache ignored: $SCRATCH/cache/other-home.json: written for another home (/elsewhere/firstmate)" "a cache written for another home is ignored and says so"
+assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "another home's cache leaves the cold start spinning"
+# Pane by pane: with the snapshot landed (the fixture has one) and the PR fetch still out, the
+# cached PR rows fill the two PR panes and only their titles carry the marker; the other way
+# round, a landed PR fetch clears the two and leaves the four (falsify: mark every pane from one
+# flag in paneCached, or clear the snapshot flag with the PR fetch).
+frame_c=$(render "$(variant populated.json snap-live '{"prs": null, "refresh": {"refreshing": true}, "now": "2026-09-16T12:05:00Z"}')" --cache "$CACHE") || fail "cache pane by pane: render exited non-zero"
+assert_count "$frame_c" "(cached 5m ago)" 2 "snapshot landed: two panes still carry the marker"
+assert_contains "$frame_c" "┌─ [2] My PRs (3) (cached 5m ago) ─" "snapshot landed: My PRs is cached and draws the cached rows"
+assert_contains "$frame_c" "┌─ [3] Teammates' PRs (0) (cached 5m ago) ─" "snapshot landed: Teammates' PRs is cached"
+assert_contains "$frame_c" "┌─ [1] Needs you (4) ─" "snapshot landed: Needs you draws live data and carries no marker"
+assert_count "$frame_c" "loading" 0 "snapshot landed: the PR panes draw the cache instead of spinning"
+frame_c=$(render "$(variant cold-start.json prs-live '{"prs": {"candidate_prs": []}, "now": "2026-09-16T12:05:00Z"}')" --cache "$CACHE") || fail "cache prs live: render exited non-zero"
+assert_count "$frame_c" "(cached 5m ago)" 4 "PR fetch landed: the four snapshot panes still carry the marker"
+assert_contains "$frame_c" "┌─ [2] My PRs (2) ─" "PR fetch landed: My PRs draws the live (empty) fetch over the cached snapshot's recorded PRs, no marker"
+assert_contains "$frame_c" "┌─ [4] In flight (7) (cached 5m ago) ─" "PR fetch landed: In flight is still cached"
+# The launch refresh failed over a cached board: the rows stay, each pane is stale and cached at
+# once, and the title line names the failure (falsify: drop the cached snapshot when
+# snapshot_error is set, or the fixture's errors, in restoreFromCache).
+frame_c=$(render "$(variant cold-start.json cached-failed '{"snapshot_error": "exit 1", "prs": {"error": "exit 1"}, "refresh": {"refreshing": false, "failed_ago": 3, "next_in": 27, "failed": "snapshot: exit 1"}, "now": "2026-09-16T12:05:00Z"}')" --cache "$CACHE") || fail "cache failed refresh: render exited non-zero"
+assert_count "$frame_c" "(stale) (cached 5m ago)" 6 "failed launch refresh: every pane is stale and cached at once"
+assert_row "$frame_c" '^ firstmate-tui .* +refresh failed 3s ago, retrying in 27s · herdr disconnected \(--no-herdr\) $' "failed launch refresh: the title line names the failure"
+assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha ' "failed launch refresh: the cached PR row stays"
+# enter on a cached PR row: the footer names the age of the data the row was read from and the PR
+# opens through the opener as usual, with no prompt and no delay; the same row over live PR data
+# carries no age, and a Needs you review row read from the cached snapshot carries it (falsify:
+# drop the cached suffix from ctx.open, wait for a confirmation, or read one flag for every pane).
+rm -f "${OPENER_LOG:?}"
+frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "tab,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "enter on a cached My PRs row opens the PR through the opener"
+assert_contains "$frame_c" "opened https://github.com/acme/widgets/pull/41 (ship-alpha) · data cached 12m ago" "the footer names the age of the cached data the row came from"
+rm -f "${OPENER_LOG:?}"
+frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$(variant cold-start.json prs-live-41 '{"prs": {"candidate_prs": [{"num": "41", "repo": "acme/widgets", "task": "ship-alpha", "url": "https://github.com/acme/widgets/pull/41", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing"}]}, "now": "2026-09-16T12:12:00Z"}')" --cache "$CACHE" --keys "tab,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open live: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "enter on the live PR row opens it"
+assert_contains "$frame_c" "opened https://github.com/acme/widgets/pull/41 (ship-alpha) " "a live PR row opens with the plain notice"
+assert_not_contains "$frame_c" "data cached" "a live PR row names no cached age although the snapshot panes are still cached"
+rm -f "${OPENER_LOG:?}"
+frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "j,j,j,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open review: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/7" "enter on a cached Needs you review row opens its PR"
+assert_contains "$frame_c" "opened https://github.com/acme/api/pull/7 (ship-gamma) · data cached 12m ago" "a Needs you row from the cached snapshot names the age too"
+# Without --cache a render reads and writes no cache: a fresh one beside the --view-state file is
+# not drawn and is not rewritten (falsify: resolve the default location in cacheFor without the
+# flag).
+mkdir -p "$SCRATCH/cache-default"
+vs_c="$SCRATCH/cache-default/view-state.json"
+cp "$CACHE" "$SCRATCH/cache-default/state-cache.json"
+frame_c=$(render "$fx_cc" --view-state "$vs_c") || fail "cache default: render exited non-zero"
+assert_count "$frame_c" "cached" 0 "without --cache a fresh cache beside the view-state file is not read"
+assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "without --cache the cold start spins"
+frame_c=$(render populated.json --view-state "$vs_c") || fail "cache default write: render exited non-zero"
+if cmp -s "$CACHE" "$SCRATCH/cache-default/state-cache.json"; then pass; else fail "without --cache a render rewrote the cache beside the view-state file"; fi
+if [ -e "$fake_home_dir/.config/fm-board/state-cache.json" ]; then fail "a fixture render without --cache wrote the default cache file"; else pass; fi
+# A --cache path inside FM_HOME is refused with a notice and the cache beside the view-state file
+# is read instead; nothing is written at the refused path (falsify: drop insideHome from
+# resolveCachePath).
+frame_c=$(render "$fx_cc" --view-state "$vs_c" --cache /fixture/firstmate/state/state-cache.json --cols 200) || fail "cache FM_HOME: render exited non-zero"
+assert_contains "$frame_c" "refusing --cache inside FM_HOME (/fixture/firstmate/state/state-cache.json)" "a cache path inside FM_HOME is refused with a notice"
+assert_count "$frame_c" "(cached 12m ago)" 6 "the refused path falls back to the cache beside the view-state file"
+if [ -e /fixture/firstmate/state/state-cache.json ]; then fail "the refused cache path was written"; else pass; fi
+# The launcher passes the three flags through (falsify: drop --cache or --cache-max-age from its
+# value-taking list, which would swallow the value as a flag).
+frame_c=$("$BOARD" open --render-once --fixture "$fx_cc" --no-herdr --cache "$CACHE" --cache-max-age 7200 --no-cache) || fail "launcher cache flags: render exited non-zero"
+assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "the launcher passes --cache, --cache-max-age and --no-cache through to the board"
+if "$BOARD" --render-once --fixture "$fx_cc" --no-herdr --cache-max-age -1 >/dev/null 2>&1; then fail "--cache-max-age -1 should be refused"; else pass; fi
+if "$BOARD" --help | grep -q -- '--cache-max-age <s>'; then pass; else fail "--help names --cache-max-age"; fi
+
+# ------------------------------------------------------------ view restore
+# The selection comes back from the view-state file: the focused pane, the row by its hide key
+# (its index when the key is gone, clamped to the pane), the expanded In flight groups and the
+# scroll offsets. A one-shot render restores them and never records them (its keys are scripted
+# from a known start), so the files here are written by hand in the shape lib/viewstate.mjs
+# saves; the app's own save is checked in the headless section below (falsify: drop focus,
+# expanded or scroll from loadViewState, or focusFromSaved from driveOnce).
+vs_f="$SCRATCH/view-restore.json"
+write_vs() { printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":[],"columns":{},%s}\n' "$1" > "$vs_f"; }
+write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":0},"expanded":[],"scroll":{}'
+tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}failing \{/inverse\}.*\{inverse\}api#8' "the saved row is selected by its hide key, whatever its saved index says (falsify: read the index first)"
+assert_count "$tags_v" "{inverse}" 1 "one row is selected"
+tags_v=$(render populated.json --view-state "$vs_f" --tags --keys "j") || fail "view restore j: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}unlisted\{/inverse\}.*\{inverse\}ship-gamma' "keys move on from the restored row"
+# The row is gone: the saved index, clamped to the pane (falsify: fall back to row 0).
+fx_gone=$(variant populated.json api8-gone '{"prs": {"candidate_prs": []}}')
+write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":1},"expanded":[],"scroll":{}'
+tags_v=$(render "$fx_gone" --view-state "$vs_f" --tags) || fail "view restore index: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}unlisted\{/inverse\}.*\{inverse\}ship-alpha' "with the row gone the saved index picks the pane's second row"
+write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":9},"expanded":[],"scroll":{}'
+tags_v=$(render "$fx_gone" --view-state "$vs_f" --tags) || fail "view restore clamp: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}unlisted\{/inverse\}.*\{inverse\}ship-alpha' "an index past the pane's rows is clamped to its last row"
+# The focused pane alone (no row: the pane was empty when saved) focuses that pane; a pane the
+# board does not know, or one hidden in the same file, leaves the default selection in force
+# (falsify: drop the PANE_IDS check from sanitizeFocus, or the clamp after focusFromSaved).
+write_vs '"focus":{"pane":"landed","row":null,"index":0},"expanded":[],"scroll":{}'
+tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore pane: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}merged +\{/inverse\}.*\{inverse\}etl-index' "a saved pane with no row selects its first row"
+write_vs '"focus":{"pane":"nope","row":"x","index":0},"expanded":[],"scroll":{}'
+tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore unknown pane: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}blocked\{/inverse\}.*\{inverse\}scout-beta' "an unknown pane id leaves the selection on the first pane"
+write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":1},"expanded":[],"scroll":{}'
+frame_v=$(render populated.json --view-state "$vs_f" --keys "2") || fail "view restore hidden pane: render exited non-zero"
+assert_contains "$frame_v" "pane hidden: My PRs" "hiding the restored pane moves the selection on without an error"
+# A pre-0.4.0 file naming the pane review restores onto My PRs (falsify: skip paneIdOf in sanitizeFocus).
+write_vs '"focus":{"pane":"review","row":"review:main:api#8","index":0},"expanded":[],"scroll":{}'
+tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore old id: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}failing \{/inverse\}.*\{inverse\}api#8' "an old file's review pane and row key restore onto My PRs"
+# Expanded groups and scroll: the hyperion group comes back open with the cursor on it, and the
+# In flight pane, three rows tall in this frame, starts three rows down as saved (falsify: drop
+# expanded from the view init in driveOnce, or scrollFromSaved).
+write_vs '"focus":{"pane":"inflight","row":"inflight:hyperion:home","index":4},"expanded":["home:/fixture/homes/hyperion"],"scroll":{"inflight":3}'
+frame_v=$(render populated.json --view-state "$vs_f") || fail "view restore expanded: render exited non-zero"
+assert_contains "$frame_v" "!▾ hyperion" "the saved In flight group is expanded"
+assert_row "$frame_v" '^│ working +working +↳ child-one ' "the expanded group lists its children"
+frame_v=$(render populated.json --view-state "$vs_f" --rows 30) || fail "view restore scroll: render exited non-zero"
+assert_row "$frame_v" '3 above, \+[0-9]+ more ──┘$' "the saved scroll offset starts the two-row In flight pane three rows down, the cursor on its last shown row"
+tags_v=$(render populated.json --view-state "$vs_f" --rows 30 --tags) || fail "view restore expanded --tags: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}decide +\{/inverse\}.*\{inverse\}!▾ hyperion' "the cursor is on the group row"
+# The restore waits for the rows: on a cold start the saved pane is loading and the default
+# selection stands; over a fresh cache the same file puts the cursor on the cached row (falsify:
+# apply focusFromSaved to a loading pane).
+write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":1},"expanded":[],"scroll":{}'
+frame_v=$(render cold-start.json --view-state "$vs_f") || fail "view restore cold: render exited non-zero"
+assert_count "$frame_v" "⠋ loading fleet snapshot…" 4 "a saved selection on a loading pane leaves the cold start as it is"
+tags_v=$(render "$fx_cc" --view-state "$vs_f" --cache "$CACHE" --tags) || fail "view restore cached: render exited non-zero"
+assert_row "$tags_v" '\{inverse\}failing \{/inverse\}.*\{inverse\}api#8' "over a fresh cache the saved row is selected among the cached rows"
+# A one-shot render writes the selection back as it read it: x hides a row, and the file keeps
+# the hand-written focus rather than the scripted cursor (falsify: save savedFocus from
+# the driver's persist).
+frame_v=$(render populated.json --view-state "$vs_f" --keys "tab,tab,tab,tab,x") || fail "view restore persist: render exited non-zero"
+assert_contains "$frame_v" "hidden " "x hid a row"
+assert_file_contains "$vs_f" '"row": "mine:main:api#8"' "the hide left the saved selection as it was"
+assert_file_contains "$vs_f" '"hidden": [' "the hide itself is saved"
+
+# ------------------------------------------------- state cache, headless app
+# The app itself, --headless against the stand-in home (its snapshot answers at once, the fake gh
+# on PATH) with --view-state and --cache in a scratch directory, run as node index.mjs so the
+# signal reaches the board (a launcher killed by the suite leaves node running). After the first
+# clean tick the cache is on disk, stamped with that tick; SIGTERM quits the board, which saves
+# the selection (Needs you, its first row) and writes the cache again with the same fetched_at
+# and a later saved_at. A second run against a home whose snapshot fails, over the same files,
+# leaves the cache byte for byte as it was (a failed refresh never writes it, and neither does a
+# quit without a clean tick) and keeps the saved selection (a board that never had data records
+# no empty one) (falsify: write the cache before the failure check in refresh, on quit without
+# fetchedAt, or stamp it with the write time; save savedFocus without a snapshot).
+HL="$SCRATCH/headless-cache"
+mkdir -p "$HL"
+vs_h="$HL/view-state.json"
+cache_h="$HL/state-cache.json"
+rm -f "${FETCH_LOG:?}"
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" node "$ROOT/bin/firstmate-tui/index.mjs" --headless --refresh 30 --no-herdr --view-state "$vs_h" --cache "$cache_h" > "$HL/out.log" 2>&1 &
+hl_pid=$!
+sleep 4
+if [ -f "$cache_h" ]; then pass; else fail "headless: the cache is written after the first clean tick"; fi
+tick_cache=$(cat "$cache_h" 2>/dev/null)
+kill -TERM "$hl_pid" 2>/dev/null
+wait "$hl_pid" 2>/dev/null
+assert_file_contains "$cache_h" '"schema": "fm-board-state-cache.v1"' "headless: the cache names its schema"
+assert_file_contains "$cache_h" "\"fm_home\": \"$FAKE_HOME\"" "headless: the cache names the stand-in home"
+assert_file_contains "$cache_h" '"login": "captain"' "headless: the cache carries the identity gh named"
+assert_file_contains "$cache_h" '"id": "ship-alpha"' "headless: the cache carries the snapshot's tasks"
+tick_fetched=$(printf '%s\n' "$tick_cache" | grep -o '"fetched_at": "[^"]*"')
+quit_fetched=$(grep -o '"fetched_at": "[^"]*"' "$cache_h")
+tick_saved=$(printf '%s\n' "$tick_cache" | grep -o '"saved_at": "[^"]*"')
+quit_saved=$(grep -o '"saved_at": "[^"]*"' "$cache_h")
+if [ -n "$tick_fetched" ] && [ "$tick_fetched" = "$quit_fetched" ]; then pass; else fail "headless quit: fetched_at stays the tick's ($tick_fetched, then $quit_fetched)"; fi
+if [ -n "$quit_saved" ] && [ "$tick_saved" != "$quit_saved" ]; then pass; else fail "headless quit: the cache is written again on quit, saved_at moving on ($tick_saved, then $quit_saved)"; fi
+assert_file_contains "$vs_h" '"pane": "needs"' "headless quit: the focused pane is saved"
+assert_file_contains "$vs_h" '"row": "needs:main:scout-beta"' "headless quit: the selected row is saved by its hide key"
+if [ -s "$HL/out.log" ]; then fail "headless cache run wrote to the terminal: $(head -c 300 "$HL/out.log")"; else pass; fi
+FAIL_HOME="$SCRATCH/firstmate-fail"
+mkdir -p "$FAIL_HOME/bin"
+# shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
+printf '#!/usr/bin/env bash\necho snapshot-fail >> "$FM_BOARD_TEST_FETCH_LOG"\necho broken >&2\nexit 1\n' > "$FAIL_HOME/bin/fm-fleet-snapshot.sh"
+cp "$FAKE_HOME/bin/fm-bearings-snapshot.sh" "$FAIL_HOME/bin/fm-bearings-snapshot.sh"
+chmod +x "$FAIL_HOME/bin/fm-fleet-snapshot.sh" "$FAIL_HOME/bin/fm-bearings-snapshot.sh"
+cp "$cache_h" "$HL/before-fail.json"
+rm -f "${FETCH_LOG:?}"
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAIL_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" node "$ROOT/bin/firstmate-tui/index.mjs" --headless --refresh 5 --no-herdr --view-state "$vs_h" --cache "$cache_h" > "$HL/out-fail.log" 2>&1 &
+hl_pid=$!
+sleep 3
+kill -TERM "$hl_pid" 2>/dev/null
+wait "$hl_pid" 2>/dev/null
+if grep -q '^snapshot-fail$' "$FETCH_LOG" 2>/dev/null; then pass; else fail "headless failing home: the failing snapshot ran ($(cat "$FETCH_LOG" 2>/dev/null))"; fi
+if cmp -s "$HL/before-fail.json" "$cache_h"; then pass; else fail "headless failing home: a failed refresh (and the quit after it) left the cache untouched"; fi
+assert_file_contains "$vs_h" '"row": "needs:main:scout-beta"' "headless failing home: the saved selection survives a run that never had data"
+if [ -s "$HL/out-fail.log" ]; then fail "headless failing run wrote to the terminal: $(head -c 300 "$HL/out-fail.log")"; else pass; fi
+
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x44 the lines are: 0 title,
 # 1 Needs you title, 3-6 its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 8 My PRs
@@ -2979,8 +3239,11 @@ assert_contains "$(cat "$NODE_LOG" 2>/dev/null)" "--view-state $PLUGIN_DIR/view-
 # adapter before the fix the opener log below has two lines and the upgrade log stays absent). Each
 # gesture runs under TERM=xterm-256color, screen and tmux-256color, whichever terminfo the host has,
 # because the board runs inside herdr. The driver waits for the PR row's URL, not the pane header, since
-# the header is drawn over the loading spinner before the snapshot lands. Needs python3 and the board's
-# node_modules (npm ci in bin/firstmate-tui); without them the section is skipped with a note, not failed.
+# the header is drawn over the loading spinner before the snapshot lands. Each run gets its own
+# view-state file (and so its own state cache beside it): the app saves the selection on quit and
+# restores it at launch, so runs sharing one file would start where the last one left off. Needs
+# python3 and the board's node_modules (npm ci in bin/firstmate-tui); without them the section is
+# skipped with a note, not failed.
 PTY="$ROOT/tests/pty-keys.py"
 PTY_URL=https://github.com/acme/widgets/pull/41
 PTY_TRACE="$SCRATCH/pty-opener-trace.log"
@@ -2989,11 +3252,12 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
     local term=$1 name=$2
     shift 2
     rm -f "${OPENER_LOG:?}" "${PTY_TRACE:?}" "${UPGRADE_LOG:?}" "${CURL_LOG:?}"
+    mkdir -p "$SCRATCH/pty-$name"
     FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" PATH="$FAKE_BIN:$PATH" \
       FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" FM_BOARD_TEST_OPENER_TRACE="$PTY_TRACE" FM_BOARD_TEST_UPGRADE_LOG="$UPGRADE_LOG" \
       FAKE_CURL_ROOT="$REL" FAKE_CURL_LOG="$CURL_LOG" \
       python3 "$PTY" --term "$term" --timeout 20 --capture "$SCRATCH/pty-$name.bin" "$@" -- \
-      "$BOARD" run --no-herdr --no-prs --opener-cmd "$FAKE_OPENER" --install-root "$INSTALL" --curl-cmd "bash $ROOT/tests/fake-curl.sh" \
+      "$BOARD" run --no-herdr --no-prs --opener-cmd "$FAKE_OPENER" --install-root "$INSTALL" --curl-cmd "bash $ROOT/tests/fake-curl.sh" --view-state "$SCRATCH/pty-$name/view-state.json" \
       > "$SCRATCH/pty-$name.out" 2>&1
   }
   pty_ok() { # <name> <label>: the driver saw every marker it waited for and the board exited on q
