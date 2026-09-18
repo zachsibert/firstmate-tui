@@ -96,11 +96,15 @@ export function describeVersion(v) {
 }
 
 // The read-only lines on the page: one per launch flag worth seeing at a
-// glance. A new flag is one more entry here.
+// glance, plus the one line that says what the PR panes' CHECKS column means
+// (lib/sources.mjs checksState; the README's My PRs paragraph says the same).
+// A new flag is one more entry here.
+export const CHECKS_MEANING = 'passing, pending or failing, from the newest run of each check on the PR head commit';
 export function settingsFlags(opts) {
   return [
     { label: 'refresh cadence', value: `${opts.refresh} s (--refresh)` },
     { label: 'PR data', value: opts.prs ? 'on: live GitHub checks on every tick' : 'off (--no-prs)' },
+    { label: 'CHECKS', value: CHECKS_MEANING },
     { label: 'herdr overlay', value: opts.herdr ? 'on' : 'off (--no-herdr)' },
     { label: 'mouse', value: opts.mouse === false ? 'off (--no-mouse)' : 'on: click selects, double-click acts, wheel scrolls, a header boundary drags' },
   ];
