@@ -1,0 +1,68 @@
+# Publish a GitHub Release with the fm-board tarball whenever a tag v* is
+# pushed. The maintainer steps are in the README under "Releasing": bump the
+# version in bin/fm-board/package.json, tag vX.Y.Z (or vX.Y.Z-beta.N for a
+# prerelease), push the tag. scripts/package.sh refuses a tag that does not
+# match the package.json version, so a mistyped tag fails here and publishes
+# nothing. The same script builds the tarball tests/install.test.sh installs.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# The built-in token only needs to create the release and upload its assets.
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Build the tarball and checksum
+        id: package
+        run: |
+          bash scripts/package.sh "$GITHUB_REF_NAME" dist > package.out
+          cat package.out
+          cat package.out >> "$GITHUB_OUTPUT"
+
+      - name: Check the checksum file verifies the tarball
+        run: |
+          cd dist
+          sha256sum -c -- *.tar.gz.sha256
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.package.outputs.tag }}
+          PRERELEASE: ${{ steps.package.outputs.prerelease }}
+          TARBALL: ${{ steps.package.outputs.tarball }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = true ]; then
+            flags+=(--prerelease)
+          fi
+          {
+            printf 'Install or upgrade to this version:\n\n```sh\n'
+            printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/bin/install.sh | bash -s -- --version %s\n' "$GITHUB_REPOSITORY" "$TAG"
+            printf '```\n\nThe .sha256 file beside the tarball is the checksum the installer verifies.\n'
+          } > notes.md
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "$TAG" \
+            --notes-file notes.md \
+            --generate-notes \
+            "${flags[@]+"${flags[@]}"}" \
+            "$TARBALL" "$CHECKSUM"
