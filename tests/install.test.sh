@@ -946,7 +946,8 @@ if [ "$tags_ok" -eq 1 ]; then
   assert_contains "$(cat "$C_BIN/fm-board")" "former name" "the alias is marked as the former name"
   assert_equal "$(file_sha "$C_VIEW")" "$C_VIEW_SHA" "a view-state file outside the prefix is untouched by the chain"
   if frame=$(cd / && "$C_BIN/firstmate-tui" --render-once --fixture "$FIX/empty.json" --no-herdr --view-state "$C_VIEW" 2>&1); then pass; else fail "the upgraded command does not render: $frame"; fi
-  assert_contains "$frame" "· panes hidden: 5" "the upgraded command reads the view state kept from before (falsify: change the file shape between releases)"
+  # The file names the pane by id (landed), so its key number, 6 since the two PR panes moved together, is read from the current board.
+  assert_contains "$frame" "· panes hidden: 6" "the upgraded command reads the view state kept from before (falsify: change the file shape between releases)"
   assert_equal "$(file_sha "$C_VIEW")" "$C_VIEW_SHA" "reading the view state does not rewrite it"
   assert_no_leftovers "$CHAIN" "the chain leaves no staging or previous directory"
   # From here on, `firstmate-tui upgrade` runs the current installer as usual.

@@ -451,7 +451,7 @@ export async function runGhPrs(snapshot, { identity, config, timeoutMs, env = pr
     return { rows, error: null, note: notes.length ? notes.join('; ') : null, seen };
   };
   const mine = collect('My PRs', [mineOpen, mineTail], () => true);
-  const toreview = scope.length ? collect('To review', [reviewOpen, reviewTail], (row) => row.author !== login && inScope(scope, row.repo) && passesLabelRule(config, row.repo, row.labels)) : { rows: [], error: null, note: null };
+  const toreview = scope.length ? collect("Teammates' PRs", [reviewOpen, reviewTail], (row) => row.author !== login && inScope(scope, row.repo) && passesLabelRule(config, row.repo, row.labels)) : { rows: [], error: null, note: null };
   toreview.scope = scope;
   delete toreview.seen;
 
@@ -512,7 +512,7 @@ export async function fetchPrs(fmHome, snapshot, { identity, config, timeoutMs, 
     return {
       mine: { rows: r.candidate_prs, error: r.error, note: null },
       toreview: { ...empty(), scope: [], unavailable: GH_MISSING },
-      note: r.error ? null : 'gh not on PATH: PR data from fm-bearings-snapshot.sh, open PRs only, without titles, base branches or PR creation times; To review needs gh',
+      note: r.error ? null : 'gh not on PATH: PR data from fm-bearings-snapshot.sh, open PRs only, without titles, base branches or PR creation times; Teammates\' PRs needs gh',
     };
   }
   if (!identityKnown(identity)) return { mine: empty(), toreview: { ...empty(), scope: [] }, note: null };

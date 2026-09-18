@@ -50,8 +50,9 @@
 // pane still waits for its first data (paneLoading below; text is the spinner
 // line the renderer draws), and meta carries the title line's refresh label
 // ({ text, failed }) and herdr warning ('' while the link is up).
-// Every row carries tag, extra, id, text, repo, home, base, age (display
-// fields; base is the PR's base branch, drawn by the two PR panes only) plus
+// Every row carries tag, extra, id, text, repo, home, base, author, age
+// (display fields; base is the PR's base branch, drawn by the two PR panes
+// only, and author the PR author's login, drawn by Teammates' PRs only) plus
 // name (the undecorated id for notices), homeId (main or the secondmate id),
 // hideKey (pane:home:name, plus the completion date for Landed), ageSeconds
 // (numeric; `age` is its short form, with a trailing `~` when ageFallback says
@@ -151,6 +152,7 @@ function makeRow(fields) {
     home: MAIN_HOME_LABEL,
     homeId: MAIN_HOME_LABEL,
     base: '-',
+    author: '-',
     hideKey: null,
     ageSeconds: null,
     paneId: null,
@@ -507,7 +509,9 @@ function byStatus(rows) {
 
 // One fetched PR as a row: the task id when a fleet task recorded the PR (or
 // its head branch names one), else repo#number; the title from the fetch,
-// else the recorded task's, else the URL.
+// else the recorded task's, else the URL; the author's login, `-` when the
+// fetch carries none (the script fallback, or a PR whose author GitHub no
+// longer names).
 function fetchedPrRow(facts, taskById, c, rec, status) {
   const taskId = rec ? rec.task : c.task && c.task !== '-' ? c.task : '-';
   return makeRow({
@@ -517,6 +521,7 @@ function fetchedPrRow(facts, taskById, c, rec, status) {
     id: taskId === '-' ? `${basename(c.repo)}#${c.num}` : taskId,
     text: c.title || (rec && rec.title) || c.url,
     base: c.base || '-',
+    author: typeof c.author === 'string' && c.author ? c.author : '-',
     repo: c.repo,
     url: c.url,
     ...reviewAge(facts, taskById, taskId, prCreatedAt(c, facts.now)),
@@ -598,7 +603,7 @@ function prPaneEmpty(facts, pane) {
   if (!prs.enabled) return pane.id === 'toreview' ? PRS_OFF_TEXT : pane.empty;
   if (pane.id === 'toreview') {
     const own = paneFetch(prs, 'toreview');
-    if (own.unavailable) return `${own.unavailable}: To review needs the GitHub CLI`;
+    if (own.unavailable) return `${own.unavailable}: Teammates' PRs needs the GitHub CLI`;
     if (own.scope && own.scope.length === 0) return SCOPE_EMPTY_TEXT;
   }
   return pane.empty;

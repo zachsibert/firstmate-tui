@@ -15,7 +15,7 @@ export const HELP_LINES = [
   '',
   '  j / down     next row            k / up       previous row',
   '  tab          next pane           shift-tab    previous pane',
-  '  enter        My PRs, To review, Landed or a Needs-you PR row: open the PR in the browser',
+  "  enter        My PRs, Teammates' PRs, Landed or Needs-you PR row: open it in the browser",
   '               Landed row without a PR: view its report, else focus its worker pane',
   '               In flight group row: expand or collapse it',
   '               In flight worker or Needs-you worker: focus its herdr pane',
@@ -26,7 +26,7 @@ export const HELP_LINES = [
   '  X            unhide every row in the current pane',
   '  H            toggle showing hidden rows, greyed and marked (hidden)',
   '  1 - 6        show or hide a pane; each pane title carries its key: [1] Needs you',
-  '               [2] My PRs  [3] In flight  [4] Findings  [5] Landed  [6] To review',
+  "               [2] My PRs  [3] Teammates' PRs  [4] In flight  [5] Findings  [6] Landed",
   '  0            show every pane (with all six hidden the board lists these keys)',
   '  r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)',
   '  .            settings page: installed version, latest release, upgrade or a beta',
@@ -491,7 +491,7 @@ function renderSettings(model, cols, rows, view) {
     head.push(L([]));
     const flagW = Math.max(1, ...s.flags.map((f) => width(f.label)));
     for (const f of s.flags) head.push(L([seg(` ${padRight(f.label, flagW)}  `, 'dim'), seg(f.value, 'row')]));
-    // Identity, config file and the To review label rules, the same shape.
+    // Identity, config file and the Teammates' PRs label rules, the same shape.
     head.push(L([]));
     const infoW = Math.max(1, ...info.map((f) => width(f.label)));
     for (const f of info) head.push(L([seg(` ${padRight(f.label, infoW)}  `, 'dim'), seg(f.value, f.bad ? 'bad' : 'row')]));
