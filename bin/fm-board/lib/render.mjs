@@ -3,8 +3,8 @@
 // styled segments so the neo-blessed adapter can color them and the
 // --render-once mode can print them plain. Nothing here touches a terminal.
 
-import { columns, layoutMode, MENU_MARKER, menuBox, MIN_COLS, MIN_ROWS, paneDemand, paneHeights, PANES, TAG_WIDTH_MIN } from './layout.mjs';
-import { charWidth, fit, fitRaw, padRight, truncate, width } from './text.mjs';
+import { columns, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights, PANES, TAG_WIDTH_MIN } from './layout.mjs';
+import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
 const H = '─';
 const V = '│';
@@ -32,8 +32,6 @@ export const HELP_LINES = [
   'mouse (off with --no-mouse; hold your terminal\'s text-selection modifier to select text)',
   '  click        select that row and focus its pane; a pane title focuses the pane',
   '  double-click the same as enter on that row',
-  '  right-click  menu of the row\'s actions with their keys: arrows or the wheel move,',
-  '               enter or a click chooses, esc or a click elsewhere closes',
   '  wheel        move the selection three rows in the focused pane',
   '',
   'The board is read-only: it never answers, merges or dispatches. Hidden rows and',
@@ -347,54 +345,9 @@ function overlayHelp(lines, cols) {
   return lines;
 }
 
-// The segments covering display columns [from, to) of a drawn line, styles
-// kept, so an overlay can replace the middle of a line and leave the selected
-// row inverse on either side. A wide character straddling a cut becomes a
-// space for each of its columns inside the range.
-function sliceSegments(segments, from, to) {
-  const out = [];
-  let col = 0;
-  for (const s of segments) {
-    let text = '';
-    for (const ch of s.text) {
-      const w = charWidth(ch.codePointAt(0));
-      const start = col;
-      col += w;
-      if (col <= from || start >= to) continue;
-      text += start >= from && col <= to ? ch : ' '.repeat(Math.min(col, to) - Math.max(start, from));
-    }
-    if (text) out.push(seg(text, s.style));
-  }
-  return out;
-}
-
-// The right-click menu: a bordered box at the pointer (lib/layout.mjs menuBox
-// clamps it inside the frame), one `key  label` line per action, the
-// highlighted item led by MENU_MARKER and drawn inverse. The box is drawn
-// over whatever is there; the cells left and right of it keep their styles.
-function overlayMenu(lines, cols, rows, menu) {
-  const box = menuBox(menu, cols, rows);
-  const inner = box.width - 2;
-  const boxLines = [[seg(`┌${H.repeat(inner)}┐`, 'help')]];
-  menu.items.forEach((it, i) => {
-    const marker = i === menu.index ? MENU_MARKER : ' ';
-    boxLines.push([seg(V, 'help'), seg(fitRaw(`${marker} ${it.key.padEnd(box.keyWidth)}  ${it.label} `, inner), i === menu.index ? 'selected' : 'row'), seg(V, 'help')]);
-  });
-  boxLines.push([seg(`└${H.repeat(inner)}┘`, 'help')]);
-  boxLines.slice(0, box.height).forEach((segments, i) => {
-    const target = box.top + i;
-    if (target >= lines.length) return;
-    const before = sliceSegments(lines[target], 0, box.left);
-    const after = sliceSegments(lines[target], box.left + box.width, cols);
-    lines[target] = line([...before, ...segments, ...after], cols);
-  });
-  return lines;
-}
-
-// view: { pane, row, scroll[], help, menu, notice, noticeBad, stale } (the
-// app's view also carries `expanded`, `hidden`, `hiddenPanes` and `showHidden`,
-// which only buildModel reads). menu, when set, is the open right-click menu:
-// { x, y, items: [{ key, label }], index }.
+// view: { pane, row, scroll[], help, notice, noticeBad, stale } (the app's view
+// also carries `expanded`, `hidden`, `hiddenPanes` and `showHidden`, which only
+// buildModel reads).
 // Returns { lines, cols, rows, mode, scroll, zones } where scroll holds the
 // start offsets actually used so the app can keep them for the next frame and
 // zones maps each line to what it shows (lib/layout.mjs hitTest). mode is
@@ -418,7 +371,6 @@ export function renderFrame(model, size, view = {}) {
   else if (mode === 'list') drawn = renderList(model, cols, rows, v);
   else drawn = renderPanes(model, cols, rows, v);
   let { lines } = drawn;
-  if (view.menu && Array.isArray(view.menu.items) && view.menu.items.length) lines = overlayMenu(lines, cols, rows, view.menu);
   if (v.help) lines = overlayHelp(lines, cols);
   return { lines, cols, rows, mode, scroll: v.scrollOut, zones: drawn.zones };
 }

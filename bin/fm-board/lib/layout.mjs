@@ -114,34 +114,3 @@ export function hitTest(frame, x, y) {
   if (zone.kind === 'pane') return { kind: 'pane', pane: zone.pane };
   return null;
 }
-
-// The context menu box: one bordered column of `key  label` lines, its top-left
-// corner at the pointer, moved left or up as far as needed to stay inside the
-// frame. The renderer draws it and the controller hit-tests clicks against it,
-// so both take the box from here. Item i sits on line top + 1 + i.
-export const MENU_MARKER = '▸';
-
-export function menuBox(menu, cols, rows) {
-  const keyWidth = Math.max(...menu.items.map((it) => it.key.length), 1);
-  const widest = Math.max(...menu.items.map((it) => keyWidth + 2 + it.label.length), 1);
-  const width = Math.min(cols, widest + 5); // border, marker, space, text, space, border
-  const height = Math.min(rows, menu.items.length + 2);
-  const left = Math.max(0, Math.min(menu.x | 0, cols - width));
-  const top = Math.max(0, Math.min(menu.y | 0, rows - height));
-  return { left, top, width, height, keyWidth };
-}
-
-// Which menu item a frame cell falls on: its index, or -1 when the cell is a
-// border cell or outside the box.
-export function menuItemAt(menu, cols, rows, x, y) {
-  const box = menuBox(menu, cols, rows);
-  if (x <= box.left || x >= box.left + box.width - 1) return -1;
-  const i = y - box.top - 1;
-  return i >= 0 && i < menu.items.length && y < box.top + box.height - 1 ? i : -1;
-}
-
-// Is the cell anywhere on the box, border included?
-export function insideMenu(menu, cols, rows, x, y) {
-  const box = menuBox(menu, cols, rows);
-  return x >= box.left && x < box.left + box.width && y >= box.top && y < box.top + box.height;
-}

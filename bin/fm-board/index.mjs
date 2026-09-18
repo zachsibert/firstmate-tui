@@ -7,7 +7,7 @@
 //                  frame comes from that facts file and no firstmate home or
 //                  herdr is touched, which is how tests/fm-board.test.sh works.
 //                  --keys <list> presses keys, and --mouse <list> clicks,
-//                  double-clicks, right-clicks and wheels (see lib/args.mjs),
+//                  double-clicks and wheels (see lib/args.mjs),
 //                  through lib/controller.mjs before
 //                  the frame is rendered (a PR open runs --opener-cmd when
 //                  given, and is only reported in the footer otherwise; a herdr
@@ -145,7 +145,7 @@ function viewStateFor(opts, fmHome) {
 async function driveOnce(facts, opts, size) {
   const vs = viewStateFor(opts, facts.fmHome);
   const loaded = loadViewState(vs.path);
-  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, showHidden: false, help: false, menu: null, frame: null, lastClick: null, notice: '', noticeBad: false };
+  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false };
   const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
   let model = build();
   if (opts.expand.length) {

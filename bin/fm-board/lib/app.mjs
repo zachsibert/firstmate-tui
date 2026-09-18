@@ -85,7 +85,6 @@ export async function runApp(opts) {
       hiddenPanes: loaded.state.hiddenPanes,
       showHidden: false,
       help: false,
-      menu: null, // the open right-click menu (lib/controller.mjs)
       frame: null, // the last drawn frame's { cols, rows, zones }: what the mouse points at
       lastClick: null,
       notice: '',
