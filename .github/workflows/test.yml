@@ -1,0 +1,63 @@
+# .github/workflows/test.yml - the checks a change must pass before it merges:
+# both test suites, ShellCheck on every shell file and actionlint on the
+# workflows, on every pull request and on every push to a branch other than
+# main (a push to main is a release, .github/workflows/release.yml, and its
+# checks ran on the pull request). Read-only: the built-in token with
+# contents: read, no secrets. The install suite builds the 0.1.0 tarball from
+# the v0.1.0 tag, so the checkout fetches the whole history and its tags. The
+# board suite runs with FORCE_COLOR unset because one of its checks compares
+# node's plain output. Pin each action to a major version tag
+# (tests/install.test.sh checks the release workflow the same way).
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Suites, ShellCheck, actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Install the board's dependencies
+        run: npm ci
+        working-directory: bin/fm-board
+
+      - name: Board suite
+        run: env -u FORCE_COLOR bash tests/fm-board.test.sh
+
+      - name: Install suite
+        run: env -u FORCE_COLOR bash tests/install.test.sh
+
+      - name: ShellCheck
+        run: npx --yes shellcheck@4.1.0 --norc bin/*.sh scripts/*.sh tests/*.sh
+
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          # The project's own download script, pinned to one version; it puts
+          # the binary in the current directory.
+          bash <(curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/v$ACTIONLINT_VERSION/scripts/download-actionlint.bash") "$ACTIONLINT_VERSION" .
+          ./actionlint -color -shellcheck= .github/workflows/*.yml

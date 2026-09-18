@@ -815,10 +815,51 @@ if [ "$old_ok" -eq 1 ]; then
   assert_no_leftovers "$OLD" "the 0.1.0 walk leaves no staging or previous directory"
 fi
 
+# --------------------------------------------------------- next-version
+# scripts/next-version.sh picks the version the release workflow publishes:
+# package.json's when its tag is free, else the next free patch counted from
+# package.json; a minor or major bump in package.json wins while its tag is
+# free; beta tags (v0.2.5-d8b290e) never count as taken; a version that is not
+# X.Y.Z is refused with exit 2 before anything is built (falsify: compare tag
+# prefixes instead of whole tags, count from the newest tag instead of
+# package.json, or accept a -suffix).
+NEXT="$ROOT/scripts/next-version.sh"
+assert_next() { # <expected> <version> [tags...]
+  local expected=$1 got
+  shift
+  got=$(bash "$NEXT" "$@" 2>&1) || true
+  if [ "$got" = "$expected" ]; then pass; else fail "next-version $*: expected '$expected', got '$got'"; fi
+}
+assert_next 0.2.5 0.2.4 v0.2.4 v0.1.0 v0.2.5-d8b290e
+assert_next 0.2.5 0.2.5 v0.2.4 v0.1.0
+assert_next 0.2.6 0.2.4 v0.2.4 v0.2.5
+assert_next 0.3.0 0.3.0 v0.2.4 v0.2.5
+assert_next 0.2.4 0.2.4
+next_err=$(mktemp "${TMPDIR:-/tmp}/fm-board-next.XXXXXX")
+if bash "$NEXT" 0.2 v0.2.4 >/dev/null 2>"$next_err"; then fail "next-version: a two-part version must be refused"; else pass; fi
+if grep -q "malformed version '0.2'" "$next_err"; then pass; else fail "next-version: the refusal names the malformed version, got '$(cat "$next_err")'"; fi
+if bash "$NEXT" 0.2.5-d8b290e v0.2.4 >/dev/null 2>&1; then fail "next-version: a version with a -suffix must be refused"; else pass; fi
+if bash "$NEXT" >/dev/null 2>&1; then fail "next-version: no arguments must be refused"; else pass; fi
+rm -f "${next_err:?}"
+
 # ------------------------------------------------------------- workflow
 # Grep-level pins on the release workflow; actionlint is the structural check
 # (see README "Releasing"). Each pin names the behavior the README promises.
 wf=$(cat "$WORKFLOW")
+# Every merge to main releases: both jobs pick the version with next-version.sh from the repository's
+# tags, the main job commits a bump under the bot identity with the [skip ci] guard and pushes it with
+# the built-in token, and the release is created at that commit (falsify: read the version from
+# package.json alone, drop the marker, or target GITHUB_SHA after a bump).
+if [ "$(printf '%s\n' "$wf" | grep -cF -- "bash scripts/next-version.sh \"\$version\"")" -eq 2 ]; then pass; else fail "both jobs pick the version with scripts/next-version.sh"; fi
+assert_contains "$wf" "git ls-remote --tags --refs origin 'refs/tags/v*'" "the version pick reads the repository's tags"
+assert_contains "$wf" "npm version \"\$next\" --no-git-tag-version" "a beta is stamped with the coming version in the checkout"
+assert_contains "$wf" "npm version \"\$VERSION\" --no-git-tag-version" "the bump writes package.json and the lockfile with npm version"
+assert_contains "$wf" "git commit -m \"Release \$VERSION [skip ci]\"" "the bump commit carries the [skip ci] guard"
+assert_contains "$wf" "github-actions[bot]" "the bump is committed under the workflow's identity"
+assert_contains "$wf" "git push origin HEAD:main" "the bump is pushed to main"
+assert_contains "$wf" "steps.bump.outputs.sha || github.sha" "the release targets the bump commit when there is one"
+assert_contains "$wf" "--target \"\$TARGET\"" "the release is created at that target"
+assert_contains "$wf" "already released as" "a released package.json version is logged and the next free patch released instead"
 assert_contains "$wf" "scripts/package.sh --commit \"\$GITHUB_SHA\"" "a branch push builds a per-commit beta with package.sh --commit (falsify: inline tar in the workflow)"
 assert_contains "$wf" "scripts/package.sh \"\$TAG\"" "a main push builds the release with package.sh and the v<version> tag"
 assert_not_contains "$wf" "tags:" "no tag trigger: the workflow creates every tag itself (falsify: bring back the v* trigger)"
@@ -836,8 +877,6 @@ assert_contains "$wf" "github.token" "the built-in token is used"
 assert_contains "$wf" "gh release create" "releases are created with gh from the runner"
 assert_contains "$wf" "--prerelease" "a beta is marked as a prerelease"
 assert_contains "$wf" "--target \"\$GITHUB_SHA\"" "the tag is created at the pushed commit, never by hand"
-assert_contains "$wf" "git ls-remote --exit-code --tags origin" "main checks whether v<version> exists before building"
-assert_contains "$wf" "already released" "an already released version is logged and skipped"
 assert_contains "$wf" "gh release delete" "betas are deleted with gh"
 assert_contains "$wf" "--cleanup-tag" "deleting a beta deletes its tag too"
 assert_contains "$wf" "KEEP_BETAS: 30" "at most 30 hash betas are kept"

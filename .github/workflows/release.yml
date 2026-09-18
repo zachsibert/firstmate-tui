@@ -5,30 +5,40 @@
 # tests/install.test.sh runs), and the README covers the flow under
 # "Releasing".
 #
-#   push to a branch other than main   a per-commit beta: package.sh --commit
-#                                      builds fm-board-v<version>-<sha7>.tar.gz
-#                                      (the asset keeps that name for 0.1.0
-#                                      upgrades; see scripts/package.sh)
-#                                      and a prerelease tagged v<version>-<sha7>
-#                                      is created at that commit (0.1.0-d8b290e
-#                                      is version 0.1.0 at commit d8b290e); then
-#                                      betas beyond the newest 30 are deleted,
-#                                      oldest first
-#   push to main                       the release: when tag v<version> does not
-#                                      exist yet, build and create the release at
-#                                      that commit; when it does, log that the
-#                                      version is already released and stop with
-#                                      exit 0. Bumping the version in a PR and
-#                                      merging it is how the next release is cut
+# Every merge to main is a release. scripts/next-version.sh picks the version
+# in both jobs from package.json and the existing tags, taking package.json's
+# version when v<version> is free and the next free patch otherwise, so nobody
+# opens a PR only to bump a version (bump minor or major in the PR that earns
+# it).
+#
+#   push to a branch other than main   a per-commit beta, named against the
+#                                      version the next merge will release:
+#                                      package.sh --commit builds
+#                                      fm-board-v<next>-<sha7>.tar.gz (the asset
+#                                      keeps that name for 0.1.0 upgrades; see
+#                                      scripts/package.sh) and a prerelease
+#                                      tagged v<next>-<sha7> is created at that
+#                                      commit (0.2.5-d8b290e is version 0.2.5 at
+#                                      commit d8b290e); then betas beyond the
+#                                      newest 30 are deleted, oldest first
+#   push to main                       the release: when the picked version is
+#                                      package.json's, build and create the
+#                                      release at that commit; otherwise write
+#                                      the version into package.json and the
+#                                      lockfile, commit "Release <v> [skip ci]"
+#                                      as github-actions[bot], push it to main
+#                                      and release at that commit
 #   pull_request closed                delete the betas (release and tag) of every
 #                                      commit in the PR, merged or not
 #   workflow_dispatch                  re-run the job for the branch it is run on
 #
 # The built-in token with contents: write creates and deletes releases and
-# tags. What the token itself does (creating the release's tag) starts no run.
-# One concurrency group per ref: two pushes to a branch build one after the
-# other, never at once. Lint with actionlint; tests/install.test.sh pins the
-# lines below that the installer and the README depend on.
+# tags and pushes the bump commit. What the token itself does (creating the
+# release's tag, pushing the bump) starts no run, and the [skip ci] marker in
+# the bump's message is the second guard. One concurrency group per ref: two
+# pushes to a branch build one after the other, never at once. Lint with
+# actionlint; tests/install.test.sh pins the lines below that the installer
+# and the README depend on and checks scripts/next-version.sh.
 name: Release
 
 on:
@@ -70,8 +80,18 @@ jobs:
       - name: Name the build
         id: name
         run: |
+          # A beta carries the version the next merge to main will release
+          # (scripts/next-version.sh against the repository's tags), stamped
+          # into this checkout only: an unbumped branch builds 0.2.5-<sha7>
+          # once v0.2.4 exists, not a second 0.2.4-<sha7>.
           version=$(node -p 'require("./bin/fm-board/package.json").version')
-          tag="v$version-${GITHUB_SHA::7}"
+          mapfile -t tags < <(git ls-remote --tags --refs origin 'refs/tags/v*' | sed 's#.*refs/tags/##')
+          next=$(bash scripts/next-version.sh "$version" ${tags[@]+"${tags[@]}"})
+          if [ "$next" != "$version" ]; then
+            echo "package.json says $version, which is released already; this beta is built as $next"
+            (cd bin/fm-board && npm version "$next" --no-git-tag-version >/dev/null)
+          fi
+          tag="v$next-${GITHUB_SHA::7}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           if gh release view "$tag" --json tagName --jq .tagName >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -145,26 +165,50 @@ jobs:
         with:
           node-version: 20
 
-      - name: Is this version released already?
-        id: check
+      - name: Pick the release version
+        id: pick
         run: |
+          # Every merge to main is a release: package.json's version when its
+          # tag is free, else the next free patch (scripts/next-version.sh).
           version=$(node -p 'require("./bin/fm-board/package.json").version')
-          tag="v$version"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "firstmate-tui $version is already released as $tag; nothing to do. To cut the next release, bump the version in bin/fm-board/package.json in a PR and merge it."
+          mapfile -t tags < <(git ls-remote --tags --refs origin 'refs/tags/v*' | sed 's#.*refs/tags/##')
+          next=$(bash scripts/next-version.sh "$version" ${tags[@]+"${tags[@]}"})
+          {
+            echo "version=$next"
+            echo "tag=v$next"
+            if [ "$next" = "$version" ]; then echo "bump=false"; else echo "bump=true"; fi
+          } >> "$GITHUB_OUTPUT"
+          if [ "$next" = "$version" ]; then
+            echo "tag v$version does not exist yet; releasing firstmate-tui $version from commit $GITHUB_SHA"
           else
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            echo "tag $tag does not exist yet; releasing firstmate-tui $version from commit $GITHUB_SHA"
+            echo "package.json says $version, already released as v$version; releasing firstmate-tui $next from a bump commit on main"
           fi
 
+      - name: Commit the version bump to main
+        if: steps.pick.outputs.bump == 'true'
+        id: bump
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          # Written under the workflow's own identity. A push made with the
+          # built-in token starts no workflow run and the [skip ci] marker is
+          # the second guard, so this commit never releases itself again. If
+          # main moved since the checkout the push is rejected and this run
+          # fails; the run for that newer commit picks the version and
+          # releases instead, carrying this commit's changes.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          (cd bin/fm-board && npm version "$VERSION" --no-git-tag-version >/dev/null)
+          git add bin/fm-board/package.json bin/fm-board/package-lock.json
+          git commit -m "Release $VERSION [skip ci]"
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "pushed the bump commit $(git rev-parse --short HEAD) to main"
+
       - name: Build the tarball and checksum
-        if: steps.check.outputs.released == 'false'
         id: package
         env:
-          TAG: ${{ steps.check.outputs.tag }}
+          TAG: ${{ steps.pick.outputs.tag }}
         run: |
           bash scripts/package.sh "$TAG" dist > package.out
           cat package.out
@@ -172,12 +216,13 @@ jobs:
           (cd dist && sha256sum -c -- *.tar.gz.sha256)
 
       - name: Create the release
-        if: steps.check.outputs.released == 'false'
         env:
           TAG: ${{ steps.package.outputs.tag }}
           VERSION: ${{ steps.package.outputs.version }}
           TARBALL: ${{ steps.package.outputs.tarball }}
           CHECKSUM: ${{ steps.package.outputs.checksum }}
+          # The bump commit when one was pushed, else the merge commit itself.
+          TARGET: ${{ steps.bump.outputs.sha || github.sha }}
         run: |
           {
             printf 'Install firstmate-tui %s, or upgrade an install to it:\n\n```sh\n' "$VERSION"
@@ -186,12 +231,12 @@ jobs:
             printf '```\n\nThe .sha256 file beside the tarball is the checksum the installer verifies.\n'
           } > notes.md
           gh release create "$TAG" \
-            --target "$GITHUB_SHA" \
+            --target "$TARGET" \
             --title "$VERSION" \
             --notes-file notes.md \
             --generate-notes \
             "$TARBALL" "$CHECKSUM"
-          echo "published release $TAG: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          echo "published release $TAG at $TARGET: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
 
   cleanup:
     name: Delete the betas of PR ${{ github.event.pull_request.number }}
