@@ -32,7 +32,7 @@ import { renderFrame } from './render.mjs';
 import { collectLedgers, discoverHomes, mtime, runBearingsPrs, runSnapshot } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
-import { focusProblem, handleKey, moveSelection, viewProblem } from './controller.mjs';
+import { focusProblem, handleKey, handleMouse, moveSelection, viewProblem } from './controller.mjs';
 import { resolveViewer, runViewer } from './viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.mjs';
 
@@ -85,6 +85,9 @@ export async function runApp(opts) {
       hiddenPanes: loaded.state.hiddenPanes,
       showHidden: false,
       help: false,
+      menu: null, // the open right-click menu (lib/controller.mjs)
+      frame: null, // the last drawn frame's { cols, rows, zones }: what the mouse points at
+      lastClick: null,
       notice: '',
       noticeBad: false,
       stale: false,
@@ -133,6 +136,7 @@ export async function runApp(opts) {
     state.view.stale = Boolean(state.snapshotError);
     const frame = renderFrame(state.model, screen.size(), state.view);
     state.view.scroll = frame.scroll;
+    state.view.frame = { cols: frame.cols, rows: frame.rows, zones: frame.zones };
     screen.draw(frame.lines);
   };
 
@@ -326,11 +330,16 @@ export async function runApp(opts) {
     handleKey(ctx, key);
     draw();
   };
+  const onMouse = (ev) => {
+    if (state.viewing) return;
+    handleMouse(ctx, ev);
+    draw();
+  };
 
   if (opts.headless) screen = headlessScreen(opts);
   else {
     const { createScreen } = await import('./tui-blessed.mjs');
-    screen = await createScreen({ onKey, onResize: () => draw() });
+    screen = await createScreen({ onKey, onMouse, onResize: () => draw(), mouse: opts.mouse !== false });
   }
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);

@@ -93,3 +93,55 @@ export function paneHeights(totalRows, demands, visible = []) {
 export function paneDemand(rowCount) {
   return 1 + Math.max(1, rowCount);
 }
+
+// Mouse hit test. The renderer records, for every line it draws, what that
+// line is (frame.zones[y], one entry per line):
+//   { kind: 'title', pane }      a pane's top border (panes) or section header (list)
+//   { kind: 'row', pane, row }   one list row of pane `pane`, its index in pane.rows
+//   { kind: 'pane', pane }       the pane's other cells: column header, empty
+//                                message, blank filler, bottom border
+//   null                         the title line, the footer, the landing page
+// A row spans the whole frame width, so only y decides; x only has to be
+// inside the frame. Hidden panes draw nothing and so own no zone: a click on
+// where one used to be lands on whatever pane took its place, or on nothing.
+export function hitTest(frame, x, y) {
+  if (!frame || !Array.isArray(frame.zones)) return null;
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= frame.cols || y >= frame.rows) return null;
+  const zone = frame.zones[y];
+  if (!zone) return null;
+  if (zone.kind === 'row') return { kind: 'row', pane: zone.pane, row: zone.row };
+  if (zone.kind === 'title') return { kind: 'title', pane: zone.pane };
+  if (zone.kind === 'pane') return { kind: 'pane', pane: zone.pane };
+  return null;
+}
+
+// The context menu box: one bordered column of `key  label` lines, its top-left
+// corner at the pointer, moved left or up as far as needed to stay inside the
+// frame. The renderer draws it and the controller hit-tests clicks against it,
+// so both take the box from here. Item i sits on line top + 1 + i.
+export const MENU_MARKER = '▸';
+
+export function menuBox(menu, cols, rows) {
+  const keyWidth = Math.max(...menu.items.map((it) => it.key.length), 1);
+  const widest = Math.max(...menu.items.map((it) => keyWidth + 2 + it.label.length), 1);
+  const width = Math.min(cols, widest + 5); // border, marker, space, text, space, border
+  const height = Math.min(rows, menu.items.length + 2);
+  const left = Math.max(0, Math.min(menu.x | 0, cols - width));
+  const top = Math.max(0, Math.min(menu.y | 0, rows - height));
+  return { left, top, width, height, keyWidth };
+}
+
+// Which menu item a frame cell falls on: its index, or -1 when the cell is a
+// border cell or outside the box.
+export function menuItemAt(menu, cols, rows, x, y) {
+  const box = menuBox(menu, cols, rows);
+  if (x <= box.left || x >= box.left + box.width - 1) return -1;
+  const i = y - box.top - 1;
+  return i >= 0 && i < menu.items.length && y < box.top + box.height - 1 ? i : -1;
+}
+
+// Is the cell anywhere on the box, border included?
+export function insideMenu(menu, cols, rows, x, y) {
+  const box = menuBox(menu, cols, rows);
+  return x >= box.left && x < box.left + box.width && y >= box.top && y < box.top + box.height;
+}

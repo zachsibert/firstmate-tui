@@ -3,8 +3,8 @@
 // styled segments so the neo-blessed adapter can color them and the
 // --render-once mode can print them plain. Nothing here touches a terminal.
 
-import { columns, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights, PANES, TAG_WIDTH_MIN } from './layout.mjs';
-import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
+import { columns, layoutMode, MENU_MARKER, menuBox, MIN_COLS, MIN_ROWS, paneDemand, paneHeights, PANES, TAG_WIDTH_MIN } from './layout.mjs';
+import { charWidth, fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
 const H = '─';
 const V = '│';
@@ -28,6 +28,13 @@ export const HELP_LINES = [
   '  0            show every pane (with all five hidden the board lists these keys)',
   '  r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)',
   '  ?            toggle this help    q / ctrl-c   quit',
+  '',
+  'mouse (off with --no-mouse; hold your terminal\'s text-selection modifier to select text)',
+  '  click        select that row and focus its pane; a pane title focuses the pane',
+  '  double-click the same as enter on that row',
+  '  right-click  menu of the row\'s actions with their keys: arrows or the wheel move,',
+  '               enter or a click chooses, esc or a click elsewhere closes',
+  '  wheel        move the selection three rows in the focused pane',
   '',
   'The board is read-only: it never answers, merges or dispatches. Hidden rows and',
   'panes are view state in the board\'s own file, never in a firstmate home.',
@@ -150,9 +157,15 @@ export function tagColumnWidth(model) {
   return w;
 }
 
+// Each renderer returns { lines, zones }: zones[y] says what line y is, in the
+// shape lib/layout.mjs hitTest() reads (a pane title, a row, the pane's other
+// cells, or null for the frame's own chrome), so a mouse click can be mapped
+// back to the row it landed on without a second copy of the geometry.
 function renderPanes(model, cols, rows, view) {
   const lines = [];
+  const zones = [];
   lines.push(titleLine(model, cols, view));
+  zones.push(null);
   const heights = paneHeights(
     rows,
     model.panes.map((p) => paneDemand(p.rows.length)),
@@ -172,37 +185,56 @@ function renderPanes(model, cols, rows, view) {
     const topText = ` ${truncate(pane.header, cols - width(lead) - width(badge) - 4)} `;
     const top = `${topText}${H.repeat(Math.max(0, cols - 1 - width(lead) - width(badge) - width(topText)))}┐`;
     lines.push(line([seg(lead, borderStyle), seg(badge, 'badge'), seg(top, borderStyle)], cols));
+    zones.push({ kind: 'title', pane: idx });
     const height = heights[idx];
     const body = [];
-    if (height >= 2) body.push(headSegments(spec));
+    const bodyZones = [];
+    const paneZone = { kind: 'pane', pane: idx };
+    if (height >= 2) {
+      body.push(headSegments(spec));
+      bodyZones.push(paneZone);
+    }
     const roomForRows = height - body.length;
     let hiddenBelow = 0;
     let hiddenAbove = 0;
     if (pane.rows.length === 0) {
       body.push([seg(fit(pane.empty, inner), 'empty')]);
+      bodyZones.push(paneZone);
     } else {
       const start = scrollStart(pane.rows.length, roomForRows, focused ? view.row : 0, view.scroll[idx] || 0);
       view.scrollOut[idx] = start;
       const visible = pane.rows.slice(start, start + roomForRows);
-      visible.forEach((r, i) => body.push(rowSegments(r, spec, focused && start + i === view.row, pane.id)));
+      visible.forEach((r, i) => {
+        body.push(rowSegments(r, spec, focused && start + i === view.row, pane.id));
+        bodyZones.push({ kind: 'row', pane: idx, row: start + i });
+      });
       hiddenAbove = start;
       hiddenBelow = pane.rows.length - (start + visible.length);
     }
-    while (body.length < height) body.push([seg(' '.repeat(inner), 'row')]);
-    for (const b of body.slice(0, height)) {
+    while (body.length < height) {
+      body.push([seg(' '.repeat(inner), 'row')]);
+      bodyZones.push(paneZone);
+    }
+    body.slice(0, height).forEach((b, i) => {
       const padStyle = b.length && b[0].style.startsWith('selected') ? 'selected' : 'row';
       lines.push(line([seg(`${V} `, borderStyle), ...fitSegments(b, inner, padStyle), seg(` ${V}`, borderStyle)], cols));
-    }
+      zones.push(bodyZones[i]);
+    });
     const markers = [];
     if (hiddenAbove > 0) markers.push(`${hiddenAbove} above`);
     if (hiddenBelow > 0) markers.push(`+${hiddenBelow} more`);
     const marker = markers.length ? ` ${markers.join(', ')} ${H}${H}` : '';
     const bottom = `└${H.repeat(Math.max(0, cols - 2 - width(marker)))}${marker}┘`;
     lines.push(line([seg(bottom, borderStyle)], cols));
+    zones.push(paneZone);
   });
-  while (lines.length < rows - 1) lines.push(line([], cols));
+  while (lines.length < rows - 1) {
+    lines.push(line([], cols));
+    zones.push(null);
+  }
   lines.push(footerLine(model, cols, view));
-  return lines.slice(0, rows);
+  zones.push(null);
+  return { lines: lines.slice(0, rows), zones: zones.slice(0, rows) };
 }
 
 // Flattened list for narrow terminals: one section header per pane, one
@@ -220,10 +252,13 @@ export function flattenRows(model) {
 
 function renderList(model, cols, rows, view) {
   const lines = [];
+  const zones = [];
   lines.push(titleLine(model, cols, view));
+  zones.push(null);
   const inner = cols - 1;
   const spec = columns(cols, inner, 'inflight', tagColumnWidth(model));
   lines.push(line([seg(' ', 'row'), ...headSegments(spec)], cols));
+  zones.push(null);
   const flat = flattenRows(model);
   const height = Math.max(rows, MIN_ROWS) - 3;
   const selectedIdx = flat.findIndex((e) => e.kind === 'row' && e.paneIdx === view.pane && e.rowIdx === view.row);
@@ -237,15 +272,22 @@ function renderList(model, cols, rows, view) {
       const lead = `${H}${H} `;
       const text = ` ${truncate(entry.text, cols - width(lead) - width(entry.badge) - 2)} `;
       lines.push(line([seg(lead, style), seg(entry.badge, 'badge'), seg(`${text}${H.repeat(Math.max(0, cols - width(lead) - width(entry.badge) - width(text)))}`, style)], cols));
+      zones.push({ kind: 'title', pane: entry.paneIdx });
     } else if (entry.kind === 'empty') {
       lines.push(line([seg(' ', 'row'), seg(fit(entry.text, inner), 'empty')], cols));
+      zones.push({ kind: 'pane', pane: entry.paneIdx });
     } else {
       lines.push(line([seg(' ', 'row'), ...rowSegments(entry.row, spec, entry.paneIdx === view.pane && entry.rowIdx === view.row, null)], cols));
+      zones.push({ kind: 'row', pane: entry.paneIdx, row: entry.rowIdx });
     }
   }
-  while (lines.length < height + 2) lines.push(line([], cols));
+  while (lines.length < height + 2) {
+    lines.push(line([], cols));
+    zones.push(null);
+  }
   lines.push(footerLine(model, cols, view));
-  return lines;
+  zones.push(null);
+  return { lines, zones };
 }
 
 // Every pane hidden: instead of an empty grid, a centered key page between the
@@ -281,7 +323,8 @@ function renderLanding(model, cols, rows, view) {
     else lines.push(line([pad, seg(truncate(entry.text, cols - left), entry.style || 'row')], cols));
   }
   lines.push(footerLine(model, cols, view));
-  return lines;
+  // Nothing on the landing page is a row or a pane: the mouse has no target.
+  return { lines, zones: lines.map(() => null) };
 }
 
 function overlayHelp(lines, cols) {
@@ -304,11 +347,57 @@ function overlayHelp(lines, cols) {
   return lines;
 }
 
-// view: { pane, row, scroll[], help, notice, noticeBad, stale } (the app's view
-// also carries `expanded`, `hidden`, `hiddenPanes` and `showHidden`, which only
-// buildModel reads)
-// Returns { lines, cols, rows, mode, scroll } where scroll holds the start
-// offsets actually used so the app can keep them for the next frame. mode is
+// The segments covering display columns [from, to) of a drawn line, styles
+// kept, so an overlay can replace the middle of a line and leave the selected
+// row inverse on either side. A wide character straddling a cut becomes a
+// space for each of its columns inside the range.
+function sliceSegments(segments, from, to) {
+  const out = [];
+  let col = 0;
+  for (const s of segments) {
+    let text = '';
+    for (const ch of s.text) {
+      const w = charWidth(ch.codePointAt(0));
+      const start = col;
+      col += w;
+      if (col <= from || start >= to) continue;
+      text += start >= from && col <= to ? ch : ' '.repeat(Math.min(col, to) - Math.max(start, from));
+    }
+    if (text) out.push(seg(text, s.style));
+  }
+  return out;
+}
+
+// The right-click menu: a bordered box at the pointer (lib/layout.mjs menuBox
+// clamps it inside the frame), one `key  label` line per action, the
+// highlighted item led by MENU_MARKER and drawn inverse. The box is drawn
+// over whatever is there; the cells left and right of it keep their styles.
+function overlayMenu(lines, cols, rows, menu) {
+  const box = menuBox(menu, cols, rows);
+  const inner = box.width - 2;
+  const boxLines = [[seg(`┌${H.repeat(inner)}┐`, 'help')]];
+  menu.items.forEach((it, i) => {
+    const marker = i === menu.index ? MENU_MARKER : ' ';
+    boxLines.push([seg(V, 'help'), seg(fitRaw(`${marker} ${it.key.padEnd(box.keyWidth)}  ${it.label} `, inner), i === menu.index ? 'selected' : 'row'), seg(V, 'help')]);
+  });
+  boxLines.push([seg(`└${H.repeat(inner)}┘`, 'help')]);
+  boxLines.slice(0, box.height).forEach((segments, i) => {
+    const target = box.top + i;
+    if (target >= lines.length) return;
+    const before = sliceSegments(lines[target], 0, box.left);
+    const after = sliceSegments(lines[target], box.left + box.width, cols);
+    lines[target] = line([...before, ...segments, ...after], cols);
+  });
+  return lines;
+}
+
+// view: { pane, row, scroll[], help, menu, notice, noticeBad, stale } (the
+// app's view also carries `expanded`, `hidden`, `hiddenPanes` and `showHidden`,
+// which only buildModel reads). menu, when set, is the open right-click menu:
+// { x, y, items: [{ key, label }], index }.
+// Returns { lines, cols, rows, mode, scroll, zones } where scroll holds the
+// start offsets actually used so the app can keep them for the next frame and
+// zones maps each line to what it shows (lib/layout.mjs hitTest). mode is
 // 'panes', 'list' (narrow) or 'landing' (every pane hidden: the key page).
 export function renderFrame(model, size, view = {}) {
   const cols = Math.max(MIN_COLS, size.cols | 0);
@@ -324,12 +413,14 @@ export function renderFrame(model, size, view = {}) {
     stale: Boolean(view.stale),
   };
   const mode = allPanesHidden(model) ? 'landing' : layoutMode(cols);
-  let lines;
-  if (mode === 'landing') lines = renderLanding(model, cols, rows, v);
-  else if (mode === 'list') lines = renderList(model, cols, rows, v);
-  else lines = renderPanes(model, cols, rows, v);
+  let drawn;
+  if (mode === 'landing') drawn = renderLanding(model, cols, rows, v);
+  else if (mode === 'list') drawn = renderList(model, cols, rows, v);
+  else drawn = renderPanes(model, cols, rows, v);
+  let { lines } = drawn;
+  if (view.menu && Array.isArray(view.menu.items) && view.menu.items.length) lines = overlayMenu(lines, cols, rows, view.menu);
   if (v.help) lines = overlayHelp(lines, cols);
-  return { lines, cols, rows, mode, scroll: v.scrollOut };
+  return { lines, cols, rows, mode, scroll: v.scrollOut, zones: drawn.zones };
 }
 
 export function toPlain(lines) {
