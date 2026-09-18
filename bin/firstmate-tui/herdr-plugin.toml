@@ -21,7 +21,7 @@ id = "firstmate.board"
 name = "firstmate-tui"
 version = "0.2.0"
 min_herdr_version = "0.8.2"
-description = "firstmate-tui: read-only board over the firstmate fleet: needs-you, review, in flight, findings, landed"
+description = "firstmate-tui: read-only board over the firstmate fleet: needs-you, my PRs, in flight, findings, landed, to review"
 platforms = ["macos", "linux"]
 
 [[panes]]

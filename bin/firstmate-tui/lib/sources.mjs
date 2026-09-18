@@ -1,18 +1,23 @@
 // lib/sources.mjs - every read the board performs against firstmate homes and
 // GitHub. Read-only by contract: it runs the fleet snapshot script, reads
-// ledgers, stats files and asks GitHub through `gh pr list`. It never writes
-// into FM_HOME, a project or a state directory, and every command is an argv
+// ledgers, stats files and asks GitHub through `gh api graphql` (and, once at
+// startup, `gh api user` for the captain's login). It never writes into
+// FM_HOME, a project or a state directory, and every command is an argv
 // spawn, never a shell string.
 
 import { spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
-import { basename, parseTime } from './text.mjs';
+import { basename, parseTime, repoFromUrl } from './text.mjs';
 import { whichOnPath } from './viewer.mjs';
 import { parseReleases, RELEASES_PER_PAGE } from './settings.mjs';
-import { TERMINAL_WINDOW_SECONDS } from './model.mjs';
+import { recordedPrs, TERMINAL_WINDOW_SECONDS } from './model.mjs';
+import { configuredRepos, passesLabelRule } from './config.mjs';
+import { identityKnown, resolveIdentity } from './identity.mjs';
 
-// Run a command to completion, bounded by timeoutMs. Resolves to { out, error }:
-// stdout on exit 0, else the last stderr line (or the timeout / spawn failure).
+// Run a command to completion, bounded by timeoutMs. Resolves to { out, error,
+// stdout }: stdout on exit 0, else the last stderr line (or the timeout /
+// spawn failure); `stdout` is whatever the command printed either way, for
+// the one caller that can read a partial answer (the PR lookup).
 function run(cmd, args, { env, timeoutMs, cwd }) {
   return new Promise((resolve) => {
     let out = '';
@@ -23,7 +28,7 @@ function run(cmd, args, { env, timeoutMs, cwd }) {
       if (done) return;
       done = true;
       child.kill('SIGKILL');
-      resolve({ out: null, error: `timed out after ${Math.round(timeoutMs / 1000)} s` });
+      resolve({ out: null, stdout: out, error: `timed out after ${Math.round(timeoutMs / 1000)} s` });
     }, timeoutMs);
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (err += d));
@@ -31,17 +36,17 @@ function run(cmd, args, { env, timeoutMs, cwd }) {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve({ out: null, error: e.message });
+      resolve({ out: null, stdout: out, error: e.message });
     });
     child.on('close', (code) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       if (code !== 0) {
-        resolve({ out: null, error: `exit ${code}: ${err.trim().split('\n').slice(-1)[0] || 'no stderr'}` });
+        resolve({ out: null, stdout: out, error: `exit ${code}: ${err.trim().split('\n').slice(-1)[0] || 'no stderr'}` });
         return;
       }
-      resolve({ out, error: null });
+      resolve({ out, stdout: out, error: null });
     });
   });
 }
@@ -122,28 +127,86 @@ export async function runSnapshot(fmHome, { timeoutMs }) {
   return r;
 }
 
+// ---------------------------------------------------------------- identity
+//
+// The two rungs of lib/identity.mjs that run a command: gh's logged-in login
+// and git's github.user. Each answers { value, error } for resolveIdentity.
+// `gh api user --jq .login` is one REST call, made once at startup and
+// cached by the caller for the session.
+
+const GH_ENV = { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' };
+
+export async function ghLogin({ timeoutMs = GH_TIMEOUT_MS, env = process.env } = {}) {
+  const r = await run('gh', ['api', 'user', '--jq', '.login'], { env: { ...env, ...GH_ENV }, timeoutMs: Math.min(timeoutMs, GH_TIMEOUT_MS) });
+  return r.error ? { value: null, error: r.error } : { value: r.out.trim(), error: null };
+}
+
+export async function gitLogin({ timeoutMs = GH_TIMEOUT_MS, env = process.env } = {}) {
+  const r = await run('git', ['config', '--get', 'github.user'], { env, timeoutMs: Math.min(timeoutMs, GH_TIMEOUT_MS) });
+  // `git config --get` exits 1 for an unset key: that is "not set", not a failure.
+  if (r.error) return { value: null, error: /^exit 1: no stderr$/.test(r.error) ? 'github.user not set' : r.error };
+  return { value: r.out.trim(), error: null };
+}
+
+// The live resolution: the config file first, then gh (unless `askGh` is
+// false: --no-prs, or gh not on PATH, so no GitHub call is made), then git.
+export async function resolveIdentityLive({ config, askGh = true, timeoutMs = GH_TIMEOUT_MS, env = process.env } = {}) {
+  const fromConfig = config && config.identity ? config.identity.github_login : null;
+  const quick = resolveIdentity({ config: fromConfig });
+  if (identityKnown(quick)) return quick;
+  const gh = askGh ? await ghLogin({ timeoutMs, env }) : null;
+  const ghRung = gh || { value: null, error: whichOnPath('gh', env) ? 'not asked (--no-prs)' : 'gh not on PATH' };
+  const early = resolveIdentity({ config: fromConfig, gh: ghRung, git: { value: null, error: 'not asked' } });
+  if (identityKnown(early)) return early;
+  const git = await gitLogin({ timeoutMs, env });
+  return resolveIdentity({ config: fromConfig, gh: ghRung, git });
+}
+
 // ------------------------------------------------------------- live PR data
 //
-// Ready for review's live check state, status, title, base branch and, since
-// the PR age landed, each PR's creation time. The board asks GitHub itself
-// through `gh pr list`, with the candidate rule and the checks mapping of
-// firstmate's bin/fm-bearings-snapshot.sh (its --include-prs block). Since the
-// pane keeps a merged or closed PR on screen for TERMINAL_WINDOW_SECONDS after
-// it finished, the call asks for every state (`--state all`), newest-updated
-// first, so a PR that just merged is near the top whatever its age, and the
-// filter below drops the finished PRs outside that window before they reach
-// the model. `--search "sort:updated-desc"` is GitHub's search syntax, which
-// gh passes through: verified on gh 2.96.0 against a live repository, the list
-// comes back ordered by updatedAt descending with --state all. Fetching here
-// also stops the fleet snapshot running twice per tick: the script runs its
-// own before it asks GitHub. The script stays as the fallback when gh is not
-// on PATH; it lists open PRs only and carries none of the new fields.
+// The two PR panes' live data: what the captain authored (My PRs) and what
+// the captain was asked to review (To review), each PR with its check state,
+// status, title, base branch, creation time, author, labels and the
+// captain's own latest review. The board asks GitHub itself, through bounded
+// searches in `gh api graphql` (`gh search prs --json` carries no review
+// decision, checks, base or head branch, so the search API is called
+// directly). Per tick, at most four searches, all started together, each
+// asking for the PR_LIMIT most recently updated matches:
+//   My PRs open       is:pr is:open author:<login>
+//   My PRs tail       is:pr author:<login> closed:>=<12 hours ago>
+//   To review open    is:pr is:open review-requested:<login> -author:<login> repo:a repo:b ...
+//   To review tail    the same with closed:>=<12 hours ago> in place of is:open
+// A merged PR counts as closed, so the two tails carry what finished inside
+// TERMINAL_WINDOW_SECONDS, and keepFetchedPr drops the rest before the model
+// sees it. review-requested:<login> matches a request to the login and a
+// request to a team it belongs to (user-review-requested: would match the
+// direct requests only). The To review scope is the candidate repositories
+// of the fleet snapshot plus every repository the config file names; the
+// scope goes into the query as repo: qualifiers while the query fits
+// GitHub's 256-character limit and is applied again in code either way, so a
+// long scope costs nothing but a wider search. The two To review searches
+// are skipped when the scope is empty. Recorded task PRs that neither My PRs
+// search returned (a bot author, or a PR older than the cap) are looked up
+// in one more GraphQL call with aliased repository { pullRequest } fields,
+// bounded by PR_LIMIT; a lookup that fails leaves the model's `-` row.
+// The candidate rule and the checks mapping copy firstmate's
+// bin/fm-bearings-snapshot.sh, which stays as the fallback for My PRs when
+// gh is not on PATH (recorded PRs only, open ones only, none of the new
+// fields); To review has no fallback and says so.
 
 export const PR_REPOS = 10; // FM_BEARINGS_PR_REPOS: candidate repositories per fetch
-export const PR_LIMIT = 50; // PRs kept per repository (every state, newest-updated first); one more is requested to see the cap
+export const PR_LIMIT = 50; // PRs asked for per search (newest-updated first) and recorded PRs looked up per tick
 export const GH_TIMEOUT_MS = 20000; // FM_BEARINGS_PR_TIMEOUT: bound on one gh call
-export const GH_PR_FIELDS = ['number', 'title', 'url', 'headRefName', 'baseRefName', 'reviewDecision', 'mergeable', 'statusCheckRollup', 'createdAt', 'isDraft', 'state', 'mergedAt', 'closedAt'];
+export const SEARCH_QUERY_MAX = 256; // GitHub refuses a longer search string
 export const GH_PR_SORT = 'sort:updated-desc';
+
+// The PullRequest fields every GraphQL answer carries. `commits(last: 1)` is
+// the head commit, whose statusCheckRollup contexts are the CHECKS column
+// (each a CheckRun { status, conclusion } or a StatusContext { state }, the
+// two shapes checksState reads); latestReviews is one review per reviewer,
+// from which the identity's own APPROVED or CHANGES_REQUESTED is taken.
+export const GH_PR_FIELDS = 'number title url headRefName baseRefName reviewDecision mergeable isDraft state createdAt mergedAt closedAt author { login } repository { nameWithOwner } labels(first: 30) { nodes { name } } latestReviews(first: 30) { nodes { state author { login } } } commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state } } } } } } }';
+export const SEARCH_GRAPHQL = `query($q: String!, $n: Int!) { search(query: $q, type: ISSUE, first: $n) { issueCount nodes { ... on PullRequest { ${GH_PR_FIELDS} } } } }`;
 
 // owner/name from a GitHub URL or remote (https://github.com/o/r/pull/1,
 // git@github.com:o/r.git), or null, the way the script's repo_slug reads them.
@@ -153,9 +216,11 @@ export function repoSlug(url) {
   return m[1].replace(/\.git$/, '') || null;
 }
 
-// The CHECKS cell of one PR from gh's statusCheckRollup, mapped exactly as the
-// script maps it: no checks is none; any failure-like conclusion is failing;
-// any check neither completed nor successful is pending; else passing.
+// The CHECKS cell of one PR from its check contexts (gh's statusCheckRollup
+// list, or the GraphQL contexts nodes: the same two shapes), mapped exactly
+// as the script maps it: no checks is none; any failure-like conclusion is
+// failing; any check neither completed nor successful is pending; else
+// passing.
 const FAILING = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED']);
 export function checksState(rollup) {
   const checks = (Array.isArray(rollup) ? rollup : []).map((c) => c || {});
@@ -170,26 +235,48 @@ export function checksState(rollup) {
 // `state` is gh's OPEN, MERGED or CLOSED (null when the record carries none,
 // which the model reads as open); `merged_at` and `closed_at` are ISO 8601 or
 // null, and `title` and `base` are null rather than '' when absent so the
-// model can fall back to the recorded task's title and a '-' cell.
+// model can fall back to the recorded task's title and a '-' cell. The
+// record may be gh's --json shape (statusCheckRollup a list) or a GraphQL
+// node (author, labels, latestReviews, commits): the extra fields read null
+// or empty when absent.
 export function projectPr(pr, repo) {
   const head = typeof pr.headRefName === 'string' ? pr.headRefName : '';
   const text = (v) => (typeof v === 'string' && v.trim() ? v : null);
+  const contexts = pr.commits && Array.isArray(pr.commits.nodes) && pr.commits.nodes[0] && pr.commits.nodes[0].commit && pr.commits.nodes[0].commit.statusCheckRollup ? pr.commits.nodes[0].commit.statusCheckRollup.contexts : null;
+  const rollup = contexts && Array.isArray(contexts.nodes) ? contexts.nodes : pr.statusCheckRollup;
   return {
     num: pr.number === null || pr.number === undefined ? '-' : String(pr.number),
-    repo,
+    repo: repo || (pr.repository && pr.repository.nameWithOwner) || repoSlug(pr.url) || '-',
     task: head.startsWith('fm/') ? head.slice(3) : '-',
     url: pr.url ?? '-',
     title: text(pr.title),
     base: text(pr.baseRefName),
     review: pr.reviewDecision ?? 'none',
     mergeable: pr.mergeable ?? 'UNKNOWN',
-    checks: checksState(pr.statusCheckRollup),
+    checks: checksState(rollup),
     created_at: text(pr.createdAt),
     draft: pr.isDraft === true,
     state: text(pr.state) ? String(pr.state).toUpperCase() : null,
     merged_at: text(pr.mergedAt),
     closed_at: text(pr.closedAt),
+    author: pr.author && typeof pr.author.login === 'string' && pr.author.login ? pr.author.login : null,
+    labels: pr.labels && Array.isArray(pr.labels.nodes) ? pr.labels.nodes.map((n) => (n && typeof n.name === 'string' ? n.name : null)).filter(Boolean) : [],
+    requested: false,
+    my_review: null,
+    pane: 'mine',
   };
+}
+
+// The identity's own latest review on a PR, APPROVED or CHANGES_REQUESTED,
+// else null (a comment-only or dismissed review says nothing about the
+// captain's verdict).
+export function myReview(node, login) {
+  const reviews = node && node.latestReviews && Array.isArray(node.latestReviews.nodes) ? node.latestReviews.nodes : [];
+  for (const r of reviews) {
+    if (!r || !r.author || r.author.login !== login) continue;
+    return r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED' ? r.state : null;
+  }
+  return null;
 }
 
 // Whether a fetched PR is worth handing to the model at `now` (epoch seconds):
@@ -230,35 +317,149 @@ export async function candidateRepos(snapshot, { timeoutMs, env = process.env } 
   return repos.slice(0, PR_REPOS);
 }
 
-async function ghPrList(repo, { timeoutMs, env, now = () => Math.floor(Date.now() / 1000) }) {
-  const args = ['pr', 'list', '--repo', repo, '--state', 'all', '--search', GH_PR_SORT, '--limit', String(PR_LIMIT + 1), '--json', GH_PR_FIELDS.join(',')];
-  const r = await runJson('gh', args, { env: { ...env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' }, timeoutMs: Math.min(timeoutMs, GH_TIMEOUT_MS) });
-  if (r.error) return { repo, rows: [], capped: false, error: r.error };
-  const list = Array.isArray(r.value) ? r.value : [];
-  const at = now();
-  const rows = list
-    .slice(0, PR_LIMIT)
-    .map((p) => projectPr(p, repo))
-    .filter((p) => keepFetchedPr(p, at));
-  return { repo, rows, capped: list.length > PR_LIMIT, error: null };
+// The To review scope: the candidate repositories, then the repositories the
+// config file names, deduped, in that order.
+export function reviewScope(candidates, config) {
+  const out = [];
+  for (const r of [...(candidates || []), ...configuredRepos(config)]) if (r && !out.includes(r)) out.push(r);
+  return out;
 }
 
-// The board's own fetch: one gh pr list per candidate repository, all started
-// at once. Every repository failing is a failed fetch (the previous data stays
-// on screen); some failing is a success whose note names them, since the other
-// repositories' rows are good.
-export async function runGhPrs(snapshot, { timeoutMs, env = process.env }) {
-  const repos = await candidateRepos(snapshot, { timeoutMs, env });
-  const results = await Promise.all(repos.map((repo) => ghPrList(repo, { timeoutMs, env })));
-  const failed = results.filter((r) => r.error);
-  if (repos.length && failed.length === repos.length) {
-    return { candidate_prs: [], error: `gh pr list ${failed[0].repo}: ${failed[0].error}`, note: null };
+// The ISO time TERMINAL_WINDOW_SECONDS before `now`, in the +00:00 form
+// GitHub's search qualifiers take.
+export function closedSince(now) {
+  return new Date((now - TERMINAL_WINDOW_SECONDS) * 1000).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+}
+
+// The four search strings (lib/sources.mjs header). The To review pair names
+// its scope with repo: qualifiers when the whole scope fits under
+// SEARCH_QUERY_MAX; otherwise the qualifiers are left out as a set and the
+// scope filter in code does the work alone (a partial list would exclude the
+// rest on GitHub's side).
+export function searchQueries(login, { now, scope = [] }) {
+  const since = closedSince(now);
+  const mine = { open: `is:pr is:open author:${login} ${GH_PR_SORT}`, tail: `is:pr author:${login} closed:>=${since} ${GH_PR_SORT}` };
+  const repoTerms = scope.map((r) => `repo:${r}`).join(' ');
+  const withRepos = (base) => {
+    const full = `${base} ${repoTerms} ${GH_PR_SORT}`;
+    return full.length <= SEARCH_QUERY_MAX ? full : `${base} ${GH_PR_SORT}`;
+  };
+  const toreview = {
+    open: withRepos(`is:pr is:open review-requested:${login} -author:${login}`),
+    tail: withRepos(`is:pr review-requested:${login} -author:${login} closed:>=${since}`),
+  };
+  return { mine, toreview };
+}
+
+// The aliased lookup of recorded PRs: r0: repository(owner:, name:) {
+// pullRequest(number:) { ...fields } } per target.
+export function lookupGraphql(targets) {
+  const fields = targets.map((t, i) => `r${i}: repository(owner: ${JSON.stringify(t.owner)}, name: ${JSON.stringify(t.name)}) { pullRequest(number: ${t.number}) { ${GH_PR_FIELDS} } }`);
+  return `query { ${fields.join(' ')} }`;
+}
+
+// One GraphQL search: { rows, capped, error }. `pane` and `requested` are
+// stamped on every row; `login` picks the identity's own review out.
+async function ghSearch(q, { login, pane, requested, timeoutMs, env, now }) {
+  const args = ['api', 'graphql', '-f', `query=${SEARCH_GRAPHQL}`, '-f', `q=${q}`, '-F', `n=${PR_LIMIT}`];
+  const r = await runJson('gh', args, { env: { ...env, ...GH_ENV }, timeoutMs: Math.min(timeoutMs, GH_TIMEOUT_MS) });
+  if (r.error) return { rows: [], capped: false, error: r.error };
+  const search = r.value && r.value.data && r.value.data.search ? r.value.data.search : null;
+  if (!search) return { rows: [], capped: false, error: r.value && Array.isArray(r.value.errors) && r.value.errors[0] ? `GraphQL: ${r.value.errors[0].message}` : 'no search data in the answer' };
+  const nodes = Array.isArray(search.nodes) ? search.nodes.filter((n) => n && typeof n === 'object' && n.url) : [];
+  const rows = nodes.map((n) => ({ ...projectPr(n, null), requested, my_review: myReview(n, login), pane })).filter((p) => keepFetchedPr(p, now));
+  return { rows, capped: Number(search.issueCount) > PR_LIMIT, error: null };
+}
+
+// The recorded PRs the My PRs searches did not return, looked up in one
+// call. A missing PR (deleted, or a repository the account cannot see) comes
+// back null beside the others: gh exits 1 when the answer carries errors but
+// still prints the body, so the body is read when it parses and the rest of
+// the lookups stand.
+async function ghLookup(urls, { login, timeoutMs, env, now }) {
+  const targets = [];
+  for (const url of urls) {
+    const pr = repoFromUrl(url);
+    if (!pr) continue;
+    const [owner, name] = pr.repo.split('/');
+    targets.push({ owner, name, number: Number(pr.num), url });
   }
-  const notes = [];
-  if (failed.length) notes.push(`${failed.length} of ${repos.length} repositories unavailable (${failed[0].repo}: ${failed[0].error})`);
-  const capped = results.filter((r) => r.capped).map((r) => r.repo);
-  if (capped.length) notes.push(`PR list capped at ${PR_LIMIT} newest-updated in ${capped.join(', ')}`);
-  return { candidate_prs: results.flatMap((r) => r.rows), error: null, note: notes.length ? `PR fetch: ${notes.join('; ')}` : null };
+  if (!targets.length) return { rows: [], error: null };
+  const r = await run('gh', ['api', 'graphql', '-f', `query=${lookupGraphql(targets)}`], { env: { ...env, ...GH_ENV }, timeoutMs: Math.min(timeoutMs, GH_TIMEOUT_MS) });
+  let body = null;
+  try {
+    body = JSON.parse(r.stdout || r.out || '');
+  } catch {
+    body = null;
+  }
+  const data = body && body.data && typeof body.data === 'object' ? body.data : null;
+  if (!data) return { rows: [], error: r.error || 'no lookup data in the answer' };
+  const rows = [];
+  targets.forEach((t, i) => {
+    const node = data[`r${i}`] && data[`r${i}`].pullRequest;
+    if (!node || typeof node !== 'object' || !node.url) return;
+    const row = { ...projectPr(node, null), my_review: myReview(node, login), pane: 'mine' };
+    if (keepFetchedPr(row, now)) rows.push(row);
+  });
+  return { rows, error: null };
+}
+
+// The board's own fetch: at most four searches at once, then the lookup of
+// the recorded PRs the author searches missed. Returns { mine, toreview } with
+// each pane's { rows, error, note } (To review also carries `scope`): a pane
+// whose searches all failed is a failed pane (its previous rows stay on
+// screen, and the failure is named once); a pane with one search failed lists
+// what the other returned and notes the failure; a capped search is noted.
+export async function runGhPrs(snapshot, { identity, config, timeoutMs, env = process.env, now = () => Math.floor(Date.now() / 1000) }) {
+  const at = now();
+  const login = identity.login;
+  const candidates = await candidateRepos(snapshot, { timeoutMs, env });
+  const scope = reviewScope(candidates, config);
+  const q = searchQueries(login, { now: at, scope });
+  const opts = { login, timeoutMs, env, now: at };
+  const searches = [ghSearch(q.mine.open, { ...opts, pane: 'mine', requested: false }), ghSearch(q.mine.tail, { ...opts, pane: 'mine', requested: false })];
+  if (scope.length) searches.push(ghSearch(q.toreview.open, { ...opts, pane: 'toreview', requested: true }), ghSearch(q.toreview.tail, { ...opts, pane: 'toreview', requested: true }));
+  const [mineOpen, mineTail, reviewOpen, reviewTail] = await Promise.all(searches);
+
+  const collect = (name, results, filter) => {
+    const failed = results.filter((r) => r.error);
+    if (results.length && failed.length === results.length) return { rows: [], error: `${name}: ${failed[0].error}`, note: null };
+    const seen = new Set();
+    const rows = [];
+    for (const r of results) {
+      for (const row of r.rows) {
+        if (seen.has(row.url) || !filter(row)) continue;
+        seen.add(row.url);
+        rows.push(row);
+      }
+    }
+    const notes = [];
+    if (failed.length) notes.push(`${name}: ${failed.length} of ${results.length} searches failed (${failed[0].error})`);
+    if (results.some((r) => r.capped)) notes.push(`${name}: search capped at the ${PR_LIMIT} newest-updated PRs`);
+    return { rows, error: null, note: notes.length ? notes.join('; ') : null, seen };
+  };
+  const mine = collect('My PRs', [mineOpen, mineTail], () => true);
+  const toreview = scope.length ? collect('To review', [reviewOpen, reviewTail], (row) => row.author !== login && scope.includes(row.repo) && passesLabelRule(config, row.repo, row.labels)) : { rows: [], error: null, note: null };
+  toreview.scope = scope;
+  delete toreview.seen;
+
+  // The recorded PRs the author searches did not return, unfinished tasks
+  // first, at most PR_LIMIT of them.
+  if (!mine.error) {
+    const recorded = recordedPrs({ snapshot }).sort((a, b) => Number(a.done) - Number(b.done));
+    const missing = recorded.filter((r) => !mine.seen.has(r.url)).map((r) => r.url).slice(0, PR_LIMIT);
+    if (missing.length) {
+      const looked = await ghLookup(missing, opts);
+      if (looked.error) mine.note = [mine.note, `recorded PR lookup failed (${looked.error})`].filter(Boolean).join('; ');
+      for (const row of looked.rows) {
+        if (mine.seen.has(row.url)) continue;
+        mine.seen.add(row.url);
+        mine.rows.push(row);
+      }
+    }
+  }
+  delete mine.seen;
+  return { mine, toreview };
 }
 
 // The fallback: fm-bearings-snapshot.sh --include-prs, which runs its own fleet
@@ -278,21 +479,35 @@ export async function runBearingsPrs(fmHome, { timeoutMs }) {
   // the board treats that as a failed fetch and names it, not as an empty list.
   const status = typeof r.value.prs === 'string' ? r.value.prs : '';
   if (/^unavailable\b/.test(status)) return { candidate_prs: [], error: status, note: null };
-  return { candidate_prs: Array.isArray(r.value.candidate_prs) ? r.value.candidate_prs : [], error: null, note: null };
+  const rows = (Array.isArray(r.value.candidate_prs) ? r.value.candidate_prs : []).map((c) => ({ ...c, pane: 'mine' }));
+  return { candidate_prs: rows, error: null, note: null };
 }
 
-// The live PR data of one refresh: { candidate_prs, error, note }. With gh on
-// PATH it is the board's own fetch against the snapshot just taken (or the
-// last good one when this tick's failed); without gh the firstmate script
-// runs instead and `note` says so, for the footer to show once. `note` is
-// advisory: fetchedAt and error are handled exactly as before.
-export async function fetchPrs(fmHome, snapshot, { timeoutMs, env = process.env }) {
+export const GH_MISSING = 'gh not on PATH';
+
+// The live PR data of one refresh: { mine, toreview, note } with each pane's
+// { rows, error, note } (To review also `scope` and, without gh,
+// `unavailable`). With gh on PATH it is the board's own fetch against the
+// snapshot just taken (or the last good one when this tick's failed) for the
+// resolved identity; without gh the firstmate script runs for My PRs instead
+// and `note` says so, for the footer to show once, while To review lists
+// nothing and says why. An unknown identity fetches nothing: both panes come
+// back empty with no error, and the model draws the identity row.
+export async function fetchPrs(fmHome, snapshot, { identity, config, timeoutMs, env = process.env }) {
+  const empty = () => ({ rows: [], error: null, note: null });
   if (!whichOnPath('gh', env)) {
     const r = await runBearingsPrs(fmHome, { timeoutMs });
-    return { ...r, note: r.error ? null : 'gh not on PATH: PR data from fm-bearings-snapshot.sh, open PRs only, without titles, base branches or PR creation times' };
+    return {
+      mine: { rows: r.candidate_prs, error: r.error, note: null },
+      toreview: { ...empty(), scope: [], unavailable: GH_MISSING },
+      note: r.error ? null : 'gh not on PATH: PR data from fm-bearings-snapshot.sh, open PRs only, without titles, base branches or PR creation times; To review needs gh',
+    };
   }
-  if (!snapshot) return { candidate_prs: [], error: 'no fleet snapshot to name the candidate repositories', note: null };
-  return runGhPrs(snapshot, { timeoutMs, env });
+  if (!identityKnown(identity)) return { mine: empty(), toreview: { ...empty(), scope: [] }, note: null };
+  if (!snapshot) return { mine: { ...empty(), error: 'no fleet snapshot to name the candidate repositories' }, toreview: { ...empty(), scope: [], error: 'no fleet snapshot to name the candidate repositories' }, note: null };
+  const r = await runGhPrs(snapshot, { identity, config, timeoutMs, env });
+  const notes = [r.mine.note, r.toreview.note].filter(Boolean);
+  return { mine: r.mine, toreview: r.toreview, note: notes.length ? `PR fetch: ${notes.join('; ')}` : null };
 }
 
 // The GitHub releases of the board's own repository, for the Settings page:

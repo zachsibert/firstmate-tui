@@ -36,28 +36,47 @@ plugins and the view-state directory are keyed by it; a plugin linked at
 the old `bin/fm-board` path is relinked once. The
 scout report at `docs/scout-report-2026-09-16.md` is the design record: its
 section 1 table is the pane-to-data mapping that `bin/firstmate-tui/lib/model.mjs`
-implements row for row, and its section 7 table is the milestone plan. Check
-the plan before widening scope: answering decisions, opening PRs, toasts and
-the findings watermark belong to later milestones.
+implements row for row (since 0.4.0 its Ready for review row is two panes, My
+PRs and To review, both over the identity in the board's config file; the
+README's Panes section is the current mapping), and its section 7 table is
+the milestone plan. Check the plan before widening scope: answering
+decisions, opening PRs, toasts and the findings watermark belong to later
+milestones.
 
 ## Hard rules
 
 - The board reads firstmate homes and never writes into `FM_HOME`, a project
   or a `state/` directory. Its files are the pane record under
-  `${XDG_STATE_HOME:-~/.local/state}/fm-board/` (or `HERDR_PLUGIN_STATE_DIR`)
-  and `view-state.json` (hidden rows and panes; `lib/viewstate.mjs` names the
-  location chain and refuses a path inside `FM_HOME`). Hiding is view state
-  because firstmate retires Done rows itself; never turn it into a firstmate
-  write.
+  `${XDG_STATE_HOME:-~/.local/state}/fm-board/` (or `HERDR_PLUGIN_STATE_DIR`),
+  `view-state.json` (hidden rows and panes; `lib/viewstate.mjs` names the
+  location chain and refuses a path inside `FM_HOME`) and `config.json` beside
+  it (`lib/config.mjs`, the same chain, passed by the launcher as `--config`
+  the way `--view-state` is): the GitHub login the two PR panes are built
+  around and the To review label rules. The board writes `config.json` once,
+  from `EXAMPLE_CONFIG`, when no file is there, and never again; the test
+  suite pins that constant byte for byte to `docs/config.example.json`, so
+  change both together. Hiding is view state because firstmate retires Done
+  rows itself; never turn it into a firstmate write.
+- The identity (`lib/identity.mjs`) is the config file's `github_login`, else
+  `gh api user` (once per session, again on `r` only while unknown), else
+  `git config --get github.user`, never `user.name` or `user.email`: those
+  are not GitHub logins. With `--no-prs` gh is not asked at all.
 - The board owns no authority. Its actions are `herdr agent focus`, opening a
   PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
   `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
   report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended),
   refreshing its own data (`r`: the snapshot, then the live PR fetch
-  unless `--no-prs`; that fetch is the board's own read-only `gh pr list` per
-  candidate repository in `lib/sources.mjs`, copying `fm-bearings-snapshot.sh`'s
-  candidate and checks rules, with that script as the fallback when gh is not
-  on PATH), and upgrading itself from the Settings page (`.`): only after a
+  unless `--no-prs`; that fetch is the board's own read-only GitHub search
+  through `gh api graphql` in `lib/sources.mjs`: at most four searches per
+  tick, My PRs open and tail by `author:<login>`, To review open and tail by
+  `review-requested:<login> -author:<login>` over the candidate repositories
+  plus the config file's, each `first: 50`, plus one aliased lookup of the
+  recorded task PRs the author searches missed; `gh search prs --json` cannot
+  replace it, it carries no review decision, checks or base branch, and
+  `user-review-requested:` must not replace `review-requested:`, it drops the
+  team requests. The candidate and checks rules copy
+  `fm-bearings-snapshot.sh`, which stays the My PRs fallback when gh is not on
+  PATH), and upgrading itself from the Settings page (`.`): only after a
   `y` confirmation, only by running the installed launcher's own
   `firstmate-tui upgrade --version <v>` / `--stable` (`lib/upgrade.mjs`, argv
   spawn of `bash <prefix>/bin/firstmate-tui.sh upgrade ...`), so the record checks
@@ -82,11 +101,19 @@ the findings watermark belong to later milestones.
 
 ## Working on the code
 
-- Pure modules (`text`, `layout`, `model`, `render`, `settings`) take data
-  and return data; keep them that way so `--render-once --fixture` stays the
-  test surface. I/O lives in `sources.mjs` (firstmate, and the GitHub
-  releases fetch through `--curl-cmd`), `herdr.mjs` (herdr) and
-  `upgrade.mjs` (the install record and the upgrade child).
+- Pure modules (`text`, `layout`, `model`, `render`, `settings`, `identity`)
+  take data and return data; keep them that way so `--render-once --fixture`
+  stays the test surface. I/O lives in `sources.mjs` (firstmate, the GitHub
+  searches and the identity rungs, and the GitHub releases fetch through
+  `--curl-cmd`), `herdr.mjs` (herdr), `upgrade.mjs` (the install record and
+  the upgrade child), `viewstate.mjs` and `config.mjs` (the board's two
+  files; both hold their pure parse beside the read and write).
+- The two PR panes share one candidate list; a row's `pane` (`mine` or
+  `toreview`, absent means `mine`) says where it draws, and `facts.prs.mine`
+  and `facts.prs.toreview` carry each pane's own fetch state so one pane can
+  be stale while the other is fresh (`mergePrs` in `lib/model.mjs` is the one
+  place that folds a fetch into the previous facts). A fixture's `prs.identity`
+  absent stands for a known login; `null` is the unknown identity.
 - `lib/tui-blessed.mjs` is the only importer of `neo-blessed`. Anything the
   terminal library must do goes through the screen contract at the top of
   that file. That includes the mouse: adding the screen's mouse listener is
@@ -147,7 +174,21 @@ the findings watermark belong to later milestones.
   The `r` key is tested against a stand-in home whose snapshot scripts only
   log that they ran, with `tests/fake-gh.sh` first on PATH as `gh` (see
   `render_live` in the test): every live render must put that fake first on
-  PATH, because the board's own fetch otherwise calls the real GitHub CLI.
+  PATH, because the board's own fetch and its `gh api user` identity call
+  otherwise reach the real GitHub CLI. The fake answers `api user` and `api
+  graphql` (dispatching on the search string's `author:`,
+  `review-requested:`, `is:open` and `closed:>=`, or on the lookup's
+  `repository(` aliases; its header names every canned PR and what each
+  proves) and fails on `pr list`, so the old per-repository fetch cannot come
+  back unnoticed; it logs a search with the `closed:>=` stamp replaced by
+  `<since>` so the suite compares whole logs. A live render also writes the
+  example config into its `XDG_CONFIG_HOME`, which is how the gemini rule
+  reaches the To review scope in those checks. The identity chain is tested
+  with a fake `git` that answers `config --get github.user` alone and hands
+  every other call to the real one, because `candidateRepos` runs git too.
+  `populated.json` and `pr-status.json` are 160x44, not 40: the sixth pane
+  needs three lines, and 44 keeps the first five panes on the lines the mouse
+  and line-number checks name.
   The refresh schedule (the snapshot, then the gh calls; the next refresh
   armed on completion for the last start plus `--refresh`, so a slow refresh
   is followed at once and never doubled; a tick that lands mid-refresh

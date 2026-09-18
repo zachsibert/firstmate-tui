@@ -1,0 +1,67 @@
+{
+  "_comment": "My PRs: the union of what the identity (captain) authored and what fleet tasks recorded, whatever the author. now is 2026-09-16T12:00:00Z = epoch 1789560000. Candidates: captain/dotfiles#5, captain's own open PR in a repository no fleet task touches (IN REVIEW, 3h); acme/widgets#41, ship-alpha's recorded PR authored by the bot fm-bot (ship-alpha, IN REVIEW, 5h); acme/api#9, captain's PR merged 30m ago (MERGED, 6h); acme/api#10, captain's PR closed 2h ago (CLOSED, 8h); acme/api#8, a teammate's PR in the toreview pane, which must not appear in My PRs. Recorded PR acme/api#7 (ship-gamma) is not in the fetched set (unlisted, STATUS -, 1m~). Five My PRs rows sorted IN REVIEW (dotfiles 3h, then ship-alpha 5h), unlisted, CLOSED, MERGED; one To review row.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 44,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "ship-alpha",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/widgets/pull/41", "source": "meta", "head": "fm/ship-alpha" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-alpha.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets" }
+      },
+      {
+        "id": "ship-gamma",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "PR https://github.com/acme/api/pull/7 checks green", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1C:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/api/pull/7", "source": "status_event", "head": "fm/ship-gamma" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "done: PR https://github.com/acme/api/pull/7 checks green" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-gamma.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "PR https://github.com/acme/api/pull/7 checks green", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "acme/api" }
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "ship-alpha", "title": "Add the widget cache", "state": "in_flight", "repo": "acme/widgets", "pr_url": null },
+        { "id": "ship-gamma", "title": "Retry on 429 from the address API", "state": "in_flight", "repo": "acme/api", "pr_url": null }
+      ]
+    },
+    "scout_reports": [],
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "herdr": null,
+  "prs": {
+    "identity": { "login": "captain", "source": "config" },
+    "candidate_prs": [
+      { "num": "5", "repo": "captain/dotfiles", "task": "-", "url": "https://github.com/captain/dotfiles/pull/5", "title": "Tidy the zsh prompt", "base": "main", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-16T09:00:00Z", "draft": false, "state": "OPEN", "merged_at": null, "closed_at": null, "author": "captain", "labels": [], "requested": false, "my_review": null, "pane": "mine" },
+      { "num": "41", "repo": "acme/widgets", "task": "ship-alpha", "url": "https://github.com/acme/widgets/pull/41", "title": "Add the widget cache", "base": "main", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-16T07:00:00Z", "draft": false, "state": "OPEN", "merged_at": null, "closed_at": null, "author": "fm-bot", "labels": [], "requested": false, "my_review": null, "pane": "mine" },
+      { "num": "9", "repo": "acme/api", "task": "-", "url": "https://github.com/acme/api/pull/9", "title": "Bump the retry budget", "base": "main", "review": "APPROVED", "mergeable": "UNKNOWN", "checks": "passing", "created_at": "2026-09-16T06:00:00Z", "draft": false, "state": "MERGED", "merged_at": "2026-09-16T11:30:00Z", "closed_at": "2026-09-16T11:30:00Z", "author": "captain", "labels": [], "requested": false, "my_review": null, "pane": "mine" },
+      { "num": "10", "repo": "acme/api", "task": "-", "url": "https://github.com/acme/api/pull/10", "title": "Old spike", "base": "main", "review": "none", "mergeable": "UNKNOWN", "checks": "none", "created_at": "2026-09-16T04:00:00Z", "draft": false, "state": "CLOSED", "merged_at": null, "closed_at": "2026-09-16T10:00:00Z", "author": "captain", "labels": [], "requested": false, "my_review": null, "pane": "mine" },
+      { "num": "8", "repo": "acme/api", "task": "-", "url": "https://github.com/acme/api/pull/8", "title": "Retry on 429", "base": "main", "review": "CHANGES_REQUESTED", "mergeable": "CONFLICTING", "checks": "failing", "created_at": "2026-09-16T10:00:00Z", "draft": false, "state": "OPEN", "merged_at": null, "closed_at": null, "author": "teammate", "labels": [], "requested": true, "my_review": null, "pane": "toreview" }
+    ],
+    "toreview": { "scope": ["acme/widgets", "acme/api"] }
+  },
+  "mtimes": {
+    "/fixture/firstmate/state/ship-alpha.status": 1789559700,
+    "/fixture/firstmate/state/ship-gamma.status": 1789559940
+  }
+}

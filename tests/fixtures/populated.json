@@ -1,8 +1,8 @@
 {
-  "_comment": "Every pane populated. Synthetic homes under /fixture; now is 2026-09-16T12:00:00Z = epoch 1789560000. Ages: ship-alpha 5m, scout-beta 2h, ship-gamma 1m, ship-old 2d, child-one 3d, child-failed 1h, scout-beta report 10m, old-scout report 10d. The hyperion secondmate record relays one keyed decision (etl-window) and mentions a PR it did not raise (etl pull/12); ship-old is a done task whose backlog row is done (PR 30 merged); the --prs list carries that PR as MERGED. PR ages: candidate 41 was opened 3h before now (created_at), candidate 8 carries no creation time and no task, and recorded PR 7 is not in the live list, so Ready for review shows 3h, - and 1m~ (ship-gamma's status-log age, marked as the fallback). The refresh block stands in for the app's schedule: the title line reads `next refresh in 18s`; the tests derive the refreshing and failed variants from this file.",
+  "_comment": "Every pane populated. Synthetic homes under /fixture; now is 2026-09-16T12:00:00Z = epoch 1789560000. Ages: ship-alpha 5m, scout-beta 2h, ship-gamma 1m, ship-old 2d, child-one 3d, child-failed 1h, scout-beta report 10m, old-scout report 10d. The hyperion secondmate record relays one keyed decision (etl-window) and mentions a PR it did not raise (etl pull/12); ship-old is a done task whose backlog row is done (PR 30 merged); the --prs list carries that PR as MERGED. PR ages: candidate 41 was opened 3h before now (created_at), candidate 8 carries no creation time and no task, and recorded PR 7 is not in the live list, so My PRs shows 3h, - and 1m~ (ship-gamma's status-log age, marked as the fallback); no candidate carries pane toreview, so To review is empty. 44 rows: the sixth pane's three lines go below Landed and the first five panes keep the lines they had at 40. The refresh block stands in for the app's schedule: the title line reads `next refresh in 18s`; the tests derive the refreshing and failed variants from this file.",
   "now": "2026-09-16T12:00:00Z",
   "cols": 160,
-  "rows": 40,
+  "rows": 44,
   "fm_home": "/fixture/firstmate",
   "refresh": { "next_in": 18 },
   "snapshot": {

@@ -18,6 +18,12 @@
 //   install   from lib/upgrade.mjs readInstall(): { root, version, kind,
 //             record | null, checkout, git, launcher, repo, error }
 //   flags     read-only { label, value } lines (settingsFlags)
+//   identity  { login, source, reason } (lib/identity.mjs), the login the two
+//             PR panes are built around; the app updates it when it resolves
+//   config    { path, problem, status, error, review } (lib/config.mjs
+//             loadOrCreateConfig plus the config's review block): where the
+//             config file is and whether it was created, loaded or replaced
+//             by the defaults; settingsInfo() turns both into read-only lines
 //   releases  { state: idle | fetching | ready | error, fetchedAt, latest |
 //             null, latestError, betas[], error, idleReason }
 //   menu      'main' | 'betas'      cursor  index into the selectable entries
@@ -33,6 +39,7 @@
 // confirmation is pending cancels it. Only `y` on the keyboard confirms.
 
 import { hitTest } from './layout.mjs';
+import { describeIdentity, identityKnown } from './identity.mjs';
 
 export const DEFAULT_REPO = 'zachsibert/firstmate-tui';
 
@@ -99,10 +106,47 @@ export function settingsFlags(opts) {
   ];
 }
 
-export function initialSettings({ install, flags, idleReason = null }) {
+// The read-only block after the flags: who the PR panes are built around,
+// where the config file is and what it says about To review. Pure entries,
+// no actions. `bad` marks the two warnings (unknown identity, a config file
+// replaced by the defaults); a line with an empty label continues the one
+// above it (the per-repository label rules).
+export function settingsInfo(s) {
+  const identity = s.identity || { login: null, source: 'unknown', reason: null };
+  const config = s.config || { path: null, status: 'none', error: null, review: null };
+  const lines = [];
+  lines.push({ label: 'Identity', value: describeIdentity(identity, config.path), bad: !identityKnown(identity) });
+  if (!identityKnown(identity) && identity.reason) lines.push({ label: '', value: `  tried: ${identity.reason}`, bad: false });
+  // The path, then what became of it: nothing when the file was read, the
+  // example note when it was just written, the reason when the defaults are
+  // in effect instead. With no path at all the reason stands alone.
+  let where;
+  if (!config.path) where = `none: using defaults (${config.error || config.problem || 'no config directory: set XDG_CONFIG_HOME or HOME'})`;
+  else if (config.status === 'created') where = `${config.path}  (created from the example)`;
+  else if (config.status === 'defaults') where = `${config.path}  (using defaults: ${config.error || config.problem || 'unreadable'})`;
+  else where = config.path;
+  lines.push({ label: 'Config', value: where, bad: config.status === 'defaults' });
+  const review = config.review || { default_labels: [], repos: {} };
+  const defaults = Array.isArray(review.default_labels) && review.default_labels.length ? review.default_labels.join(', ') : 'none';
+  lines.push({ label: 'Review labels', value: `default: ${defaults}`, bad: false });
+  for (const [repo, entry] of Object.entries(review.repos || {})) {
+    const labels = entry && Array.isArray(entry.labels) && entry.labels.length ? entry.labels.join(', ') : 'unfiltered';
+    lines.push({ label: '', value: `  ${repo}: ${labels}`, bad: false });
+  }
+  return lines;
+}
+
+// The Settings page's config block from what loadOrCreateConfig returned.
+export function settingsConfig(cfg) {
+  return { path: cfg.path, problem: cfg.problem, status: cfg.status, error: cfg.error, review: cfg.config.review };
+}
+
+export function initialSettings({ install, flags, idleReason = null, identity = null, config = null }) {
   return {
     install,
     flags,
+    identity,
+    config,
     releases: { state: 'idle', fetchedAt: null, latest: null, latestError: null, betas: [], error: null, idleReason },
     menu: 'main',
     cursor: 0,
