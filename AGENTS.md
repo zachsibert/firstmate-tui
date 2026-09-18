@@ -35,7 +35,11 @@ the findings watermark belong to later milestones.
   the ledger carries no per-child parent field (the comment above
   `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it
   before changing the grouping.
-- `FM_HOME` is explicit, never inferred from the current directory.
+- `FM_HOME` is explicit, never inferred from the current directory. The
+  launcher's FM_HOME error may name a home it finds above the working
+  directory as the command to run, but it never adopts one (`die_no_home`
+  in `bin/fm-board.sh`); the plugin `fm-home` file is the one automatic
+  fallback.
 - yimbot (github.com/YiminArava4508/yimbot) ships no license: it is a pattern
   reference only. Do not copy code from it.
 
