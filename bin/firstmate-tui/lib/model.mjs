@@ -40,6 +40,13 @@
 //                 succeeds, and loadingFrame the spinner's frame counter (the
 //                 app's 10 Hz tick count, a fixture's refresh.loading_frame;
 //                 never wall-clock, so a one-shot frame is deterministic)
+//   cached        null, or { at, snapshot, prs: { mine, toreview } } while
+//                 some of the facts above come from the state cache
+//                 (lib/cache.mjs) and their live source has not landed in this
+//                 session: at is when the cached data landed (epoch seconds),
+//                 snapshot marks the four fleet panes and prs.mine /
+//                 prs.toreview each PR pane; the app clears each flag as its
+//                 source lands live (lib/app.mjs)
 //   mtime(path)   epoch seconds of a file's last write, or null
 //   statusVerbs(path)  the verbs of a task's status log in file order
 //                 (['working', 'done', 'working']), or null when it cannot be
@@ -53,9 +60,12 @@
 //   showHidden    list hidden rows anyway, marked "(hidden)" (the `H` toggle)
 //   hiddenPanes   Set of pane ids switched off with `1`-`6`
 //
-// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading } x6 ], meta },
+// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading, cached } x6 ], meta },
 // where header is `Title (count[, n hidden])` plus ` (stale)` when that pane's
-// own data failed to refresh, loading is null or { source, text } while the
+// own data failed to refresh and ` (cached 12m ago)` while its rows come from
+// the state cache (paneCached below; cached is null or { ageSeconds, label }
+// so the host can name the age when a cached row is opened), loading is null
+// or { source, text } while the
 // pane still waits for its first data (paneLoading below; text is the spinner
 // line the renderer draws), and meta carries the title line's refresh label
 // ({ text, failed }) and herdr warning ('' while the link is up).
@@ -1368,9 +1378,25 @@ function paneStale(facts, pane) {
   return Boolean(facts.snapshotError);
 }
 
-function paneHeader(facts, pane, count, hiddenCount, showHidden) {
+// The cached marker of a pane, or null: its rows come from the state cache
+// (lib/cache.mjs, facts.cached) and the live source has not landed in this
+// session. The four fleet panes read the snapshot flag, each PR pane its own,
+// so a landed snapshot clears four markers while the PR panes keep theirs
+// until the fetch lands. The age counts from when the cached data landed, in
+// the AGE column's shape (fmtAge), and moves with the clock. A pane can be
+// cached and stale at once: the launch refresh failed and the rows on screen
+// are still the cached ones.
+function paneCached(facts, pane, cached) {
+  if (!cached) return null;
+  const flag = PR_PANE_IDS.has(pane.id) ? Boolean(cached.prs && cached.prs[pane.id]) : Boolean(cached.snapshot);
+  if (!flag) return null;
+  const ageSeconds = Math.max(0, facts.now - (Number(cached.at) || facts.now));
+  return { ageSeconds, label: `cached ${fmtAge(ageSeconds)} ago` };
+}
+
+function paneHeader(facts, pane, count, hiddenCount, showHidden, cached) {
   const hiddenNote = hiddenCount > 0 ? `, ${hiddenCount} hidden${showHidden ? ' shown' : ''}` : '';
-  return `${pane.title} (${count}${hiddenNote})${paneStale(facts, pane) ? ' (stale)' : ''}`;
+  return `${pane.title} (${count}${hiddenNote})${paneStale(facts, pane) ? ' (stale)' : ''}${cached ? ` (${cached.label})` : ''}`;
 }
 
 // ------------------------------------------------------------------ Loading
@@ -1457,6 +1483,7 @@ export function buildModel(facts, options = {}) {
     herdr: facts.herdr || { state: 'off', agents: {} },
     prs: facts.prs || { enabled: false },
     refresh: facts.refresh || null,
+    cached: facts.cached && typeof facts.cached === 'object' ? facts.cached : null,
     mtime: typeof facts.mtime === 'function' ? facts.mtime : () => null,
     statusVerbs: typeof facts.statusVerbs === 'function' ? facts.statusVerbs : () => null,
   };
@@ -1464,7 +1491,8 @@ export function buildModel(facts, options = {}) {
   const panes = PANES.map((p, i) => {
     const { rows, hiddenCount } = applyHidden(p.id, builders[p.id](f, opts), opts);
     const empty = PR_PANE_IDS.has(p.id) ? prPaneEmpty(f, p) : p.empty;
-    return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden), loading: paneLoading(f, p) };
+    const cached = paneCached(f, p, f.cached);
+    return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden, cached), loading: paneLoading(f, p), cached };
   });
   const homes = 1 + f.ledgers.length;
   return {

@@ -9,9 +9,8 @@ The board is read-only.
 It never writes into firstmate's files, never answers a question on your behalf and never merges anything.
 Its only actions are jumping to an agent's pane, opening a pull request in your browser and showing a report in the terminal.
 
-![The board filling a dark terminal: bordered panes stacked top to bottom, each titled with its number key and a row count, with columns such as state, id, what, repo, home and age, and the key hints on the bottom line.](docs/fm-board.png)
+![A dark terminal filled by the board. The top line names the tool, the fleet directory and 4 homes, with the word refreshing at the right edge where the seconds to the next refresh normally count down. Below it six bordered panes stack top to bottom, each titled with its number key and a count: 1 Needs you (4) lists two items waiting on a decision and two on hold, with state, key, id, what, repo, home and age columns; 2 My PRs (4, 9 hidden) lists four pull requests with their checks, status, id, title, base branch and age, one of them failing in red; 3 Teammates' PRs (3) lists three pull requests awaiting review with an author column; 4 In flight (10) groups running agents by home with their state and live pane count, the selected row highlighted and a plus 3 more note at its foot; 5 Findings (21) lists reports by kind and path with plus 14 more; 6 Landed (16, 24 hidden) lists merged work by date with plus 9 more. The bottom line lists the keys: j/k move, tab pane, enter open/focus/view, l/h expand, x hide, H hidden, 1-6 panes, r refresh, . settings, ? help, q quit.](docs/fm-board.png)
 
-The screenshot is from an earlier release with five panes and one pull request pane.
 The current board has the six panes listed under [Using the board](#using-the-board).
 
 ## Prerequisites
@@ -163,6 +162,7 @@ firstmate-tui
 
 The launcher checks the home, Node and herdr, then the board fills the terminal with six bordered panes.
 Each pane's body starts with a spinner line naming what it waits on (the fleet snapshot, then for the two pull request panes your GitHub identity, then the GitHub checks or the GitHub review requests) until that data first lands, about five seconds for the snapshot and a few more for GitHub.
+From the second launch on, the board draws what it showed last time at once, each pane title marked `(cached 12m ago)` until that pane's live data lands, and puts the cursor back on the row you were on; [state-cache.json](#state-cachejson) explains both.
 The first launch also writes the board's config file from the shipped example, so you have a real file to edit; [Configuration](#configuration) says where it lives and what is in it.
 Press `?` inside the board for the keys, `.` for the Settings page and `q` to quit.
 
@@ -233,7 +233,7 @@ The six panes, top to bottom; each pane's key is its number:
 5. **Findings**: the reports the agents wrote, newest first, from every home.
 6. **Landed**: finished work, newest first: merged pull requests and done tasks, with the pull request URL, report path or pane id in WHAT.
 
-The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing…` while one runs, and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
+The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing...` while one runs, and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
 Each pane title carries its key and its row count, as in `[1] Needs you (3)`.
 In the HERDR column, `pane lost` in red means herdr no longer has that agent's pane, and `unknown` in grey means herdr is disconnected so the board cannot tell.
 The bottom line lists the keys, and `?` shows them all.
@@ -284,7 +284,9 @@ Flags go after `open` or directly after `firstmate-tui`.
 | `--no-herdr` | run without herdr: no live pane state and no herdr calls |
 | `--no-mouse` | ignore the mouse and leave the terminal's own text selection alone |
 | `--all-homes-needs` | Needs you also lists every delegate home's open decisions; by default those flag the home's In flight group instead |
-| `--config <path>`, `--view-state <path>` | where the board's two files live ([Configuration](#configuration)); a path inside `FM_HOME` is refused |
+| `--config <path>`, `--view-state <path>`, `--cache <path>` | where the board's three files live ([Configuration](#configuration)); a path inside `FM_HOME` is refused |
+| `--cache-max-age <seconds>` | ignore a state cache whose data is older than this and start with the spinners instead, default 3600 |
+| `--no-cache` | never read the state cache, so every launch starts with the spinners; the file is still written for the next launch |
 | `--opener-cmd <argv>` | the command that opens a URL, default `open` on macOS and `xdg-open` on Linux; the URL is appended as one argument |
 | `--viewer-cmd <argv>` | the command that shows a Findings report, default `glow -p`, else `$EDITOR`, else `vim`, else `less`; the path is appended |
 | `--snapshot-timeout <seconds>` | kill a snapshot run after this long, default 60 |
@@ -293,9 +295,9 @@ Flags go after `open` or directly after `firstmate-tui`.
 
 ## Configuration
 
-The board owns two files and writes nowhere else: never into a firstmate home, a project or a `state/` directory.
-Both live in the same directory: the one `herdr plugin config-dir firstmate.board` prints when herdr answers, else `$XDG_CONFIG_HOME/fm-board/`, else `~/.config/fm-board/`.
-`--config` and `--view-state` override the two paths one at a time.
+The board owns three files and writes nowhere else: never into a firstmate home, a project or a `state/` directory.
+All three live in the same directory: the one `herdr plugin config-dir firstmate.board` prints when herdr answers, else `$XDG_CONFIG_HOME/fm-board/`, else `~/.config/fm-board/`.
+`--config`, `--view-state` and `--cache` override the three paths one at a time.
 
 ### config.json
 
@@ -337,6 +339,21 @@ The Settings page (`.`) shows the identity and where it came from, such as `Iden
 The view state remembers what you hid and how you sized the columns: hidden rows (by pane, home and id, plus the completion date for Landed, so an item that lands again reappears), hidden panes, and every column width you dragged.
 firstmate retires done rows on its own, so hiding a row is the board's business and never a firstmate write.
 `=` resets every column width, and the Settings page has a `Reset column widths` entry that does the same.
+Since 0.5.0 the file also remembers where you were: the focused pane, the selected row, the expanded In flight groups and each pane's scroll offset.
+The board saves them whenever it saves the file anyway, about 1.5 seconds after your last key or click, and when you quit.
+At the next launch the cursor goes back to that row as soon as its pane has data; a row that is gone gives way to the row at the same position, and a board that quit before any data landed keeps the file's selection rather than recording an empty one.
+
+### state-cache.json
+
+The state cache holds the last data the board drew that came from outside: the fleet snapshot, the delegate homes' ledgers, the pull request data with the GitHub login it was fetched for, and the herdr pane states.
+The board writes it after every refresh that landed cleanly and again when you quit, and stamps it with the time the data landed; a refresh that failed never overwrites it.
+At the next launch, when the file is younger than `--cache-max-age` seconds (default 3600, one hour), the panes draw it at once and every pane title carries `(cached 12m ago)`, the age in the AGE column's shape.
+The title line reads the refreshing label and the launch refresh starts immediately, exactly as it would without a cache; nothing is skipped or delayed.
+As each source lands live its panes drop the marker: the fleet snapshot clears Needs you, In flight, Findings and Landed, and each pull request pane clears its own when its GitHub fetch answers.
+A pane whose live fetch failed keeps its cached rows, its marker and the `(stale)` word.
+Every cached row works as usual, and `enter` on a pull request row whose pane still shows cached data opens the pull request and says `opening PR from data cached 12m ago` in the footer, so you know what you are acting on; there is no prompt.
+With no cache, a cache older than the limit or `--no-cache`, the first frame is the spinner-per-pane start described in [First run](#first-run); `--no-cache` skips the read only, and the file is still written.
+A cache that fails to parse, names another schema or was written for another firstmate home is ignored with a footer notice and replaced by the next clean refresh.
 
 ### The pane record
 
@@ -359,6 +376,11 @@ Cause: the board could not learn your GitHub login: the config file's `identity.
 Fix: either write your login into the config file's `identity.github_login`, or run `gh auth login` once.
 Then press `r`; while the identity is unknown a refresh asks again, so no restart is needed.
 Check: the Settings page's Identity line reads your login followed by `(from config)` or `(from gh api user)`.
+
+**The footer reads `state cache ignored: <path>: <reason>` once, and the panes start with spinners.**
+Symptom: right after launch the footer names the state cache file with `bad JSON`, `not an object`, `unexpected schema` or `written for another home`, and the board starts as if it had no cache.
+Cause: the file at that path is damaged, was written by another version of the board, or belongs to a board that runs against a different `FM_HOME`; the board never draws data it cannot trust.
+Fix: nothing, unless the notice repeats on every launch: the next refresh that lands cleanly writes a fresh cache over the file, and `--no-cache` skips the read for good if you want a spinner start every time.
 
 **The title line reads `herdr disconnected (<reason>)` in red.**
 Symptom: the title line carries that warning, and the HERDR column in In flight reads `unknown` in grey instead of a live pane count.
