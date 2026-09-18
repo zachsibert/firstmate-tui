@@ -5,20 +5,24 @@
 // shares them; this module supplies the I/O: herdr focus, the browser opener,
 // the report viewer, snapshots and the view-state file. The terminal is reached only through the adapter's screen contract.
 //
-// Cadence: every --refresh seconds (default 30) one tick runs the fleet
-// snapshot and then, unless --no-prs, the live GitHub PR fetch (one gh pr list
-// per candidate repository named by that snapshot, all at once; the firstmate
-// script when gh is not on PATH), applied in one frame update, so nothing on
-// screen is older than the cadence plus the two steps. A herdr event touching a known task pane
-// brings a tick forward, debounced to one start per 10 s. Never two refreshes
-// at once: a tick or an event that lands while one is still running is
-// skipped, not queued, and the pane titles keep showing the age of the data
-// they have; r during a refresh queues exactly one follow-up so the key press
-// is honored. A failed PR fetch keeps the previous PR data and its age and is
-// named in the footer once, as is a fetch note (the script fallback, a
-// repository that did not answer). Herdr pushes redraw the frame immediately because
-// the agents map is already updated. With --no-prs, r says why the PR pane did
-// not change.
+// Cadence: one refresh runs the fleet snapshot and then, unless --no-prs, the
+// live GitHub PR fetch (one gh pr list per candidate repository named by that
+// snapshot, all at once; the firstmate script when gh is not on PATH), applied
+// in one frame update. The next refresh is due --refresh seconds (default 30)
+// after the last one started: a single timer, armed when a refresh completes
+// (armRefreshTimer), and the title line counts down to it once a second. A
+// herdr event touching a known task pane brings a refresh forward, debounced
+// to one start per 10 s, and r starts one at once; both reset the countdown.
+// Never two refreshes at once: a tick or an event that lands while one is
+// still running is skipped, not queued, and the panes keep the data they
+// have; r during a refresh queues exactly one follow-up so the key press is
+// honored. A failed snapshot or PR fetch keeps the previous data, marks that
+// pane's title (stale), turns the title line's label into `refresh failed Ns
+// ago, retrying in Ns` until a later refresh is clean, and is named in the
+// footer once, as is a fetch note (the script fallback, a repository that did
+// not answer). Herdr pushes redraw the frame immediately because the agents
+// map is already updated. With --no-prs, r says why the PR pane did not
+// change.
 //
 // --headless runs this schedule with no terminal (tests/fm-board.test.sh does,
 // against a stand-in home, and stops it with a signal): nothing is drawn, no
@@ -50,7 +54,7 @@ import { defaultInstallRoot, readInstall, runUpgrade } from './upgrade.mjs';
 export { moveSelection } from './controller.mjs';
 
 const SNAPSHOT_DEBOUNCE_MS = 10000;
-const CLOCK_TICK_MS = 5000;
+const CLOCK_TICK_MS = 1000; // the title line's countdown moves once a second
 
 // The screen contract of lib/tui-blessed.mjs with no terminal behind it.
 function headlessScreen(opts) {
@@ -101,13 +105,15 @@ export async function runApp(opts) {
       lastClick: null,
       notice: '',
       noticeBad: false,
-      stale: false,
       page: 'board',
       settings: initialSettings({ install: readInstall(opts.installRoot || defaultInstallRoot()), flags: settingsFlags(opts) }),
     },
     refreshing: false,
     refreshPending: false,
     lastSnapshotStart: 0,
+    refreshTimer: null, // the one timer to the next refresh (armRefreshTimer)
+    nextRefreshAt: null, // epoch ms that timer is due, for the title line's countdown
+    lastFailure: null, // { at: epoch seconds, text } of the last failed refresh, until one succeeds
     debounceTimer: null,
     noticeTimer: null,
     viewing: false,
@@ -124,8 +130,14 @@ export async function runApp(opts) {
     snapshotAt: state.snapshotAt,
     snapshotError: state.snapshotError,
     ledgers: state.ledgers,
-    herdr: herdr ? { state: herdr.state, detail: herdr.detail, agents: herdr.agents } : { state: 'off', agents: {} },
+    herdr: herdr ? { state: herdr.state, detail: herdr.detail, agents: herdr.agents } : { state: 'off', detail: '--no-herdr', agents: {} },
     prs: state.prs,
+    refresh: {
+      nextAt: state.nextRefreshAt === null ? null : Math.floor(state.nextRefreshAt / 1000),
+      refreshing: state.refreshing,
+      failedAt: state.lastFailure ? state.lastFailure.at : null,
+      failed: state.lastFailure ? state.lastFailure.text : null,
+    },
     mtime,
   });
 
@@ -146,7 +158,6 @@ export async function runApp(opts) {
     const v = moveSelection(state.model, state.view, null); // clamp only
     state.view.pane = v.pane;
     state.view.row = v.row;
-    state.view.stale = Boolean(state.snapshotError);
     const frame = renderFrame(state.model, screen.size(), state.view);
     state.view.scroll = frame.scroll;
     state.view.frame = { cols: frame.cols, rows: frame.rows, zones: frame.zones };
@@ -176,10 +187,29 @@ export async function runApp(opts) {
     if (err) notice(`view state not saved: ${err}`, true, 15000);
   };
 
+  // The one timer to the next refresh, armed when a refresh completes for that
+  // refresh's start plus --refresh: the title line counts down to exactly this
+  // moment. A refresh that took longer than the cadence leaves it already due,
+  // so the next one starts at once; nothing is queued and nothing doubles.
+  // A manual r or a herdr event starts a refresh of its own, which clears the
+  // pending timer and re-arms it on completion: that is what resets the
+  // countdown. Headless, this timer is what keeps the process alive.
+  const armRefreshTimer = () => {
+    if (state.refreshTimer) clearTimeout(state.refreshTimer);
+    state.nextRefreshAt = state.lastSnapshotStart + opts.refresh * 1000;
+    state.refreshTimer = setTimeout(() => {
+      state.refreshTimer = null;
+      refresh('timer');
+    }, Math.max(0, state.nextRefreshAt - Date.now()));
+    if (!opts.headless) state.refreshTimer.unref?.();
+  };
+
   // One refresh: the snapshot, then the PR fetch against the repositories that
   // snapshot names, landing in one frame update. While one is running, a timer
   // tick or a herdr event is skipped (the next one catches up) and only a key
-  // press queues a follow-up.
+  // press queues a follow-up. The title line reads `refreshing…` meanwhile,
+  // then either the countdown or, when the snapshot or the fetch failed,
+  // `refresh failed Ns ago, retrying in Ns` until a later refresh is clean.
   const refresh = async (why) => {
     const manual = why === 'manual';
     if (state.refreshing) {
@@ -188,6 +218,11 @@ export async function runApp(opts) {
     }
     state.refreshing = true;
     state.lastSnapshotStart = Date.now();
+    if (state.refreshTimer) {
+      clearTimeout(state.refreshTimer);
+      state.refreshTimer = null;
+    }
+    state.nextRefreshAt = state.lastSnapshotStart + opts.refresh * 1000;
     notice(`refreshing (${why})…`, false, 60000);
     const timeoutMs = opts.snapshotTimeout * 1000;
     const snap = await runSnapshot(state.fmHome, { timeoutMs });
@@ -213,6 +248,9 @@ export async function runApp(opts) {
     }
     if (herdr) herdr.setPanes(knownPaneIds(state.snapshot, state.ledgers));
     state.refreshing = false;
+    const failure = state.snapshotError ? `snapshot: ${state.snapshotError}` : state.prs.error ? `PR fetch: ${state.prs.error}` : null;
+    state.lastFailure = failure ? { at: Math.floor(Date.now() / 1000), text: failure } : null;
+    armRefreshTimer();
     if (state.snapshotError) notice(`snapshot: ${state.snapshotError}`, true, 30000);
     else {
       const errs = state.ledgers.filter((l) => l.error && !l.cached).map((l) => `${l.id}: ${l.error}`);
@@ -406,16 +444,20 @@ export async function runApp(opts) {
       if (ev.paneId && herdr.panes.has(ev.paneId)) scheduleRefresh(`herdr ${ev.type}`);
       draw();
     });
+    // The client starts out "off", which the title line would read as
+    // --no-herdr; until the subscription is up it warns "herdr disconnected
+    // (connecting)" instead, and the warning goes as soon as it is acked.
+    herdr.setState('connecting');
     herdr.bootstrap().then(() => {
       draw();
       herdr.connect();
     });
   }
-  // The cadence counts from launch, so a slow first refresh only makes the
-  // ticks it overlaps skip. The screen's input stream keeps the process alive;
-  // headless, the refresh timer does.
-  const interval = setInterval(() => refresh('timer'), opts.refresh * 1000);
-  if (!opts.headless) interval.unref?.();
+  // The first refresh starts now and each completed refresh arms the timer
+  // for the next (armRefreshTimer), so the cadence counts from each start.
+  // The clock redraws once a second so the countdown moves; the render is
+  // pure and cheap, and headless it draws nothing. The screen's input stream
+  // keeps the process alive; headless, the refresh timer does.
   const clock = setInterval(() => draw(), CLOCK_TICK_MS);
   clock.unref?.();
   refresh('start');

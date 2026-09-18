@@ -16,6 +16,10 @@
 //                 is {num, repo, task, url, review, mergeable, checks} plus
 //                 created_at (ISO 8601, from gh's createdAt; absent from the
 //                 fm-bearings-snapshot.sh fallback)
+//   refresh       the schedule for the title line, or null when nothing is
+//                 scheduled (a one-shot render): { nextAt, refreshing,
+//                 failedAt, failed }, the times in epoch seconds and `failed`
+//                 the last failure's text, kept until a later refresh succeeds
 //   mtime(path)   epoch seconds of a file's last write, or null
 //
 // Options (second argument of buildModel):
@@ -26,7 +30,10 @@
 //   showHidden    list hidden rows anyway, marked "(hidden)" (the `H` toggle)
 //   hiddenPanes   Set of pane ids switched off with `1`-`5`
 //
-// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount } x5 ], meta }.
+// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount } x5 ], meta },
+// where header is `Title (count[, n hidden])` plus ` (stale)` when that pane's
+// own data failed to refresh, and meta carries the title line's refresh label
+// ({ text, failed }) and herdr warning ('' while the link is up).
 // Every row carries tag, extra, id, text, repo, home, age (display fields) plus
 // name (the undecorated id for notices), homeId (main or the secondmate id),
 // hideKey (pane:home:name, plus the completion date for Landed), ageSeconds
@@ -807,46 +814,49 @@ function landedRows(facts) {
 }
 
 // ------------------------------------------------------------------- Header
-export function herdrLabel(herdr) {
-  if (!herdr) return 'herdr off';
-  switch (herdr.state) {
-    case 'connected':
-      return 'herdr connected';
-    case 'connecting':
-      return 'herdr connecting';
-    case 'disconnected':
-      return `herdr disconnected${herdr.detail ? ` (${herdr.detail})` : ''}`;
-    case 'unavailable':
-      return `herdr unavailable${herdr.detail ? ` (${herdr.detail})` : ''}`;
-    case 'fixture':
-      return 'herdr fixture';
-    case 'off':
-    default:
-      return 'herdr off';
+// The title line's herdr text: nothing while the subscription is up (or a
+// fixture block stands in for it, which the HERDR column also reads as
+// connected), otherwise `herdr disconnected (<reason>)` whatever brought the
+// link down: never connected (connecting), dropped (the socket error), the
+// board started with --no-herdr, herdr not on PATH or its socket unknown
+// (the client's detail). The reason is left out when nothing recorded one.
+export function herdrWarning(herdr) {
+  const state = herdr ? herdr.state : 'off';
+  if (state === 'connected' || state === 'fixture') return '';
+  const detail = (herdr && herdr.detail) || (state === 'connecting' ? 'connecting' : '');
+  return detail ? `herdr disconnected (${detail})` : 'herdr disconnected';
+}
+
+// The title line's refresh label, from facts.refresh: { nextAt, refreshing,
+// failedAt, failed } in epoch seconds, or null when nothing is scheduled (a
+// one-shot render). `refreshing…` while one runs; after a failure, `refresh
+// failed 40s ago, retrying in 20s` until a later refresh succeeds, so stale
+// data stays visibly stale; otherwise `next refresh in 18s`, whole seconds
+// and never negative. Returns { text, failed } so the renderer can color a
+// failure; text is '' with no schedule.
+export function refreshLabel(facts) {
+  const r = facts.refresh;
+  if (!r) return { text: '', failed: false };
+  if (r.refreshing) return { text: 'refreshing…', failed: false };
+  const countdown = r.nextAt === null || r.nextAt === undefined ? null : `${Math.max(0, Math.floor(r.nextAt - facts.now))}s`;
+  if (r.failedAt !== null && r.failedAt !== undefined) {
+    const ago = fmtAge(facts.now - r.failedAt);
+    return { text: countdown === null ? `refresh failed ${ago} ago` : `refresh failed ${ago} ago, retrying in ${countdown}`, failed: true };
   }
+  return { text: countdown === null ? '' : `next refresh in ${countdown}`, failed: false };
 }
 
-export function snapshotLabel(facts) {
-  if (facts.snapshotError && facts.snapshotAt === null) return 'snapshot failed';
-  if (facts.snapshotAt === null || facts.snapshotAt === undefined) return 'snapshot pending';
-  const age = fmtAge(facts.now - facts.snapshotAt);
-  return facts.snapshotError ? `snapshot ${age} ago (stale)` : `snapshot ${age} ago`;
-}
-
-// The Ready for review title's PR-data state. Like snapshotLabel, a failed
-// fetch keeps the age of the data still on screen and marks it stale.
-function checksLabel(facts) {
-  const prs = facts.prs || { enabled: false };
-  if (!prs.enabled) return 'checks off';
-  if (prs.fetchedAt) return `checks ${fmtAge(facts.now - prs.fetchedAt)} ago${prs.error ? ' (stale)' : ''}`;
-  return prs.error ? 'checks failed' : 'checks fetching';
+// A pane is stale when its own data failed to refresh and the rows on screen
+// are the previous ones: Ready for review when the PR fetch failed, the other
+// four when the snapshot failed. The title line's refresh label says when.
+function paneStale(facts, pane) {
+  if (pane.id === 'review') return Boolean(facts.prs && facts.prs.enabled && facts.prs.error);
+  return Boolean(facts.snapshotError);
 }
 
 function paneHeader(facts, pane, count, hiddenCount, showHidden) {
   const hiddenNote = hiddenCount > 0 ? `, ${hiddenCount} hidden${showHidden ? ' shown' : ''}` : '';
-  const parts = [`${pane.title} (${count}${hiddenNote})`, snapshotLabel(facts), herdrLabel(facts.herdr)];
-  if (pane.id === 'review') parts.push(checksLabel(facts));
-  return parts.join(' · ');
+  return `${pane.title} (${count}${hiddenNote})${paneStale(facts, pane) ? ' (stale)' : ''}`;
 }
 
 function asSet(value) {
@@ -884,6 +894,7 @@ export function buildModel(facts, options = {}) {
     ledgers: Array.isArray(facts.ledgers) ? facts.ledgers : [],
     herdr: facts.herdr || { state: 'off', agents: {} },
     prs: facts.prs || { enabled: false },
+    refresh: facts.refresh || null,
     mtime: typeof facts.mtime === 'function' ? facts.mtime : () => null,
   };
   const builders = { needs: needsRows, review: reviewRows, inflight: inflightRows, findings: findingsRows, landed: landedRows };
@@ -897,9 +908,9 @@ export function buildModel(facts, options = {}) {
     meta: {
       fmHome: f.fmHome,
       homes,
-      snapshot: snapshotLabel(f),
+      refresh: refreshLabel(f),
       snapshotError: f.snapshotError,
-      herdr: herdrLabel(f.herdr),
+      herdrWarning: herdrWarning(f.herdr),
       hiddenPanes: panes.filter((p) => p.hidden).map((p) => p.key),
       hiddenRows: panes.reduce((n, p) => n + p.hiddenCount, 0),
       showHidden: opts.showHidden,

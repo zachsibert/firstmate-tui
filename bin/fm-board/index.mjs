@@ -38,13 +38,23 @@
 //     "herdr": { "state": "connected" | "disconnected" | ... (optional),
 //                "agents": [ { pane_id, agent_status, terminal_title_stripped } ] } | null,
 //     "prs": { "candidate_prs": [ { num, repo, task, url, review, mergeable,
-//                                   checks, created_at? } ] } | null,
+//                                   checks, created_at? } ], "error"? } | null,
+//     "snapshot_error": text (optional; marks the four snapshot panes stale),
+//     "refresh": { "next_in": seconds, "refreshing": bool, "failed_ago": seconds,
+//                  "failed": text } (optional; every field optional),
 //     "mtimes": { "<absolute path>": epoch seconds } }
+// The refresh block stands in for the app's schedule, which a one-shot render
+// has none of: {"next_in": 18} draws `next refresh in 18s` on the title line,
+// {"refreshing": true} draws `refreshing…`, and {"failed_ago": 40, "next_in":
+// 20, "failed": "PR fetch: exit 1"} draws `refresh failed 40s ago, retrying in
+// 20s` in red; without the block the title line carries no refresh label.
 // With --no-herdr the fixture's herdr block is still applied as an offline
-// overlay (header says "herdr fixture") so the join is testable without a
-// live server; a "state" in the block overrides that label (a "disconnected"
-// fixture shows the grey "unknown" HERDR cells); without a herdr block the
-// header says "herdr off".
+// overlay (state "fixture", which the title line treats as connected: no
+// herdr text) so the join is testable without a live server; a "state" in
+// the block overrides it, and a "detail" is the reason the title line's red
+// `herdr disconnected (<reason>)` warning names (a "disconnected" fixture also
+// shows the grey "unknown" HERDR cells). Without a herdr block the state is
+// "off", which under --no-herdr warns `herdr disconnected (--no-herdr)`.
 
 import { readFileSync } from 'node:fs';
 import { parseArgs, USAGE } from './lib/args.mjs';
@@ -99,14 +109,36 @@ function factsFromFixture(path, opts) {
     const state = typeof fx.herdr.state === 'string' && fx.herdr.state ? fx.herdr.state : opts.herdr ? 'connected' : 'fixture';
     herdr = { state, detail: fx.herdr.detail || '', agents };
   } else {
-    herdr = { state: 'off', detail: '', agents: {} };
+    herdr = { state: 'off', detail: opts.herdr ? '' : '--no-herdr', agents: {} };
   }
+  const refresh = refreshFromFixture(fx.refresh, now);
   const prs = opts.prs
     ? { enabled: true, fetchedAt: fx.prs && Array.isArray(fx.prs.candidate_prs) ? now - 30 : null, error: fx.prs && fx.prs.error ? fx.prs.error : null, candidate_prs: fx.prs && Array.isArray(fx.prs.candidate_prs) ? fx.prs.candidate_prs : [] }
     : { enabled: false };
   return {
-    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs, mtime: fixtureMtime },
+    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs, refresh, mtime: fixtureMtime },
     size: { cols: opts.cols || fx.cols || 120, rows: opts.rows || fx.rows || 40 },
+  };
+}
+
+// The fixture's refresh block -> the facts the title line reads (lib/model.mjs
+// refreshLabel), anchored on the fixture's clock; null without the block.
+function refreshFromFixture(block, now) {
+  if (!block || typeof block !== 'object') return null;
+  const seconds = (key) => {
+    if (block[key] === undefined || block[key] === null) return null;
+    const n = Number(block[key]);
+    if (!Number.isFinite(n)) fail(`fixture refresh.${key} is not a number: ${block[key]}`, 2);
+    return n;
+  };
+  const nextIn = seconds('next_in');
+  const failedAgo = seconds('failed_ago');
+  const failed = typeof block.failed === 'string' && block.failed ? block.failed : null;
+  return {
+    nextAt: nextIn === null ? null : now + nextIn,
+    refreshing: Boolean(block.refreshing),
+    failedAt: failedAgo !== null ? now - failedAgo : failed ? now : null,
+    failed,
   };
 }
 
@@ -122,14 +154,15 @@ async function factsLive(opts) {
   const r = opts.prs ? await fetchPrs(fmHome, snapshot, { timeoutMs }) : null;
   const ledgers = collectLedgers(snapshot, discoverHomes(fmHome, opts.homes));
   const prs = r ? { enabled: true, fetchedAt: r.error ? null : now(), error: r.error, candidate_prs: r.candidate_prs } : { enabled: false };
-  let herdr = { state: 'off', detail: '', agents: {} };
+  let herdr = { state: 'off', detail: '--no-herdr', agents: {} };
   if (opts.herdr) {
     const client = new HerdrClient({ cmd: opts.herdrCmd, socketPath: opts.herdrSocket });
     const ok = await client.bootstrap();
     herdr = ok ? { state: 'connected', detail: 'one-shot', agents: client.agents } : { state: 'unavailable', detail: client.detail, agents: {} };
   }
   return {
-    facts: { now: now(), fmHome, snapshot, snapshotAt: snapshot ? now() : null, snapshotError: snap.error, ledgers, herdr, prs, mtime },
+    // A one-shot render has no schedule, so the title line carries no refresh label.
+    facts: { now: now(), fmHome, snapshot, snapshotAt: snapshot ? now() : null, snapshotError: snap.error, ledgers, herdr, prs, refresh: null, mtime },
     size: { cols: opts.cols || process.stdout.columns || 120, rows: opts.rows || process.stdout.rows || 40 },
   };
 }
@@ -278,7 +311,7 @@ async function driveOnce(facts, opts, size) {
     }
     if (!opts.mouse) continue;
     for (const ev of input.events) {
-      const frame = renderFrame(model, size, { ...view, stale: Boolean(facts.snapshotError) });
+      const frame = renderFrame(model, size, view);
       view.scroll = frame.scroll;
       view.frame = { cols: frame.cols, rows: frame.rows, zones: frame.zones };
       handleMouse(ctx, { ...ev, time: n * 1000 });
@@ -324,7 +357,7 @@ async function main() {
   if (opts.renderOnce) {
     const { facts, size } = opts.fixture ? factsFromFixture(opts.fixture, opts) : await factsLive(opts);
     const { model, view } = await driveOnce(facts, opts, size);
-    const frame = renderFrame(model, size, { ...view, stale: Boolean(facts.snapshotError) });
+    const frame = renderFrame(model, size, view);
     process.stdout.write(opts.tags ? `${toTags(frame.lines)}\n` : `${toPlain(frame.lines).join('\n')}\n`);
     if (facts.snapshotError && !opts.fixture) {
       process.stderr.write(`firstmate-tui: snapshot failed: ${facts.snapshotError}\n`);

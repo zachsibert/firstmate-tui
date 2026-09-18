@@ -94,10 +94,14 @@ the findings watermark belong to later milestones.
   log that they ran, with `tests/fake-gh.sh` first on PATH as `gh` (see
   `render_live` in the test): every live render must put that fake first on
   PATH, because the board's own fetch otherwise calls the real GitHub CLI.
-  The refresh schedule (the snapshot, then the gh calls, per tick; a tick
-  that lands mid-refresh skipped) is tested by running the app with
-  `--headless` against a stand-in whose snapshot sleeps and stopping it with
-  a signal, so `--headless` must never load `neo-blessed`. The Settings page
+  The refresh schedule (the snapshot, then the gh calls; the next refresh
+  armed on completion for the last start plus `--refresh`, so a slow refresh
+  is followed at once and never doubled; a tick that lands mid-refresh
+  skipped) is tested by running the app with `--headless` against a stand-in
+  whose snapshot sleeps and stopping it with a signal, so `--headless` must
+  never load `neo-blessed`. The title line's countdown, `refreshing…` and
+  failure label render from a fixture `refresh` block (`index.mjs` documents
+  it) because a one-shot render has no schedule. The Settings page
   is tested with `--install-root` at a fake prefix whose `bin/fm-board.sh` is
   `tests/fake-upgrade.sh` and with `--curl-cmd bash tests/fake-curl.sh` over
   `tests/fixtures/releases/api`; a one-shot render without `--curl-cmd`
