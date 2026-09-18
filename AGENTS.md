@@ -18,14 +18,22 @@ the default prefix `~/.local/share/fm-board`, the pane-record and view-state
 directories named `fm-board` and the view-state schema keep the old word, so
 an upgrade moves nothing. Because an install upgrades by running the
 `bin/install.sh` that shipped in its own tarball, `bin/install.sh` still
-asks for the old asset name after the new one and accepts either layout
-(never a mix), so a 0.2.x release can be installed again; installs older
-than 0.2.5 reach 0.3.0 only through 0.2.5 (the last release under the old
-name, and the first installer that knows both), and `tests/install.test.sh`
-walks both chains with the real installers from the `v0.1.0` and `v0.2.5`
-tags. The herdr plugin id `firstmate.board` stays: linked plugins and the
-view-state directory are keyed by it; a plugin linked at the old
-`bin/fm-board` path is relinked once. The
+knows both asset names: it reads the release's asset list
+(`/releases/tags/<tag>`) and downloads `firstmate-tui-<tag>.tar.gz` when the
+release has it, else `fm-board-<tag>.tar.gz`; when that read fails it tries
+the two names in that order and moves on from the first on any curl
+failure, never on one exit status (GitHub's redirected 404 reached the
+0.2.5 installer as exit 56, not the 22 it waited for, so a 0.2.5 install's
+own `firstmate-tui upgrade` is not reliable and the README documents one
+reinstall through the current installer). It accepts either layout inside
+the tarball (never a mix), so a 0.2.x release can be installed again;
+installs older than 0.2.5 reach 0.3.0 only through 0.2.5 (the last release
+under the old name, and the first installer that knows both).
+`tests/install.test.sh` walks both chains with the real installers from the
+`v0.1.0` and `v0.2.5` tags and the exit-56 shape (`tests/fake-curl.sh`,
+`FAKE_CURL_FAIL`). The herdr plugin id `firstmate.board` stays: linked
+plugins and the view-state directory are keyed by it; a plugin linked at
+the old `bin/fm-board` path is relinked once. The
 scout report at `docs/scout-report-2026-09-16.md` is the design record: its
 section 1 table is the pane-to-data mapping that `bin/firstmate-tui/lib/model.mjs`
 implements row for row, and its section 7 table is the milestone plan. Check

@@ -20,8 +20,13 @@
 # v0.2.5 tag. Last it walks the upgrade chains with the installers from the
 # tags: a 0.2.5 install reinstalled through the current installer, a 0.2.5
 # install's own upgrade, and a 0.1.0 install reaching 0.2.5 by the old asset
-# name and nothing newer. Nothing reaches GitHub: no tag, no release, no
-# download. Each check's comment names what would make it fail.
+# name and nothing newer. The installer reads the release's asset list first
+# (/releases/tags/<tag>, api/tags/<tag>.json in a mirror) and tries both
+# names only when that read fails, moving past any curl failure on the
+# first; the 0.2.5 installer's stop on the exit-56 answer GitHub gives for a
+# missing asset is reproduced through tests/fake-curl.sh's FAKE_CURL_FAIL.
+# Nothing reaches GitHub: no tag, no release, no download. Each check's
+# comment names what would make it fail.
 #
 # Needs node and npm (scripts/package.sh runs `npm ci --omit=dev` to vendor
 # neo-blessed), plus tar and shasum or sha256sum, which the installer needs
@@ -397,11 +402,31 @@ done
 # URL to $CURL_LOG, so the real --stable, --pre and --version paths in
 # install.sh run and nothing reaches the network.
 MIRROR="$SCRATCH/mirror"
-mkdir -p "$MIRROR/api" "$MIRROR/download/$TAG" "$MIRROR/download/$BETA_TAG"
+mkdir -p "$MIRROR/api/tags" "$MIRROR/download/$TAG" "$MIRROR/download/$BETA_TAG"
 cp "$TARBALL" "$CHECKSUM" "$MIRROR/download/$TAG/"
 cp "$BETA_TARBALL" "$BETA_CHECKSUM" "$MIRROR/download/$BETA_TAG/"
 printf '{\n  "tag_name": "%s",\n  "prerelease": false\n}\n' "$TAG" > "$MIRROR/api/latest.json"
 printf '[\n  {\n    "tag_name": "%s",\n    "prerelease": true\n  }\n]\n' "$BETA_TAG" > "$MIRROR/api/newest.json"
+# The two asset names (AGENTS.md): the current one, and the one every release
+# carried up to 0.2.x, which the installer still falls back to.
+NEW_ASSET="firstmate-tui-$TAG.tar.gz"
+OLD_ASSET="fm-board-$TAG.tar.gz"
+# release_json <tag> [asset...]: a release as GET /releases/tags/<tag> returns
+# it, with the fields the installer reads (each asset's browser_download_url,
+# whose last segment is the asset's name) and the release's own "name", which
+# a grep for "name" would mistake for an asset.
+release_json() {
+  local tag=$1 sep='' a
+  shift
+  printf '{\n  "tag_name": "%s",\n  "name": "firstmate-tui %s",\n  "prerelease": false,\n  "assets": [' "$tag" "$tag"
+  for a in "$@"; do
+    printf '%s\n    {\n      "name": "%s",\n      "browser_download_url": "https://github.com/zachsibert/firstmate-tui/releases/download/%s/%s"\n    }' "$sep" "$a" "$tag" "$a"
+    sep=','
+  done
+  printf '\n  ]\n}\n'
+}
+release_json "$TAG" "$NEW_ASSET" "$NEW_ASSET.sha256" > "$MIRROR/api/tags/$TAG.json"
+release_json "$BETA_TAG" "firstmate-tui-$BETA_TAG.tar.gz" "firstmate-tui-$BETA_TAG.tar.gz.sha256" > "$MIRROR/api/tags/$BETA_TAG.json"
 FAKEBIN="$SCRATCH/fakebin"
 mkdir -p "$FAKEBIN"
 cp "$ROOT/tests/fake-curl.sh" "$FAKEBIN/curl"
@@ -409,12 +434,13 @@ chmod +x "$FAKEBIN/curl"
 CURL_LOG="$SCRATCH/curl.log"
 # offline_from <mirror root> <command...>: run with the fake curl first on
 # PATH, serving <mirror root>, and a fresh URL log; offline <command...> is
-# the same against $MIRROR.
+# the same against $MIRROR. FAKE_CURL_FAIL set on the call (see
+# tests/fake-curl.sh) makes the fake answer matching URLs with a failure.
 offline_from() {
   local root=$1
   shift
   : > "$CURL_LOG"
-  env PATH="$FAKEBIN:$PATH" FAKE_CURL_ROOT="$root" FAKE_CURL_LOG="$CURL_LOG" "$@"
+  env PATH="$FAKEBIN:$PATH" FAKE_CURL_ROOT="$root" FAKE_CURL_LOG="$CURL_LOG" FAKE_CURL_FAIL="${FAKE_CURL_FAIL:-}" "$@"
 }
 offline() { offline_from "$MIRROR" "$@"; }
 SWAP="$SCRATCH/swap"
@@ -453,10 +479,11 @@ for flag in --stable --pre --version --from-file; do
   assert_contains "$out" "$flag" "upgrade --help lists $flag"
 done
 
-# 1. First install, default channel: the latest release through the API, the
-# stable tarball and its checksum downloaded and verified.
+# 1. First install, default channel: the latest release through the API, its
+# asset list read, the stable tarball and its checksum downloaded and verified.
 if out=$(offline "$INSTALL" --prefix "$SWAP_PREFIX" --bin-dir "$SWAP_BIN" 2>&1); then pass; else fail "install through the fake network exited non-zero: $out"; fi
 assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "the default channel asks GitHub for the latest release (falsify: default to --pre)"
+assert_contains "$(cat "$CURL_LOG")" "/releases/tags/$TAG" "the release's asset list is read before the download (falsify: download the names blind)"
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/firstmate-tui-$TAG.tar.gz" "the stable tarball is downloaded from the release"
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/firstmate-tui-$TAG.tar.gz.sha256" "its checksum is downloaded too"
 assert_contains "$out" "checksum verified" "the download is verified"
@@ -503,9 +530,12 @@ assert_contains "$("$FM" version 2>&1)" "firstmate-tui $VERSION (stable release)
 assert_equal "$(file_sha "$VIEW_STATE")" "$VIEW_STATE_SHA" "view state survives the swap back to stable"
 
 # 4. An exact beta by version, without the v: --version adds it (falsify: pass
-# the version to the download URL as typed).
+# the version to the download URL as typed). No channel is resolved, but the
+# named release's asset list is still read.
 if out=$(cd / && offline "$FM" upgrade --version "$BETA_VERSION" 2>&1); then pass; else fail "firstmate-tui upgrade --version $BETA_VERSION exited non-zero: $out"; fi
-assert_not_contains "$(cat "$CURL_LOG")" "api.github.com" "--version needs no API call"
+assert_not_contains "$(cat "$CURL_LOG")" "/releases/latest" "--version asks for no latest release"
+assert_not_contains "$(cat "$CURL_LOG")" "per_page" "--version lists no releases"
+assert_contains "$(cat "$CURL_LOG")" "/releases/tags/$BETA_TAG" "--version reads the named release's asset list (falsify: skip the read under --version)"
 assert_contains "$(cat "$CURL_LOG")" "/releases/download/$BETA_TAG/firstmate-tui-$BETA_TAG.tar.gz" "--version without the v downloads the v-tagged asset"
 assert_contains "$out" "firstmate-tui $BETA_VERSION installed (replaced $VERSION)" "the exact beta replaces stable"
 assert_contains "$("$FM" version 2>&1)" "(beta: $VERSION at commit $SHA7)" "version reports the exact beta"
@@ -560,14 +590,13 @@ assert_contains "$(bash "$SWAP/moved/bin/firstmate-tui.sh" version 2>&1)" "not a
 # ------------------------------------------- asset name and tarball layout
 # The rename is done (AGENTS.md, the header of bin/install.sh): the asset is
 # firstmate-tui-<tag>.tar.gz with bin/firstmate-tui.sh and bin/firstmate-tui/
-# inside, and the installer still asks for fm-board-<tag>.tar.gz after it and
-# installs a tarball of either layout, so a 0.2.x release can be installed
-# again. The old layout is the real thing: the 0.2.5 tree from the v0.2.5 tag,
-# packaged by its own scripts/package.sh (fm-board-v0.2.5.tar.gz, unpacking to
+# inside, and the installer still downloads fm-board-<tag>.tar.gz from a
+# release that has only that name and installs a tarball of either layout,
+# so a 0.2.x release can be installed again. The old layout is the real
+# thing: the 0.2.5 tree from the v0.2.5 tag, packaged by its own
+# scripts/package.sh (fm-board-v0.2.5.tar.gz, unpacking to
 # firstmate-tui-v0.2.5/), with its installer from git show for the upgrade
 # chains further down. The 0.1.0 tree and installer come the same way.
-NEW_ASSET="firstmate-tui-$TAG.tar.gz"
-OLD_ASSET="fm-board-$TAG.tar.gz"
 MID_TAG=v0.2.5
 MID_VERSION=0.2.5
 MID_SRC="$SCRATCH/src-$MID_TAG"
@@ -667,26 +696,51 @@ if [ "$tags_ok" -eq 1 ]; then
   assert_absent "$MIXED/prefix" "a refused tarball installs nothing"
   assert_no_leftovers "$MIXED" "a refused tarball leaves no staging directory"
 
-  # 4. Through the fake network, three releases: the new asset name only
-  # ($MIRROR, what every release from 0.3.0 on looks like), the old name only
-  # (the 0.2.5 release, what every release before looked like), and both (the
-  # current tarball under the new name, the 0.2.5 tarball under the old, so the
-  # launcher that lands tells which one was taken).
+  # 4. Through the fake network. The installer reads the release's asset list
+  # (GET /releases/tags/<tag>, api/tags/<tag>.json in a mirror) and asks only
+  # for a name the release has; a mirror without that file answers the read
+  # with exit 22, as GitHub does for a tag it has no release for, and the
+  # installer then tries both names blind. The releases: the new asset name
+  # only ($MIRROR, what every release from 0.3.0 on looks like), the old name
+  # only (the 0.2.5 release, what every release before looked like), both
+  # (the current tarball under the new name, the 0.2.5 tarball under the old,
+  # so the launcher that lands tells which one was taken; the old name listed
+  # first, so the preference and not the order decides), one whose assets
+  # carry neither name, and the 0.2.5 release with no asset list to read.
   MIRROR_OLD="$SCRATCH/mirror-old"
   MIRROR_BOTH="$SCRATCH/mirror-both"
-  mkdir -p "$MIRROR_OLD/api" "$MIRROR_OLD/download/$MID_TAG" "$MIRROR_BOTH/api" "$MIRROR_BOTH/download/$TAG"
+  MIRROR_NEITHER="$SCRATCH/mirror-neither"
+  MIRROR_BLIND="$SCRATCH/mirror-blind"
+  mkdir -p "$MIRROR_OLD/api/tags" "$MIRROR_OLD/download/$MID_TAG" "$MIRROR_BOTH/api/tags" "$MIRROR_BOTH/download/$TAG" "$MIRROR_NEITHER/api/tags" "$MIRROR_BLIND/api" "$MIRROR_BLIND/download/$MID_TAG"
   printf '{\n  "tag_name": "%s",\n  "prerelease": false\n}\n' "$MID_TAG" > "$MIRROR_OLD/api/latest.json"
   cp "$MID_TARBALL" "$MID_TARBALL.sha256" "$MIRROR_OLD/download/$MID_TAG/"
+  release_json "$MID_TAG" "$MID_OLD_ASSET" "$MID_OLD_ASSET.sha256" > "$MIRROR_OLD/api/tags/$MID_TAG.json"
   cp "$MIRROR/api/latest.json" "$MIRROR_BOTH/api/latest.json"
   cp "$TARBALL" "$CHECKSUM" "$MIRROR_BOTH/download/$TAG/"
   cp "$MID_TARBALL" "$MIRROR_BOTH/download/$TAG/$OLD_ASSET"
   printf '%s  %s\n' "$(file_sha "$MID_TARBALL")" "$OLD_ASSET" > "$MIRROR_BOTH/download/$TAG/$OLD_ASSET.sha256"
+  release_json "$TAG" "$OLD_ASSET" "$OLD_ASSET.sha256" "$NEW_ASSET" "$NEW_ASSET.sha256" > "$MIRROR_BOTH/api/tags/$TAG.json"
+  cp "$MIRROR/api/latest.json" "$MIRROR_NEITHER/api/latest.json"
+  release_json "$TAG" "release-notes.txt" "fm-board-$TAG.zip" > "$MIRROR_NEITHER/api/tags/$TAG.json"
+  cp "$MIRROR_OLD/api/latest.json" "$MIRROR_BLIND/api/latest.json"
+  cp "$MID_TARBALL" "$MID_TARBALL.sha256" "$MIRROR_BLIND/download/$MID_TAG/"
   NET="$SCRATCH/net"
+  # url_order <first substring> <second substring> <label>: the first URL
+  # containing <first> was logged before the first containing <second>.
+  url_order() {
+    local a b
+    a=$(grep -nF -- "$1" "$CURL_LOG" | head -n 1 | cut -d: -f1)
+    b=$(grep -nF -- "$2" "$CURL_LOG" | head -n 1 | cut -d: -f1)
+    if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; then pass; else fail "$3: $(tr '\n' ' ' < "$CURL_LOG")"; fi
+  }
 
-  # New name only: downloaded and verified under it, the old name never asked
-  # for, no fallback line (falsify: fetch both names regardless, or try the old
-  # name first).
+  # New name only: the asset list is read, the new asset downloaded and
+  # verified under its name, the old name never asked for, no fallback line
+  # (falsify: download the names blind, prefer the old name, or fetch both).
   if out=$(offline "$INSTALL" --prefix "$NET/new/prefix" --bin-dir "$NET/new/bin" 2>&1); then pass; else fail "install from a release holding the new asset name exited non-zero: $out"; fi
+  assert_contains "$(cat "$CURL_LOG")" "/releases/tags/$TAG" "the release's asset list is read"
+  url_order "/releases/tags/$TAG" "/$NEW_ASSET" "the asset list is read before any download (falsify: download first, read on failure)"
+  assert_not_contains "$out" "could not read" "the asset list was read, so no blind attempt is reported"
   assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$NEW_ASSET" "the new asset is downloaded"
   assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$NEW_ASSET.sha256" "its checksum is downloaded under the new name"
   assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "the old name is never asked for when the new one is there"
@@ -698,21 +752,21 @@ if [ "$tags_ok" -eq 1 ]; then
   assert_contains "$(cat "$NET/new/prefix/install-record")" "layout=firstmate-tui" "the record notes the current layout of a network install"
   assert_contains "$(cat "$NET/new/prefix/install-record")" "installed_from=release $TAG" "the record names the release"
 
-  # Old name only, the 0.2.5 release: the new name is asked for first and is
-  # not there, the old name is downloaded with its own checksum, the log says
-  # so, and 0.2.5 lands in its own layout (falsify: ask for the old name only
-  # or first, drop the fallback, or stay silent about it).
+  # Old name only, the 0.2.5 release, asset list readable: the release is read
+  # first, the new name is never asked for, the old name is downloaded with its
+  # own checksum, the log says so, and 0.2.5 lands in its own layout (falsify:
+  # ask for the new name blind before reading the release, stay silent about
+  # the fallback, or fetch the checksum under the new name).
   if out=$(offline_from "$MIRROR_OLD" "$INSTALL" --prefix "$NET/old/prefix" --bin-dir "$NET/old/bin" 2>&1); then pass; else fail "install from the 0.2.5 release exited non-zero: $out"; fi
-  assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_NEW_ASSET" "the new asset name is asked for"
-  assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_OLD_ASSET" "the old asset name is downloaded when the new one is missing"
-  new_line=$(grep -nF -- "/$MID_NEW_ASSET" "$CURL_LOG" | head -n 1 | cut -d: -f1)
-  old_line=$(grep -nF -- "/$MID_OLD_ASSET" "$CURL_LOG" | head -n 1 | cut -d: -f1)
-  if [ -n "$new_line" ] && [ -n "$old_line" ] && [ "$new_line" -lt "$old_line" ]; then pass; else fail "the new asset name is asked for before the old one (falsify: try the old name first): $(tr '\n' ' ' < "$CURL_LOG")"; fi
+  assert_contains "$(cat "$CURL_LOG")" "/releases/tags/$MID_TAG" "the release's asset list is read"
+  assert_not_contains "$(cat "$CURL_LOG")" "/$MID_NEW_ASSET" "a name the release does not have is never asked for"
+  assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_OLD_ASSET" "the old asset name is downloaded"
+  url_order "/releases/tags/$MID_TAG" "/$MID_OLD_ASSET" "the asset list is read before any download"
   assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_OLD_ASSET.sha256" "the checksum is fetched under the name that was found"
   assert_not_contains "$(cat "$CURL_LOG")" "$MID_NEW_ASSET.sha256" "no checksum is fetched under a name the release does not have"
-  assert_contains "$out" "downloading $MID_NEW_ASSET" "the log names the asset asked for first"
-  assert_contains "$out" "has no $MID_NEW_ASSET" "the log says the new name was missing"
-  assert_contains "$out" "downloaded $MID_OLD_ASSET" "the log names the asset that was used"
+  assert_contains "$out" "has no $MID_NEW_ASSET" "the log says the new name is missing"
+  assert_contains "$out" "downloading $MID_OLD_ASSET" "the log names the asset that was used"
+  assert_not_contains "$out" "could not read" "the asset list was read, so no blind attempt is reported"
   assert_contains "$out" "checksum verified" "the fallback download is verified"
   assert_contains "$out" "firstmate-tui $MID_VERSION installed" "the 0.2.5 release installs"
   assert_exec "$NET/old/prefix/bin/fm-board.sh" "the fallback installed the old layout"
@@ -723,7 +777,7 @@ if [ "$tags_ok" -eq 1 ]; then
   # fallback and lands the old layout, both commands following (falsify: drop
   # the fallback, or rewrite the shims only on a first install).
   if out=$(cd / && offline_from "$MIRROR_OLD" "$NET/new/bin/firstmate-tui" upgrade --version "$MID_VERSION" 2>&1); then pass; else fail "firstmate-tui upgrade --version $MID_VERSION from the current release exited non-zero: $out"; fi
-  assert_contains "$out" "downloaded $MID_OLD_ASSET" "going back to 0.2.5 takes the old asset name through the fallback"
+  assert_contains "$out" "downloading $MID_OLD_ASSET" "going back to 0.2.5 takes the old asset name through the fallback"
   assert_contains "$out" "firstmate-tui $MID_VERSION installed (replaced $VERSION)" "going back to 0.2.5 names both versions"
   assert_exec "$NET/new/prefix/bin/fm-board.sh" "going back to 0.2.5 lands the old layout"
   assert_absent "$NET/new/prefix/bin/firstmate-tui.sh" "the current launcher went with the replaced install"
@@ -732,18 +786,33 @@ if [ "$tags_ok" -eq 1 ]; then
   assert_contains "$(cd / && "$NET/new/bin/firstmate-tui" version 2>&1)" "firstmate-tui $MID_VERSION (stable release)" "version reports 0.2.5 after going back"
   assert_no_leftovers "$NET/new" "going back leaves no staging or previous directory"
 
-  # Both names: the new one wins, and it is the current tarball that lands
-  # (falsify: prefer the old name, or download both and unpack the old).
+  # Both names: the new one wins whatever order the release lists them in, and
+  # it is the current tarball that lands (falsify: take the first asset listed,
+  # prefer the old name, or download both and unpack the old).
   if out=$(offline_from "$MIRROR_BOTH" "$INSTALL" --prefix "$NET/both/prefix" --bin-dir "$NET/both/bin" 2>&1); then pass; else fail "install from a release holding both asset names exited non-zero: $out"; fi
   assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "with both names present the old one is never asked for"
   assert_exec "$NET/both/prefix/bin/firstmate-tui.sh" "the tarball under the new name is the one installed"
   assert_contains "$(cd / && "$NET/both/bin/firstmate-tui" version 2>&1)" "firstmate-tui $VERSION (stable release)" "the current tarball landed"
 
+  # Neither name among the assets: the installer stops before any download and
+  # names both what it looked for and what the release has (falsify: try the
+  # downloads anyway, or report only the names it wanted).
+  if out=$(offline_from "$MIRROR_NEITHER" "$INSTALL" --prefix "$NET/neither/prefix" --bin-dir "$NET/neither/bin" 2>&1); then fail "a release whose assets carry neither name should stop the install"; else pass; fi
+  assert_contains "$out" "neither $NEW_ASSET nor $OLD_ASSET" "the error names both asset names it looked for"
+  assert_equal "${out##*its assets: }" "release-notes.txt fm-board-$TAG.zip" "the error lists exactly the assets the release has, not its own name (falsify: grep the assets by their name field)"
+  assert_not_contains "$(cat "$CURL_LOG")" "/releases/download/" "nothing is downloaded from a release that has neither name"
+  assert_absent "$NET/neither/prefix" "nothing is installed from a release with neither name"
+  release_json "$TAG" > "$MIRROR_NEITHER/api/tags/$TAG.json"
+  if out=$(offline_from "$MIRROR_NEITHER" "$INSTALL" --prefix "$NET/neither/prefix" --bin-dir "$NET/neither/bin" 2>&1); then fail "a release with no assets at all should stop the install"; else pass; fi
+  assert_contains "$out" "its assets: none" "a release with no assets says so"
+
   # A missing checksum is an error under either name, never a reason to try the
-  # other name (falsify: fall back on any failed download).
+  # other name; the asset list is not consulted for it, the download is what
+  # proves it is there (falsify: fall back to the old name on any failed download).
   MIRROR_NOSUM="$SCRATCH/mirror-nosum"
-  mkdir -p "$MIRROR_NOSUM/api" "$MIRROR_NOSUM/download/$TAG"
+  mkdir -p "$MIRROR_NOSUM/api/tags" "$MIRROR_NOSUM/download/$TAG"
   cp "$MIRROR/api/latest.json" "$MIRROR_NOSUM/api/latest.json"
+  cp "$MIRROR/api/tags/$TAG.json" "$MIRROR_NOSUM/api/tags/$TAG.json"
   cp "$TARBALL" "$MIRROR_NOSUM/download/$TAG/"
   if out=$(offline_from "$MIRROR_NOSUM" "$INSTALL" --prefix "$NET/nosum/prefix" --bin-dir "$NET/nosum/bin" 2>&1); then fail "a release with the tarball but no checksum should stop the install"; else pass; fi
   assert_contains "$out" "download failed" "the missing checksum is a failed download"
@@ -751,26 +820,59 @@ if [ "$tags_ok" -eq 1 ]; then
   assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "a missing checksum does not send the installer to the old name"
   assert_absent "$NET/nosum/prefix" "nothing is installed without the checksum"
 
-  # A failure that is not a missing asset stays an error: a curl that cannot
-  # connect (exit 7) on the new name stops the install instead of trying the
-  # old one (falsify: fall back on every non-zero curl status).
-  FLAKY="$SCRATCH/flakybin"
-  mkdir -p "$FLAKY"
-  # shellcheck disable=SC2016 # the "$*" and "$@" are for the fake curl's own shell
-  printf '#!/usr/bin/env bash\ncase "$*" in *%s*) exit 7 ;; esac\nexec bash %q "$@"\n' "$NEW_ASSET" "$ROOT/tests/fake-curl.sh" > "$FLAKY/curl"
-  chmod +x "$FLAKY/curl"
-  : > "$CURL_LOG"
-  if out=$(env PATH="$FLAKY:$PATH" FAKE_CURL_ROOT="$MIRROR" FAKE_CURL_LOG="$CURL_LOG" "$INSTALL" --prefix "$NET/flaky/prefix" --bin-dir "$NET/flaky/bin" 2>&1); then fail "a connection failure on the new asset name should stop the install"; else pass; fi
-  assert_contains "$out" "download failed" "the connection failure is reported as a failed download"
-  assert_contains "$out" "curl exit 7" "the error carries curl's status"
-  assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "a connection failure never falls back to the old name"
-  assert_absent "$NET/flaky/prefix" "nothing is installed after a connection failure"
+  # The asset list cannot be read (no api/tags file: exit 22, GitHub's answer
+  # for a tag without a release, and the same path for a rate limit or no
+  # connection), the release holding the old name only: the installer says
+  # so, asks for the new name first, and on the fake's exit 22 goes on to the
+  # old name, which installs (falsify: stop when the read fails, or try the
+  # old name first).
+  if out=$(offline_from "$MIRROR_BLIND" "$INSTALL" --prefix "$NET/blind/prefix" --bin-dir "$NET/blind/bin" 2>&1); then pass; else fail "install with the asset list unreadable exited non-zero: $out"; fi
+  assert_contains "$(cat "$CURL_LOG")" "/releases/tags/$MID_TAG" "the read was attempted"
+  assert_contains "$out" "could not read the asset list" "the failed read is reported, not hidden"
+  assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_NEW_ASSET" "the new name is asked for first when the list is unreadable"
+  assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_OLD_ASSET" "the old name follows"
+  url_order "/$MID_NEW_ASSET" "/$MID_OLD_ASSET" "the new name is asked for before the old one (falsify: try the old name first)"
+  assert_contains "$out" "downloading $MID_OLD_ASSET" "the fallback is reported"
+  assert_contains "$out" "checksum verified" "the blind fallback is verified"
+  assert_contains "$out" "firstmate-tui $MID_VERSION installed" "the blind fallback installs"
 
-  # A release with neither name fails before the swap and the error names both
+  # The shapes curl gives for a first name that is missing or unreachable, each
+  # on the blind path. Exit 56 with the 404 text is what GitHub's redirect to
+  # the download host sent a 0.2.5 install, and the 0.2.5 installer stopped
+  # there instead of falling back (the chains below pin that); exit 7 is no
+  # connection at all. Each falls through to the old name and installs, with
+  # curl's own message on record (falsify: read exit 22 alone as "not there",
+  # as the 0.2.5 installer did, or stop on exit 7).
+  for shape in "56 curl: (56) The requested URL returned error: 404" "7 curl: (7) Failed to connect to objects.githubusercontent.com port 443"; do
+    status=${shape%% *}
+    message=${shape#* }
+    rm -rf -- "${NET:?}/shape"
+    if out=$(FAKE_CURL_FAIL="/$MID_NEW_ASSET $status $message" offline_from "$MIRROR_BLIND" "$INSTALL" --prefix "$NET/shape/prefix" --bin-dir "$NET/shape/bin" 2>&1); then pass; else fail "curl exit $status on the new asset name should fall back to the old name: $out"; fi
+    assert_contains "$(cat "$CURL_LOG")" "/$MID_NEW_ASSET" "exit $status: the new name was asked for"
+    assert_contains "$out" "$message" "exit $status: curl's message says why the first name failed"
+    assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_OLD_ASSET" "exit $status: the old name is downloaded after the failure"
+    assert_contains "$out" "firstmate-tui $MID_VERSION installed" "exit $status: the install completes"
+  done
+
+  # The API itself unreachable (exit 7 on the asset-list read) while the release
+  # holds only the old name: the read fails with curl's message shown, both
+  # names are tried, the old one installs (falsify: die when the read fails).
+  if out=$(FAKE_CURL_FAIL="/releases/tags/ 7 curl: (7) Failed to connect to api.github.com port 443" offline_from "$MIRROR_OLD" "$INSTALL" --prefix "$NET/noapi/prefix" --bin-dir "$NET/noapi/bin" 2>&1); then pass; else fail "install with the API unreachable exited non-zero: $out"; fi
+  assert_contains "$out" "could not read the asset list" "the unreachable API is reported"
+  assert_contains "$out" "Failed to connect to api.github.com" "curl's message for the failed read is shown"
+  assert_contains "$(cat "$CURL_LOG")" "/$MID_NEW_ASSET" "the new name is tried when the API is unreachable"
+  assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_OLD_ASSET" "the old name follows"
+  assert_contains "$out" "firstmate-tui $MID_VERSION installed" "the install completes with the API unreachable"
+
+  # A release the API does not know and neither download there: fails before
+  # the swap, and the error names both asset names and both curl messages
   # (falsify: report only the last name tried).
   if out=$(cd / && offline "$NET/both/bin/firstmate-tui" upgrade --version 0.9.9-abcdef0 2>&1); then fail "upgrade to a version with no release should exit non-zero"; else pass; fi
+  assert_contains "$out" "could not read the asset list" "the unknown release fails the asset-list read first"
   assert_contains "$out" "download failed" "the missing release is a failed download"
   assert_contains "$out" "neither firstmate-tui-v0.9.9-abcdef0.tar.gz nor fm-board-v0.9.9-abcdef0.tar.gz" "the error names both asset names it tried"
+  assert_contains "$out" "firstmate-tui-v0.9.9-abcdef0.tar.gz: fake-curl: 404" "the error carries the first name's curl message"
+  assert_contains "$out" "fm-board-v0.9.9-abcdef0.tar.gz: fake-curl: 404" "the error carries the second name's curl message"
   assert_contains "$(cd / && "$NET/both/bin/firstmate-tui" version 2>&1)" "firstmate-tui $VERSION (stable release)" "the install is unchanged after the failed upgrade"
   assert_no_leftovers "$NET/both" "the failed upgrade leaves no staging directory"
 
@@ -778,15 +880,22 @@ if [ "$tags_ok" -eq 1 ]; then
   # The real installers from the tags, through the fake network. An install
   # upgrades with the installer that shipped in its own tarball, so what a
   # 0.2.5 or a 0.1.0 install can reach is decided by that installer, not by
-  # this tree's. MIRROR_CHAIN holds every release the chains touch; its latest
-  # release is switched between steps.
+  # this tree's. MIRROR_CHAIN holds every release the chains touch, each with
+  # its asset list; its latest release is switched between steps. SHAPE56 is
+  # the answer GitHub gave a 0.2.5 install for the missing new name of a 0.2.x
+  # release, API_DOWN an asset-list read that cannot connect.
   MIRROR_CHAIN="$SCRATCH/mirror-chain"
-  mkdir -p "$MIRROR_CHAIN/api" "$MIRROR_CHAIN/download/$OLD_TAG" "$MIRROR_CHAIN/download/$MID_TAG" "$MIRROR_CHAIN/download/$TAG"
+  mkdir -p "$MIRROR_CHAIN/api/tags" "$MIRROR_CHAIN/download/$OLD_TAG" "$MIRROR_CHAIN/download/$MID_TAG" "$MIRROR_CHAIN/download/$TAG"
   cp "$OLD_TARBALL" "$OLD_TARBALL.sha256" "$MIRROR_CHAIN/download/$OLD_TAG/"
   cp "$MID_TARBALL" "$MID_TARBALL.sha256" "$MIRROR_CHAIN/download/$MID_TAG/"
   cp "$TARBALL" "$CHECKSUM" "$MIRROR_CHAIN/download/$TAG/"
+  release_json "$OLD_TAG" "fm-board-$OLD_TAG.tar.gz" "fm-board-$OLD_TAG.tar.gz.sha256" > "$MIRROR_CHAIN/api/tags/$OLD_TAG.json"
+  release_json "$MID_TAG" "$MID_OLD_ASSET" "$MID_OLD_ASSET.sha256" > "$MIRROR_CHAIN/api/tags/$MID_TAG.json"
+  release_json "$TAG" "$NEW_ASSET" "$NEW_ASSET.sha256" > "$MIRROR_CHAIN/api/tags/$TAG.json"
   chain_latest() { printf '{\n  "tag_name": "%s",\n  "prerelease": false\n}\n' "$1" > "$MIRROR_CHAIN/api/latest.json"; }
   chain() { offline_from "$MIRROR_CHAIN" "$@"; }
+  SHAPE56="/$MID_NEW_ASSET 56 curl: (56) The requested URL returned error: 404"
+  API_DOWN="/releases/tags/ 7 curl: (7) Failed to connect to api.github.com port 443"
 
   # 1. A 0.2.5 install made by the 0.2.5 installer (git show
   # v0.2.5:bin/install.sh), then reinstalled through the current installer
@@ -807,6 +916,7 @@ if [ "$tags_ok" -eq 1 ]; then
   chain_latest "$MID_TAG"
   if out=$(chain bash "$MID_INSTALLER" --prefix "$C_PREFIX" --bin-dir "$C_BIN" 2>&1); then pass; else fail "the 0.2.5 installer exited non-zero: $out"; fi
   assert_contains "$out" "firstmate-tui $MID_VERSION installed" "the 0.2.5 installer reports 0.2.5"
+  assert_contains "$out" "downloaded $MID_OLD_ASSET" "the 0.2.5 installer fell back to the old name on the fake's exit 22"
   assert_contains "$(cat "$CURL_LOG")" "/releases/download/$MID_TAG/$MID_OLD_ASSET" "the 0.2.5 installer took the old asset name for the 0.2.5 release"
   assert_exec "$C_PREFIX/bin/fm-board.sh" "a 0.2.5 install has bin/fm-board.sh"
   assert_exec "$C_BIN/firstmate-tui" "a 0.2.5 install has the firstmate-tui command"
@@ -816,6 +926,7 @@ if [ "$tags_ok" -eq 1 ]; then
   chain_latest "$TAG"
   if out=$(cd / && chain bash -s -- --prefix "$C_PREFIX" --bin-dir "$C_BIN" < "$INSTALL" 2>&1); then pass; else fail "the reinstall through the current installer exited non-zero: $out"; fi
   assert_contains "$(cat "$CURL_LOG")" "/releases/latest" "the reinstall asks for the latest release"
+  assert_contains "$(cat "$CURL_LOG")" "/releases/tags/$TAG" "the reinstall reads the release's asset list"
   assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$NEW_ASSET" "the reinstall downloads the new asset name"
   assert_not_contains "$(cat "$CURL_LOG")" "$OLD_ASSET" "the reinstall never asks for the old name"
   assert_contains "$out" "checksum verified" "the reinstall verifies the download"
@@ -839,9 +950,31 @@ if [ "$tags_ok" -eq 1 ]; then
   assert_equal "$(file_sha "$C_VIEW")" "$C_VIEW_SHA" "reading the view state does not rewrite it"
   assert_no_leftovers "$CHAIN" "the chain leaves no staging or previous directory"
   # From here on, `firstmate-tui upgrade` runs the current installer as usual.
+  assert_equal "$(file_sha "$C_PREFIX/bin/install.sh")" "$(file_sha "$INSTALL")" "the install carries this tree's installer"
   if out=$(cd / && chain "$C_BIN/firstmate-tui" upgrade 2>&1); then pass; else fail "firstmate-tui upgrade after the reinstall exited non-zero: $out"; fi
   assert_contains "$out" "firstmate-tui $VERSION installed (replaced $VERSION)" "after the reinstall, firstmate-tui upgrade runs the current installer"
   assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$NEW_ASSET" "and downloads the new asset name"
+  # That installer never meets the answer that stopped 0.2.5 when the release
+  # is readable, because it asks only for a name the release has; with the
+  # API unreachable it meets it and moves past it to the old name. Both are
+  # shown by going back to 0.2.5, whose new name is missing, and coming
+  # forward again (falsify: bring back the exit-22 test in fetch, or die when
+  # the asset-list read fails).
+  if out=$(cd / && FAKE_CURL_FAIL="$SHAPE56" chain "$C_BIN/firstmate-tui" upgrade --version "$MID_VERSION" 2>&1); then pass; else fail "going back to 0.2.5 with the release readable exited non-zero: $out"; fi
+  assert_not_contains "$(cat "$CURL_LOG")" "/$MID_NEW_ASSET" "with the release readable, the missing new name is never asked for"
+  assert_contains "$out" "firstmate-tui $MID_VERSION installed (replaced $VERSION)" "going back to 0.2.5 completes"
+  assert_equal "$(file_sha "$C_PREFIX/bin/install.sh")" "$(file_sha "$MID_INSTALLER")" "the install carries the 0.2.5 installer again"
+  if out=$(cd / && chain "$C_BIN/firstmate-tui" upgrade 2>&1); then pass; else fail "coming forward through the 0.2.5 installer exited non-zero: $out"; fi
+  assert_contains "$out" "firstmate-tui $VERSION installed (replaced $MID_VERSION)" "the 0.2.5 installer comes forward: the new name is there on its first try"
+  if out=$(cd / && FAKE_CURL_FAIL="$API_DOWN"$'\n'"$SHAPE56" chain "$C_BIN/firstmate-tui" upgrade --version "$MID_VERSION" 2>&1); then pass; else fail "going back to 0.2.5 with the API unreachable should survive the exit-56 shape: $out"; fi
+  assert_contains "$out" "could not read the asset list" "with the API unreachable the failed read is reported"
+  assert_contains "$out" "The requested URL returned error: 404" "the exit-56 message is shown and moved past"
+  assert_contains "$out" "downloading $MID_OLD_ASSET" "the upgrade fell back to the old name"
+  assert_contains "$out" "firstmate-tui $MID_VERSION installed (replaced $VERSION)" "the upgrade survives the shape that stopped 0.2.5"
+  if out=$(cd / && chain "$C_BIN/firstmate-tui" upgrade 2>&1); then pass; else fail "coming forward again exited non-zero: $out"; fi
+  assert_contains "$(cd / && "$C_BIN/firstmate-tui" version 2>&1)" "firstmate-tui $VERSION (stable release)" "the chain ends on $VERSION"
+  assert_equal "$(file_sha "$C_VIEW")" "$C_VIEW_SHA" "view state survives every step of the chain"
+  assert_no_leftovers "$CHAIN" "the back-and-forth leaves no staging or previous directory"
   # The launcher's own write_command is the installer's, byte for byte: with
   # the firstmate-tui command deleted from the bin dir, one run through the
   # alias writes it back and says so once (falsify: change write_command in
@@ -854,15 +987,22 @@ if [ "$tags_ok" -eq 1 ]; then
   assert_equal "$(cat "$C_BIN/firstmate-tui")" "$installer_shim" "the launcher's shim and the installer's shim are identical"
   assert_not_contains "$(cd / && "$C_BIN/fm-board" version 2>&1)" "the command is now" "the line is printed once, not on every run"
 
-  # 2. A second 0.2.5 install's own `firstmate-tui upgrade` against the same
-  # release: the 0.2.5 installer asks for the new name first and finds it, so
-  # the upgrade lands in one step. What that installer cannot do is fall back
-  # when GitHub answers a missing asset with a curl status other than 22, which
-  # is why the README documents the reinstall above; the fake curl answers 22,
-  # so that failure is not reproduced here (falsify: rename the asset again).
+  # 2. A second 0.2.5 install's own `firstmate-tui upgrade`. First the
+  # reproduction: the 0.2.5 installer read curl exit 22 alone as "not there",
+  # so against the exit-56 answer GitHub gave for the missing new name of a
+  # 0.2.x release it stops with curl's status and never asks for the old name,
+  # which is why the README documents the reinstall above (if this passes,
+  # the fake no longer sends what GitHub sent). Then the same installer
+  # against the current release: it asks for the new name first and finds it,
+  # so that upgrade lands in one step (falsify: rename the asset again).
   CHAIN2="$SCRATCH/chain2"
   chain_latest "$MID_TAG"
   if out=$(chain bash "$MID_INSTALLER" --prefix "$CHAIN2/prefix" --bin-dir "$CHAIN2/bin" 2>&1); then pass; else fail "the second 0.2.5 install exited non-zero: $out"; fi
+  if out=$(cd / && FAKE_CURL_FAIL="$SHAPE56" chain "$CHAIN2/bin/firstmate-tui" upgrade --version "$MID_VERSION" 2>&1); then fail "the 0.2.5 installer should stop on curl exit 56 for the new asset name (the fake no longer sends what GitHub sent): $out"; else pass; fi
+  assert_contains "$out" "download failed" "the 0.2.5 installer reports a failed download"
+  assert_contains "$out" "curl exit 56" "the 0.2.5 installer stops with curl's status"
+  assert_not_contains "$(cat "$CURL_LOG")" "$MID_OLD_ASSET" "the 0.2.5 installer never asks for the old name after exit 56"
+  assert_contains "$(cd / && "$CHAIN2/bin/firstmate-tui" version 2>&1)" "firstmate-tui $MID_VERSION (stable release)" "the failed run leaves the 0.2.5 install alone"
   chain_latest "$TAG"
   if out=$(cd / && chain "$CHAIN2/bin/firstmate-tui" upgrade 2>&1); then pass; else fail "firstmate-tui upgrade from a 0.2.5 install exited non-zero: $out"; fi
   assert_contains "$(cat "$CURL_LOG")" "/releases/download/$TAG/$NEW_ASSET" "the 0.2.5 installer downloads the new asset name"
