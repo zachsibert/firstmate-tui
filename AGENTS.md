@@ -146,12 +146,19 @@ the findings watermark belong to later milestones.
   the `${VAR:?}` guard so an empty variable fails instead of widening.
 - Distribution is GitHub Releases (README "Install" and "Releasing"). The
   one version source is `version` in `bin/fm-board/package.json`, and
-  `.github/workflows/release.yml` is the only release path: a push to `main`
-  releases `v<version>` once, any other push publishes the prerelease
-  `v<version>-<sha7>`; nobody tags by hand, and no test creates a tag or a
-  release. `scripts/package.sh` is the one place that builds the tarball
-  (the workflow and `tests/install.test.sh` both run it), so a new file that
-  must ship, and the tag-equals-version check, are changes there.
+  `.github/workflows/release.yml` is the only release path. Every push to
+  `main` is a release: `scripts/next-version.sh` picks package.json's
+  version when its tag is free, else the next free patch, and the workflow
+  commits that bump to `main` as `github-actions[bot]` (`Release <v> [skip
+  ci]`) before building at it; any other push publishes the prerelease
+  `v<next>-<sha7>`, named against the coming release. Nobody tags by hand,
+  nobody opens a PR only to bump the version (bump minor or major in the PR
+  that earns it), and no test creates a tag or a release. `scripts/package.sh`
+  is the one place that builds the tarball (the workflow and
+  `tests/install.test.sh` both run it), so a new file that must ship, and the
+  tag-equals-version check, are changes there. `.github/workflows/test.yml`
+  runs both suites, ShellCheck and actionlint on every pull request and on
+  every push to a branch other than `main`.
   `bin/install.sh` must stay runnable through `curl | bash`: everything
   inside `main()`, no `BASH_SOURCE`, only curl, tar and sha256sum or shasum
   (grep and sed parse the releases API), and it writes only under `--prefix`
