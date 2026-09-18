@@ -51,7 +51,12 @@
 //     "snapshot_error": text (optional; marks the four snapshot panes stale),
 //     "refresh": { "next_in": seconds, "refreshing": bool, "failed_ago": seconds,
 //                  "failed": text, "loading_frame": N } (optional; every field optional),
-//     "mtimes": { "<absolute path>": epoch seconds } }
+//     "mtimes": { "<absolute path>": epoch seconds },
+//     "status_logs": { "<absolute status log path>": [ "working", "done", ... ] } }
+// status_logs stands in for the lines of a task's status log (the verbs, in
+// order), which the model reads to tell a task repairing its PR (working
+// again after a done line) from one on its first pass; a path absent from
+// the map reads as an unreadable log, never repairing.
 // The refresh block stands in for the app's schedule, which a one-shot render
 // has none of: {"next_in": 18} draws `next refresh in 18s` on the title line,
 // {"refreshing": true} draws `refreshing…`, and {"failed_ago": 40, "next_in":
@@ -87,7 +92,7 @@ import { buildModel, initialPrs, mergePrs, prsFailureText } from './lib/model.mj
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot } from './lib/sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
 import { focusProblem, handleKey, handleMouse, viewProblem } from './lib/controller.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './lib/viewer.mjs';
@@ -115,6 +120,8 @@ function factsFromFixture(path, opts) {
   const fmHome = fx.fm_home || (snapshot && snapshot.fm_home) || '/fixture/firstmate';
   const mtimes = fx.mtimes || {};
   const fixtureMtime = (p) => (Object.prototype.hasOwnProperty.call(mtimes, p) ? Number(mtimes[p]) : null);
+  const statusLogs = fx.status_logs || {};
+  const fixtureVerbs = (p) => (Object.prototype.hasOwnProperty.call(statusLogs, p) && Array.isArray(statusLogs[p]) ? statusLogs[p].map((v) => String(v).toLowerCase()) : null);
   let ledgers;
   if (Array.isArray(fx.ledgers)) {
     ledgers = fx.ledgers.map((l) => ({ id: l.id || null, home: l.home, remote: Boolean(l.remote), cached: Boolean(l.cached), summary: l.summary || null, error: l.error || null, generatedAt: l.summary && l.summary.generated_epoch ? Number(l.summary.generated_epoch) : null }));
@@ -125,7 +132,7 @@ function factsFromFixture(path, opts) {
       home: r.home,
       remote: Boolean(r.remote),
       cached: Boolean(r.provenance && r.provenance.summary_source === 'remote-ledger-cache'),
-      summary: { active_children: r.active_children || [], endpoints: r.endpoints || [], decisions_open: r.decisions_open || [], landed: Array.isArray(r.landed) ? r.landed : [], queued: Array.isArray(r.queued) ? r.queued : [] },
+      summary: { active_children: r.active_children || [], endpoints: r.endpoints || [], decisions_open: r.decisions_open || [], holds: Array.isArray(r.holds) ? r.holds : [], landed: Array.isArray(r.landed) ? r.landed : [], queued: Array.isArray(r.queued) ? r.queued : [], contributions: r.contributions && typeof r.contributions === 'object' ? r.contributions : null },
       error: null,
       generatedAt: null,
     }));
@@ -140,7 +147,7 @@ function factsFromFixture(path, opts) {
   }
   const refresh = refreshFromFixture(fx.refresh, now);
   return {
-    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs: prsFromFixture(fx.prs, opts, now), refresh, mtime: fixtureMtime },
+    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs: prsFromFixture(fx.prs, opts, now), refresh, mtime: fixtureMtime, statusVerbs: fixtureVerbs },
     size: { cols: opts.cols || fx.cols || 120, rows: opts.rows || fx.rows || 40 },
   };
 }
@@ -218,7 +225,7 @@ async function factsLive(opts, cfg) {
   }
   return {
     // A one-shot render has no schedule, so the title line carries no refresh label.
-    facts: { now: now(), fmHome, snapshot, snapshotAt: snapshot ? now() : null, snapshotError: snap.error, ledgers, herdr, prs, refresh: null, mtime, identity, config: cfg.config },
+    facts: { now: now(), fmHome, snapshot, snapshotAt: snapshot ? now() : null, snapshotError: snap.error, ledgers, herdr, prs, refresh: null, mtime, statusVerbs, identity, config: cfg.config },
     size: { cols: opts.cols || process.stdout.columns || 120, rows: opts.rows || process.stdout.rows || 40 },
   };
 }
