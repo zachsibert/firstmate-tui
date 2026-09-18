@@ -1229,7 +1229,9 @@ config_out=$(node --input-type=module -e "
   out.push(['example', exampleConfigText() === readFileSync('$ROOT/docs/config.example.json', 'utf8')]);
   const ex = parseConfig(exampleConfigText());
   out.push(['example-parse', [String(ex.error), String(ex.config.identity.github_login), ex.config.review.default_labels.length, configuredRepos(ex.config).join(','), labelsFor(ex.config, 'MatthewsREIS/gemini').join(',')].join(' ')]);
-  out.push(['bad-json', parseConfig('{').error]);
+  // Node's JSON.parse message differs between versions (20 says "at position 1", 26 adds the line and
+  // column), so only the board's own prefix is pinned.
+  out.push(['bad-json', String(parseConfig('{').error).startsWith('bad JSON (') ? 'bad JSON (...)' : String(parseConfig('{').error)]);
   out.push(['not-object', parseConfig('[1]').error]);
   out.push(['schema', parseConfig('{\"schema\":\"other.v9\"}').error]);
   out.push(['login-type', parseConfig('{\"identity\":{\"github_login\":7}}').error]);
@@ -1253,7 +1255,7 @@ config_out=$(node --input-type=module -e "
 ") || fail "config unit checks: node exited non-zero: $config_out"
 for expected in "example=true" \
   "example-parse=null null 0 MatthewsREIS/gemini ready-to-merge" \
-  "bad-json=bad JSON (Expected property name or '}' in JSON at position 1 (line 1 column 2))" \
+  "bad-json=bad JSON (...)" \
   "not-object=not an object" "schema=unexpected schema other.v9" "login-type=identity.github_login is not a string" \
   "labels-type=review.default_labels is not a list" 'repo-name=review.repos: "gemini" is not owner/name' \
   "parsed=zachsibert ready a/b,c/d,e/f" "labels-own=x" "labels-own-empty=0 0" "labels-default=ready" "labels-case=x" \
