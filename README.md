@@ -24,7 +24,7 @@ The captain asked for one row per initiative the main firstmate delegated. The s
 
 ## Status
 
-M1, the read-only board, is implemented in this repository, plus the M1b follow-on (`enter` / `o` open a PR in the browser, In flight groups secondmate work by home, and Needs you lists the main home only) and M2: `enter` on a Findings row opens the report in a terminal viewer, lost panes show in red, `x` / `X` / `H` hide and unhide rows, `1`-`5` / `0` hide and show panes, and `r` refreshes the snapshot and, with `--prs`, the live PR checks at once. The scout report that grounds the plan is in [`docs/scout-report-2026-09-16.md`](docs/scout-report-2026-09-16.md): data availability per pane, herdr capabilities, what is reusable from yimbot as a pattern, stack choice, and the four-milestone plan. Answering decisions, toasts and the findings watermark are later milestones.
+M1, the read-only board, is implemented in this repository, plus the M1b follow-on (`enter` opens a PR in the browser, In flight groups secondmate work by home, and Needs you lists the main home only) and M2: `enter` on a Findings row opens the report in a terminal viewer, lost panes show in red, `x` / `X` / `H` hide and unhide rows, `1`-`5` / `0` hide and show panes, and `r` refreshes the snapshot and, with `--prs`, the live PR checks at once. The scout report that grounds the plan is in [`docs/scout-report-2026-09-16.md`](docs/scout-report-2026-09-16.md): data availability per pane, herdr capabilities, what is reusable from yimbot as a pattern, stack choice, and the four-milestone plan. Answering decisions, toasts and the findings watermark are later milestones.
 
 ## Requirements
 
@@ -88,8 +88,7 @@ Options (also `bin/fm-board.sh --help`):
 | --- | --- |
 | `j` / `k`, arrows | move the selection |
 | `tab` / `shift-tab` | next / previous pane |
-| `enter` | Ready for review, or a Needs you row carrying a PR URL: open the PR in the browser. In flight group row: expand or collapse it. In flight worker, or a Needs you worker row: focus its herdr pane (`herdr agent focus`); a row whose pane is lost gets a notice instead. Findings row: open the report in the viewer (`glow -p`, else `$EDITOR`, else `vim`, else `less`) and come back when it exits |
-| `o` | open the PR of the selected row in the browser, in any pane that has one (Ready for review, Needs you, In flight, Landed) |
+| `enter` | Ready for review, Landed, or a Needs you row carrying a PR URL: open the PR in the browser. In flight group row: expand or collapse it. In flight worker, or a Needs you worker row: focus its herdr pane (`herdr agent focus`); a row whose pane is lost gets a notice instead. Findings row: open the report in the viewer (`glow -p`, else `$EDITOR`, else `vim`, else `less`) and come back when it exits |
 | `l` / `right` | expand the selected In flight group |
 | `h` / `left` | collapse the group, from the group row or from one of its children (the selection lands on the group row) |
 | `x` | hide the selected row from view (on a hidden row shown by `H`: unhide it) |
@@ -111,7 +110,7 @@ Below 100 columns the REPO and AGE columns are dropped; below 80 columns the fiv
 tests/fm-board.test.sh
 ```
 
-The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the `--prs` path, the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, pane toggles with one and four panes hidden, and the wrapper's error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, so the suite asserts that `r` re-runs the snapshot, and the PR fetch only with `--prs`, without touching GitHub. `f` is asserted to be a no-op. No real firstmate home, herdr server or TTY is needed.
+The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the `--prs` path, the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, pane toggles with one and four panes hidden, and the wrapper's error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, so the suite asserts that `r` re-runs the snapshot, and the PR fetch only with `--prs`, without touching GitHub. `o` and `f` are asserted to be no-ops. No real firstmate home, herdr server or TTY is needed.
 
 ## Layout of the code
 

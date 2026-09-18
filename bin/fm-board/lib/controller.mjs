@@ -7,10 +7,9 @@
 // code with fakes and read the resulting frame.
 //
 // Actions on a row:
-//   enter   group row: expand or collapse; Ready for review / Needs you row
-//           with a PR URL: open it; In flight worker or Needs you worker:
-//           herdr focus; Findings row: open its report in the viewer
-//   o       open the row's PR URL (any pane)
+//   enter   group row: expand or collapse; Ready for review, Landed or Needs
+//           you row with a PR URL: open it; In flight worker or Needs you
+//           worker: herdr focus; Findings row: open its report in the viewer
 //   l/right expand the selected group      h/left collapse it (from the group
 //           row or from one of its children; the selection lands on the group)
 //   x       hide the row (view state); on a hidden row shown by H: unhide it
@@ -23,7 +22,7 @@
 
 import { PANES } from './layout.mjs';
 
-const OPEN_PANES = new Set(['review', 'needs']);
+const OPEN_PANES = new Set(['review', 'needs', 'landed']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
 const VIEW_PANES = new Set(['findings']);
 
@@ -156,10 +155,6 @@ export function keyAction(model, view, key) {
       return { type: row.hidden ? 'unhide' : 'hide', row };
     case 'X':
       return pane ? { type: 'unhide-pane', paneId: pane.id, title: pane.title } : { type: 'none' };
-    case 'o':
-      if (!row) return { type: 'none' };
-      if (row.url) return { type: 'open', row };
-      return { type: 'notice', text: `${row.name}: no PR URL on this row`, bad: true };
     case 'l':
     case 'right':
       if (row && row.group && !row.expanded) return { type: 'expand', key: row.group };
@@ -173,14 +168,10 @@ export function keyAction(model, view, key) {
       if (!row) return { type: 'none' };
       if (row.group) return row.expanded ? { type: 'collapse', key: row.group } : { type: 'expand', key: row.group };
       if (OPEN_PANES.has(pane.id) && row.url) return { type: 'open', row };
-      if (pane.id === 'review') return { type: 'notice', text: `${row.name}: no PR URL on this row`, bad: true };
       if (FOCUS_PANES.has(pane.id)) return { type: 'focus', row };
       if (VIEW_PANES.has(pane.id)) return { type: 'view', row };
-      return {
-        type: 'notice',
-        text: row.url ? 'enter opens a PR from Ready for review or Needs you; press o to open this one' : 'enter opens a PR, focuses a worker or views a report: pick a row in Ready for review, Needs you, In flight or Findings',
-        bad: true,
-      };
+      // Ready for review or Landed without a PR URL (every pane is covered above).
+      return { type: 'notice', text: `${row.name}: no PR URL on this row`, bad: true };
     default:
       return { type: 'move', key };
   }

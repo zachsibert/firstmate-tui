@@ -28,7 +28,9 @@ the findings watermark belong to later milestones.
   and refreshing its own data (`r`: the snapshot, plus the live PR fetch when
   `--prs` is on). It never moves or closes a herdr pane; the captain splits
   panes himself, so do not bring back an `f` toggle or a `pane move` action.
-  Answers, merges and dispatch stay with firstmate's own owners.
+  `enter` is the one key that opens a PR; do not bring back the separate `o`
+  key the scout report's M2 row still lists. Answers, merges and dispatch stay
+  with firstmate's own owners.
 - In flight groups secondmate work by home, not by delegated item, because
   the ledger carries no per-child parent field (the comment above
   `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it

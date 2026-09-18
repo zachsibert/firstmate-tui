@@ -275,7 +275,7 @@ assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship
 assert_lines "$frame" 40 "populated frame is 40 lines"
 assert_widths "$frame" 160 "populated frame lines are 160 columns"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
-assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  o open PR  l/h expand  x hide  H hidden  1-5 panes  r refresh  \? help  q quit +$' "footer keys"
+assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  \? help  q quit +$' "footer keys"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs).
 frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l") || fail "keys l: render exited non-zero"
@@ -291,24 +291,25 @@ assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "enter on a group ro
 frame_k=$(render populated.json --keys "tab,tab,enter") || fail "keys enter worker: render exited non-zero"
 assert_contains "$frame_k" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus"
 frame_k=$(render populated.json --keys "?") || fail "keys ?: render exited non-zero"
-assert_contains "$frame_k" "o            open the PR of the selected row in the browser (any pane)" "help overlay documents o"
+assert_contains "$frame_k" "enter        Ready for review, Landed or a Needs-you PR row: open the PR in the browser" "help overlay documents enter on Landed"
+assert_not_contains "$frame_k" "open the PR of the selected row" "help overlay no longer documents o"
 assert_contains "$frame_k" "l / right    expand the selected In flight group" "help overlay documents l/right"
 
-# Opening a PR: enter in Ready for review, enter and o on a Needs-you PR row, through the injected
-# opener only (falsify: drop the url field from reviewRows or the merge? row, or the 'open' case in
-# keyAction). The opener receives the exact URL as its only argument.
+# Opening a PR: enter in Ready for review, on a Needs-you PR row and on a Landed row with a PR,
+# through the injected opener only (falsify: drop the url field from reviewRows, the merge? row or
+# landedRows, drop 'landed' from OPEN_PANES, or drop the 'open' case in keyAction). The opener
+# receives the exact URL as its only argument.
 frame_o=$(render_open populated.json "tab,enter") || fail "open review: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "enter on the first Ready for review row opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "footer notice names the opened URL"
 frame_o=$(render_open populated.json "j,j,j,enter") || fail "open needs enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on the Needs-you merge? row opens its PR"
-frame_o=$(render_open populated.json "j,j,j,o") || fail "open needs o: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/7" "o on the Needs-you merge? row opens its PR"
-frame_o=$(render_open populated.json "tab,tab,o") || fail "open inflight o: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "o on an In flight worker with a recorded PR opens it"
-frame_o=$(render_open populated.json "o") || fail "open no url: render exited non-zero"
-assert_not_opened "o on a row without a PR URL calls no opener"
-assert_contains "$frame_o" "scout-beta: no PR URL on this row" "o without a URL says so"
+frame_o=$(render_open populated.json "tab,tab,tab,tab,enter") || fail "open landed enter: render exited non-zero"
+assert_opened "https://github.com/acme/etl/pull/12" "enter on the first Landed row opens its PR"
+assert_contains "$frame_o" "opened https://github.com/acme/etl/pull/12 (etl-index)" "footer notice names the Landed URL"
+frame_o=$(render_open populated.json "tab,tab,tab,tab,j,j,j,enter") || fail "open landed no url: render exited non-zero"
+assert_not_opened "enter on a Landed row without a PR URL calls no opener"
+assert_contains "$frame_o" "old-scout: no PR URL on this row" "enter on a Landed row without a URL says so"
 frame_o=$(render_open populated.json "tab,tab,enter") || fail "enter inflight: render exited non-zero"
 assert_not_opened "enter on an In flight worker calls no opener"
 rm -f "$OPENER_LOG"
@@ -335,7 +336,7 @@ assert_no_row "$frame_med" ' REPO +HOME' "medium drops REPO"
 assert_no_row "$frame_med" ' HOME +AGE' "medium drops AGE"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$frame_med" '^ j/k  tab  enter  o open  l/h  x hide  H  1-5 panes  r  \? help  q quit +$' "medium width uses the short footer"
+assert_row "$frame_med" '^ j/k  tab  enter  l/h  x hide  H  1-5 panes  r  \? help  q quit +$' "medium width uses the short footer"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -589,7 +590,15 @@ assert_not_contains "$frame_p" "── Landed" "list mode: the hidden pane's sec
 assert_contains "$frame_p" "panes hidden: 5" "list mode: the title lists the hidden pane"
 assert_widths "$frame_p" 70 "list mode with a hidden pane: lines are 70 columns"
 
-# ---------------------------------------------------------- f is a no-op
+# ---------------------------------------------------------- o and f are no-ops
+# o used to open the selected row's PR in any pane; enter does that now, so
+# the key does nothing, not even a notice (falsify: give 'o' a case in keyAction).
+frame_o=$(render_open populated.json "tab,o") || fail "keys o: render exited non-zero"
+assert_not_opened "o on a Ready for review row calls no opener"
+frame_o=$(render populated.json --keys "o") || fail "keys o plain: render exited non-zero"
+if [ "$frame_o" = "$frame" ]; then pass; else fail "o changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_o") | head -n 5)"; fi
+assert_not_contains "$frame_o" "no PR URL" "o leaves no PR notice"
+assert_no_row "$frame" '^ j/k move .* o open' "footer offers no o key"
 # f used to move the firstmate pane beside the board; the captain splits panes
 # himself now, so the key does nothing (falsify: give 'f' a case in keyAction).
 frame_f=$(render populated.json --keys "f") || fail "keys f: render exited non-zero"
