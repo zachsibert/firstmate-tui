@@ -88,7 +88,15 @@ the findings watermark belong to later milestones.
   in `lib/settings.mjs`, over that page's own `kind: 'settings'` zones)
   against the `zones` the renderer returns with every frame, so gestures are
   tested through `--render-once --mouse <list>` (event tokens and key names
-  in order) and never a real pointer.
+  in order) and never a real pointer. That harness never loads neo-blessed,
+  so a change to the adapter is also checked by running the interactive
+  board on a pseudo-terminal (Python `pty.fork`; macOS `script` refuses
+  piped stdio) with `--opener-cmd bash tests/fake-opener.sh` and the raw
+  reports a terminal sends (X10 `ESC [ M`, button+32, col+33, line+33:
+  press 32, release 35, drag 64; SGR `ESC [ < b;col+1;line+1 M` or `m`),
+  counting opener lines. neo-blessed 0.2.0 parses one report per chunk,
+  labels a drag as `mousedown left` and emits two keypress events for one
+  carriage return; the adapter's comments say how each is handled.
 - Run `tests/fm-board.test.sh` after any change; it needs Node and nothing
   else. Add a fixture under `tests/fixtures/` when a new data shape appears,
   and name in the test comment what would make the check fail. Key behavior

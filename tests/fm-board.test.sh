@@ -15,12 +15,13 @@
 # FM_BOARD_TEST_VIEWER_LOG); without --viewer-cmd a one-shot render only
 # reports the viewer the PATH chain resolved to, so the suite shadows glow with
 # the fake on PATH and no real viewer ever runs. Mouse gestures go through
-# `--mouse <list>` (click:X,Y, dblclick:X,Y, wheel:up:X,Y,
+# `--mouse <list>` (click:X,Y, dblclick:X,Y, tripleclick:X,Y, wheel:up:X,Y,
 # wheel:down:X,Y and key names, in order with --keys; X the column and Y the
 # line, from 0 at the top-left cell), which feeds lib/controller.mjs
 # handleMouse the same event objects the terminal adapter would, measured
 # against the frame the app would have drawn, so no terminal library and no
-# pointer is involved. Hidden rows and panes go to
+# pointer is involved; what the adapter itself makes of the library's mouse
+# events is checked by calling its pure functions. Hidden rows and panes go to
 # `--view-state <temp file>`. The r key is checked against a stand-in firstmate
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
 # that they ran and print canned JSON, with tests/fake-gh.sh first on PATH as
@@ -1576,6 +1577,62 @@ assert_not_viewed "double-click on a worker views no report"
 frame_m=$(render_mouse populated.json "dblclick:60,37") || fail "mouse dblclick landed no url: render exited non-zero"
 assert_not_opened "double-click on a Landed row without a PR opens nothing"
 assert_contains "$frame_m" "old-scout: no PR URL on this row" "double-click on a Landed row without a PR says so, as enter does"
+
+# One gesture, one open. The second press of a double-click acts, and every further press on that row
+# inside the same 400 ms window only selects, so a triple-click, or a release or drag report a host
+# delivers shaped as a press, opens the PR once and the opener log has exactly one line; assert_opened
+# compares the whole log (falsify: drop the lastActivate check from mouseAction, or stop applyAction
+# recording lastActivate on activate).
+frame_m=$(render_mouse populated.json "dblclick:30,10") || fail "mouse dblclick once: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "a double-click opens the PR exactly once: one opener line"
+frame_m=$(render_mouse populated.json "tripleclick:30,10") || fail "mouse tripleclick: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "a third press inside the window opens nothing more: one opener line"
+assert_contains "$frame_m" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "triple-click: the footer names the one open"
+# The guard covers one window only: a click a second later is a fresh single click, a double-click a
+# second later opens again (falsify: make the guard ignore the time, or never clear it).
+frame_m=$(render_mouse populated.json "dblclick:30,10 click:30,10") || fail "mouse dblclick then click: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/41" "a click a second after a double-click only selects: still one opener line"
+frame_m=$(render_mouse populated.json "dblclick:30,10 dblclick:30,10") || fail "mouse dblclick twice: render exited non-zero"
+assert_opened "$(printf 'https://github.com/acme/widgets/pull/41\nhttps://github.com/acme/widgets/pull/41')" "a second double-click a second later opens again"
+# enter is never guarded: one press opens once (checked above with tab,enter) and it still opens right
+# after a double-click on the row (falsify: apply the lastActivate guard in keyAction).
+frame_m=$(render_mouse populated.json "dblclick:30,10" --keys enter) || fail "mouse dblclick then enter: render exited non-zero"
+assert_opened "$(printf 'https://github.com/acme/widgets/pull/41\nhttps://github.com/acme/widgets/pull/41')" "enter after a double-click opens the row again: two opener lines, one each"
+
+# What the terminal library hands the adapter for the mouse, checked without a terminal
+# (lib/tui-blessed.mjs loads neo-blessed only inside createScreen). neo-blessed 0.2.0 labels a drag
+# report with the left button held (button code 32 + 32 in X10 and urxvt, 32 in SGR: the pointer
+# crossed a cell with the button down, terminal mode 1002) as 'mousedown left', seen on a pty, which
+# made the controller count a click whose pointer slipped a cell as two presses. The adapter drops
+# every report whose code carries the motion flag while presses, releases and the wheel pass (falsify:
+# drop isMotion). A chunk carrying two reports is split so the second click of a fast double-click is
+# not lost to the library's one-report parse; a single report is left alone (falsify: return the match
+# for one report too).
+adapter=$(node --input-type=module -e "
+  import { normalizeMouse, splitMouseReports } from '$ROOT/bin/fm-board/lib/tui-blessed.mjs';
+  const show = (label, v) => console.log(label + ' ' + JSON.stringify(v === undefined ? null : v));
+  const ev = (action, raw, type, button = 'left') => normalizeMouse({ action, button, x: 30, y: 10, raw: [raw, 63, 43, ''], type });
+  show('x10-press', ev('mousedown', 32, 'X10'));
+  show('x10-drag', ev('mousedown', 64, 'X10'));
+  show('x10-release', ev('mouseup', 35, 'X10'));
+  show('x10-wheel', ev('wheelup', 96, 'X10', 'middle'));
+  show('urxvt-drag', ev('mousedown', 64, 'urxvt'));
+  show('sgr-press', ev('mousedown', 0, 'sgr'));
+  show('sgr-drag', ev('mousedown', 32, 'sgr'));
+  show('split-two', splitMouseReports('\x1b[M#?+\x1b[M ?+'));
+  show('split-one', splitMouseReports('\x1b[M ?+'));
+  show('split-mixed', splitMouseReports('\x1b[<0;31;11m\x1b[M ?+'));
+")
+assert_row "$adapter" '^x10-press \{"type":"down","button":"left","x":30,"y":10\}$' "adapter: an X10 left press is a down event"
+assert_row "$adapter" '^x10-drag null$' "adapter: an X10 drag report (code 64) is dropped although the library calls it mousedown"
+assert_row "$adapter" '^x10-release \{"type":"up","button":"left","x":30,"y":10\}$' "adapter: an X10 release is an up event"
+assert_row "$adapter" '^x10-wheel \{"type":"wheel","dir":"up","x":30,"y":10\}$' "adapter: the wheel (code 96) is not mistaken for motion"
+assert_row "$adapter" '^urxvt-drag null$' "adapter: a urxvt drag report is dropped"
+assert_row "$adapter" '^sgr-press \{"type":"down","button":"left","x":30,"y":10\}$' "adapter: an SGR left press is a down event"
+assert_row "$adapter" '^sgr-drag null$' "adapter: an SGR drag report (code 32) is dropped"
+assert_row "$adapter" '^split-two \["\\u001b\[M#\?\+","\\u001b\[M \?\+"\]$' "adapter: a chunk with a release and the next press splits into two reports"
+assert_row "$adapter" '^split-one null$' "adapter: a chunk with one report is left to the library"
+assert_row "$adapter" '^split-mixed \["\\u001b\[<0;31;11m","\\u001b\[M \?\+"\]$' "adapter: SGR and X10 reports in one chunk both split out"
 
 # Only the left button acts. Herdr keeps the right button for its own pane menu, so the board binds
 # nothing to it: the harness refuses an rclick token, and a right- or middle-button event reaching the
