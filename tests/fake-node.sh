@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tests/fake-node.sh - stands in for node on PATH when tests/fm-board.test.sh
-# checks the relaunch loop of bin/fm-board.sh run. The launcher probes the
+# checks the relaunch loop of bin/firstmate-tui.sh run. The launcher probes the
 # version with `node -p ...`, which this answers with 26; every other call
 # (the board itself) is logged as one line to FM_BOARD_TEST_NODE_LOG and exits
 # FM_BOARD_TEST_NODE_FIRST_EXIT (default 75, the board's relaunch status) on

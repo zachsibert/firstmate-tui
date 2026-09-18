@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bin/fm-board/index.mjs - entry point for the firstmate-tui board.
+// bin/firstmate-tui/index.mjs - entry point for the firstmate-tui board.
 //
 // Modes:
 //   run (default)  interactive board (neo-blessed through lib/tui-blessed.mjs)
@@ -26,7 +26,7 @@
 //                  from --install-root (default: the directory above bin/),
 //                  its release data from --curl-cmd (without the flag a
 //                  one-shot render fetches nothing and says so), an upgrade it
-//                  confirms runs `bash <root>/bin/fm-board.sh upgrade ...` and
+//                  confirms runs `bash <root>/bin/firstmate-tui.sh upgrade ...` and
 //                  is awaited before the next key, and the relaunch key only
 //                  reports the exit status the launcher would act on.
 //
@@ -308,7 +308,7 @@ async function driveOnce(facts, opts, size) {
       );
     },
     relaunch: () => {
-      ctx.notice(`would relaunch: exit ${RELAUNCH_EXIT} makes bin/fm-board.sh run start the installed copy again; --render-once never exits ${RELAUNCH_EXIT}`);
+      ctx.notice(`would relaunch: exit ${RELAUNCH_EXIT} makes bin/firstmate-tui.sh run start the installed copy again; --render-once never exits ${RELAUNCH_EXIT}`);
     },
     quit: () => {},
   };

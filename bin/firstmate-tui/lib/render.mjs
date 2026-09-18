@@ -410,7 +410,7 @@ function renderSettings(model, cols, rows, view) {
     head.push(text(`installed at ${install.root} (from ${install.record.installed_from || 'unknown'}) · repository ${install.repo}`));
   } else if (install.git) {
     head.push(text(`running from a checkout at ${install.root} (no install record); update it with git:`));
-    head.push(text(`  git -C ${install.root} pull   (then (cd bin/fm-board && npm ci) when the lockfile changed)`, 'help'));
+    head.push(text(`  git -C ${install.root} pull   (then (cd bin/firstmate-tui && npm ci) when the lockfile changed)`, 'help'));
   } else {
     head.push(text(`running from ${install.root} (no install record, not a git checkout); install a copy with:`));
     head.push(text(`  curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/bin/install.sh | bash`, 'help'));

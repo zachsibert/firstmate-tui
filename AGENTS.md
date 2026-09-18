@@ -9,30 +9,25 @@ A read-only terminal board over the firstmate fleet, hosted in herdr. The
 command is `firstmate-tui` (bare, or `open`, runs the board in the current
 pane; `focus`, `upgrade`, `version`, `help`; `run` is a hidden synonym of the
 default); `fm-board`, the name up to 0.1.0, is written by the installer as an
-alias for the 0.2.x release only. The release asset `fm-board-<tag>.tar.gz`,
-the default prefix `~/.local/share/fm-board`, and `bin/fm-board.sh` and
-`bin/fm-board/` inside the tarball still carry the old name because an
-install upgrades by running the `bin/install.sh` that shipped in its own
-tarball, and every installer before step 1 below downloads and checks
-exactly those; the launcher then writes `firstmate-tui` beside `fm-board`
-(`ensure_new_command`). The rename is two steps. Step 1, in `bin/install.sh`:
-it asks for `firstmate-tui-<tag>.tar.gz` before `fm-board-<tag>.tar.gz`,
-accepts either layout inside the tarball (`bin/firstmate-tui.sh` with
-`bin/firstmate-tui/`, or the old pair, never a mix), points both commands at
-whichever launcher the tree has, and writes `layout=` into the install
-record; `tests/install.test.sh` checks it against a stand-in 0.3.0 tarball
-it builds. Step 2, not before every install has upgraded to a release that
-carries that installer (an install upgrading with an older installer still
-asks for the old asset name): flip the asset name in `scripts/package.sh`,
-the paths in the tarball and the launcher (`BOARD_DIR`, the relaunch and
-`open --detached` paths, `write_command`), the workflow, the README, both
-test suites and this note, as 0.3.0, and keep the `fm-board` alias one more
-release. Keep the 0.1.0 upgrade walk in `tests/install.test.sh` (built from
-the `v0.1.0` tag) green until step 2 lands. The herdr plugin id
-`firstmate.board` stays regardless: linked plugins and the view-state
-directory are keyed by it. The
+alias through 0.3.x and goes in the next release (drop the second
+`write_command` call in `bin/install.sh`, `OLD_NAME` in both scripts,
+`ensure_new_command`, and the alias checks in `tests/install.test.sh`). The
+rename of the asset (`firstmate-tui-<tag>.tar.gz`) and of the paths inside
+it (`bin/firstmate-tui.sh`, `bin/firstmate-tui/`) is done as of 0.3.0; only
+the default prefix `~/.local/share/fm-board`, the pane-record and view-state
+directories named `fm-board` and the view-state schema keep the old word, so
+an upgrade moves nothing. Because an install upgrades by running the
+`bin/install.sh` that shipped in its own tarball, `bin/install.sh` still
+asks for the old asset name after the new one and accepts either layout
+(never a mix), so a 0.2.x release can be installed again; installs older
+than 0.2.5 reach 0.3.0 only through 0.2.5 (the last release under the old
+name, and the first installer that knows both), and `tests/install.test.sh`
+walks both chains with the real installers from the `v0.1.0` and `v0.2.5`
+tags. The herdr plugin id `firstmate.board` stays: linked plugins and the
+view-state directory are keyed by it; a plugin linked at the old
+`bin/fm-board` path is relinked once. The
 scout report at `docs/scout-report-2026-09-16.md` is the design record: its
-section 1 table is the pane-to-data mapping that `bin/fm-board/lib/model.mjs`
+section 1 table is the pane-to-data mapping that `bin/firstmate-tui/lib/model.mjs`
 implements row for row, and its section 7 table is the milestone plan. Check
 the plan before widening scope: answering decisions, opening PRs, toasts and
 the findings watermark belong to later milestones.
@@ -57,8 +52,8 @@ the findings watermark belong to later milestones.
   on PATH), and upgrading itself from the Settings page (`.`): only after a
   `y` confirmation, only by running the installed launcher's own
   `firstmate-tui upgrade --version <v>` / `--stable` (`lib/upgrade.mjs`, argv
-  spawn of `bash <prefix>/bin/fm-board.sh upgrade ...`), so the record checks
-  and the swap stay in `bin/fm-board.sh` and `bin/install.sh`; the relaunch is
+  spawn of `bash <prefix>/bin/firstmate-tui.sh upgrade ...`), so the record checks
+  and the swap stay in `bin/firstmate-tui.sh` and `bin/install.sh`; the relaunch is
   exit 75, which `run_board` in the launcher answers by starting the same path
   again. It never moves or closes a herdr
   pane; the captain splits panes himself, so do not bring back an `f` toggle
@@ -72,7 +67,7 @@ the findings watermark belong to later milestones.
 - `FM_HOME` is explicit, never inferred from the current directory. The
   launcher's FM_HOME error may name a home it finds above the working
   directory as the command to run, but it never adopts one (`die_no_home`
-  in `bin/fm-board.sh`); the plugin `fm-home` file is the one automatic
+  in `bin/firstmate-tui.sh`); the plugin `fm-home` file is the one automatic
   fallback.
 - yimbot (github.com/YiminArava4508/yimbot) ships no license: it is a pattern
   reference only. Do not copy code from it.
@@ -135,7 +130,7 @@ the findings watermark belong to later milestones.
   comes from the same block (`refreshing: true` with no snapshot or `prs`
   block, `loading_frame` for the glyph), and it counts ticks, never the
   clock, so keep it that way or one-shot frames stop being deterministic. The Settings page
-  is tested with `--install-root` at a fake prefix whose `bin/fm-board.sh` is
+  is tested with `--install-root` at a fake prefix whose `bin/firstmate-tui.sh` is
   `tests/fake-upgrade.sh` and with `--curl-cmd bash tests/fake-curl.sh` over
   `tests/fixtures/releases/api`; a one-shot render without `--curl-cmd`
   fetches nothing by design, and the launcher's relaunch loop runs against
@@ -148,7 +143,7 @@ the findings watermark belong to later milestones.
   when no local binary is installed). Every `rm` on a variable path takes
   the `${VAR:?}` guard so an empty variable fails instead of widening.
 - Distribution is GitHub Releases (README "Install" and "Releasing"). The
-  one version source is `version` in `bin/fm-board/package.json`, and
+  one version source is `version` in `bin/firstmate-tui/package.json`, and
   `.github/workflows/release.yml` is the only release path. Every push to
   `main` is a release: `scripts/next-version.sh` picks package.json's
   version when its tag is free, else the next free patch, and the workflow

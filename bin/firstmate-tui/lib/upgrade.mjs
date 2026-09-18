@@ -1,15 +1,18 @@
 // lib/upgrade.mjs - the two pieces of I/O behind the Settings page that are
 // not the releases API: reading the install identity and running the upgrade.
 //
-// An install is <root>/bin/fm-board.sh plus <root>/install-record, the
+// An install is <root>/bin/firstmate-tui.sh plus <root>/install-record, the
 // key=value file bin/install.sh writes (prefix, bin_dir, repo, version,
-// installed_from); the running version is the "version" in
-// <root>/bin/fm-board/package.json. <root> is the directory two levels above
-// this package (the install prefix, or a checkout), or --install-root when a
-// test points the page at a fake prefix. A root without a record is a
-// checkout: the page shows the git pull hint and no upgrade actions.
+// installed_from, layout); the running version is the "version" in
+// <root>/bin/firstmate-tui/package.json. <root> is the directory two levels
+// above this package (the install prefix, or a checkout), or --install-root
+// when a test points the page at a fake prefix. A root laid out the 0.2.x way
+// (bin/fm-board.sh beside bin/fm-board/) is read the same, with that launcher
+// and that package.json, so the page works whichever layout is under it. A
+// root without a record is a checkout: the page shows the git pull hint and
+// no upgrade actions.
 //
-// The upgrade itself is `bash <root>/bin/fm-board.sh upgrade --version <v>`
+// The upgrade itself is `bash <root>/bin/firstmate-tui.sh upgrade --version <v>`
 // (or --stable), spawned as an argv with piped stdout and stderr so each line
 // lands on the page as it arrives. The launcher checks the record and execs
 // the bin/install.sh that shipped with the copy, so download, verify and swap
@@ -38,9 +41,19 @@ export function parseInstallRecord(text) {
   return record;
 }
 
+// The launcher and package directory share a name: firstmate-tui, or fm-board
+// for a 0.2.x tree. The current name wins when a root somehow has both.
+export const LAYOUTS = ['firstmate-tui', 'fm-board'];
+
+export function installLayout(root) {
+  const r = String(root).replace(/\/+$/, '');
+  return LAYOUTS.find((layout) => existsSync(`${r}/bin/${layout}.sh`)) || LAYOUTS[0];
+}
+
 export function readInstall(root) {
   const r = String(root).replace(/\/+$/, '');
-  const pkgPath = `${r}/bin/fm-board/package.json`;
+  const layout = installLayout(r);
+  const pkgPath = `${r}/bin/${layout}/package.json`;
   const recordPath = `${r}/install-record`;
   let version = null;
   let error = null;
@@ -64,7 +77,8 @@ export function readInstall(root) {
     record,
     checkout: !record,
     git: existsSync(`${r}/.git`),
-    launcher: `${r}/bin/fm-board.sh`,
+    layout,
+    launcher: `${r}/bin/${layout}.sh`,
     repo: record && record.repo ? record.repo : DEFAULT_REPO,
     error,
   };

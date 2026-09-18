@@ -42,9 +42,9 @@
 //
 // The Settings page (`.`, lib/settings.mjs) fetches the GitHub releases API
 // through --curl-cmd when it opens and on r inside it, never on the tick; a
-// confirmed upgrade runs `bash <root>/bin/fm-board.sh upgrade ...` with piped
+// confirmed upgrade runs `bash <root>/bin/firstmate-tui.sh upgrade ...` with piped
 // output and each line is drawn as it arrives; the relaunch key exits the
-// process with RELAUNCH_EXIT, which bin/fm-board.sh run answers by starting
+// process with RELAUNCH_EXIT, which bin/firstmate-tui.sh run answers by starting
 // the copy at the same path again (Node cannot exec in place).
 
 import { buildModel, parseTarget } from './model.mjs';

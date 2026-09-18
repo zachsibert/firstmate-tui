@@ -1,5 +1,5 @@
 # herdr plugin manifest for firstmate-tui. Link once with:
-#   herdr plugin link /path/to/firstmate-tui/bin/fm-board
+#   herdr plugin link /path/to/firstmate-tui/bin/firstmate-tui
 # `firstmate-tui` (or `firstmate-tui open`) runs the board in the pane you
 # type it in; `firstmate-tui open --detached` opens it as a tab pane in the
 # current workspace instead (never splitting the captain pane). The open
@@ -9,10 +9,12 @@
 #   key = "prefix+y"
 #   type = "plugin_action"
 #   command = "firstmate.board.focus"
-# Plugin commands run with this directory as cwd, so ../fm-board.sh is the
-# launcher (the file keeps its old name so 0.1.0 installs can upgrade; the id
-# firstmate.board stays too, because linked plugins and the view-state
-# directory are keyed by it). Actions carry no FM_HOME; write it once to
+# Plugin commands run with this directory as cwd, so ../firstmate-tui.sh is the
+# launcher. Up to 0.2.x this directory was bin/fm-board: a plugin linked at
+# that path must be linked again once at the new one (herdr plugin unlink
+# firstmate.board, then the link line above). The id firstmate.board stays,
+# because linked plugins and the view-state directory are keyed by it.
+# Actions carry no FM_HOME; write it once to
 # "$(herdr plugin config-dir firstmate.board)/fm-home".
 
 id = "firstmate.board"
@@ -26,16 +28,16 @@ platforms = ["macos", "linux"]
 id = "board"
 title = "firstmate-tui"
 placement = "tab"
-command = ["bash", "../fm-board.sh", "open"]
+command = ["bash", "../firstmate-tui.sh", "open"]
 
 [[actions]]
 id = "open"
 title = "Open firstmate-tui in a tab pane"
 contexts = ["workspace"]
-command = ["bash", "../fm-board.sh", "open", "--detached"]
+command = ["bash", "../firstmate-tui.sh", "open", "--detached"]
 
 [[actions]]
 id = "focus"
 title = "Focus firstmate-tui"
 contexts = ["workspace"]
-command = ["bash", "../fm-board.sh", "focus"]
+command = ["bash", "../firstmate-tui.sh", "focus"]

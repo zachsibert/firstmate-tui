@@ -3,8 +3,9 @@
 # workflows, on every pull request and on every push to a branch other than
 # main (a push to main is a release, .github/workflows/release.yml, and its
 # checks ran on the pull request). Read-only: the built-in token with
-# contents: read, no secrets. The install suite builds the 0.1.0 tarball from
-# the v0.1.0 tag, so the checkout fetches the whole history and its tags. The
+# contents: read, no secrets. The install suite builds the 0.1.0 and 0.2.5
+# tarballs from their tags, so the checkout fetches the whole history and its
+# tags. The
 # board suite runs with FORCE_COLOR unset because one of its checks compares
 # node's plain output. Pin each action to a major version tag
 # (tests/install.test.sh checks the release workflow the same way).
@@ -42,7 +43,7 @@ jobs:
 
       - name: Install the board's dependencies
         run: npm ci
-        working-directory: bin/fm-board
+        working-directory: bin/firstmate-tui
 
       - name: Board suite
         run: env -u FORCE_COLOR bash tests/fm-board.test.sh

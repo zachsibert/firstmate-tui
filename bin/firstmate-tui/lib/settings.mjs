@@ -5,12 +5,12 @@
 // install record and runs the upgrade, lib/sources.mjs fetches the releases,
 // lib/render.mjs draws the page and lib/controller.mjs applies the actions.
 //
-// The page shows the running version (bin/fm-board/package.json), where the
+// The page shows the running version (bin/firstmate-tui/package.json), where the
 // copy is installed (<prefix>/install-record, written by bin/install.sh) and
 // the latest stable release; from an install it offers one `Upgrade to <v>`
 // action, a Betas submenu of prereleases with `Back to stable`, and after a
 // successful install a relaunch. Every install goes through one confirmation
-// (`y`) and then runs `bash <prefix>/bin/fm-board.sh upgrade ...`, so the
+// (`y`) and then runs `bash <prefix>/bin/firstmate-tui.sh upgrade ...`, so the
 // launcher's own record checks stay the single owner of that path. A git
 // checkout (no install record) gets the `git pull` hint and no actions.
 //
@@ -36,7 +36,7 @@ import { hitTest } from './layout.mjs';
 
 export const DEFAULT_REPO = 'zachsibert/firstmate-tui';
 
-// The board exits with this status on the relaunch key; bin/fm-board.sh run
+// The board exits with this status on the relaunch key; bin/firstmate-tui.sh run
 // then starts the copy at the same path again, which after an upgrade is the
 // new one.
 export const RELAUNCH_EXIT = 75;
@@ -54,7 +54,7 @@ export function parseVersion(v) {
 
 // stable (X.Y.Z), beta (X.Y.Z-<7 hex>, the per-commit prerelease the release
 // workflow publishes), prerelease (any other suffix) or unknown. Mirrors
-// version_kind in bin/fm-board.sh.
+// version_kind in bin/firstmate-tui.sh.
 export function versionKind(v) {
   const p = parseVersion(v);
   if (!p) return 'unknown';
@@ -72,7 +72,7 @@ export function compareBase(a, b) {
   return 0;
 }
 
-// The same words `firstmate-tui version` prints (NAME in bin/fm-board.sh).
+// The same words `firstmate-tui version` prints (NAME in bin/firstmate-tui.sh).
 export function describeVersion(v) {
   switch (versionKind(v)) {
     case 'stable':
