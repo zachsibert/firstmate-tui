@@ -37,7 +37,7 @@ the old `bin/fm-board` path is relinked once. The
 scout report at `docs/scout-report-2026-09-16.md` is the design record: its
 section 1 table is the pane-to-data mapping that `bin/firstmate-tui/lib/model.mjs`
 implements row for row (since 0.4.0 its Ready for review row is two panes, My
-PRs and To review, both over the identity in the board's config file; the
+PRs and Teammates' PRs, both over the identity in the board's config file; the
 README's Panes section is the current mapping), and its section 7 table is
 the milestone plan. Check the plan before widening scope: answering
 decisions, opening PRs, toasts and the findings watermark belong to later
@@ -52,7 +52,7 @@ milestones.
   location chain and refuses a path inside `FM_HOME`) and `config.json` beside
   it (`lib/config.mjs`, the same chain, passed by the launcher as `--config`
   the way `--view-state` is): the GitHub login the two PR panes are built
-  around and the To review label rules. The board writes `config.json` once,
+  around and the Teammates' PRs label rules. The board writes `config.json` once,
   from `EXAMPLE_CONFIG`, when no file is there, and never again; the test
   suite pins that constant byte for byte to `docs/config.example.json`, so
   change both together. Hiding is view state because firstmate retires Done
@@ -68,7 +68,7 @@ milestones.
   refreshing its own data (`r`: the snapshot, then the live PR fetch
   unless `--no-prs`; that fetch is the board's own read-only GitHub search
   through `gh api graphql` in `lib/sources.mjs`: at most four searches per
-  tick, My PRs open and tail by `author:<login>`, To review open and tail by
+  tick, My PRs open and tail by `author:<login>`, Teammates' PRs open and tail by
   `review-requested:<login> -author:<login>` over the candidate repositories
   plus the config file's, each `first: 50`, plus one aliased lookup of the
   recorded task PRs the author searches missed; `gh search prs --json` cannot
@@ -194,12 +194,16 @@ milestones.
   back unnoticed; it logs a search with the `closed:>=` stamp replaced by
   `<since>` so the suite compares whole logs. A live render also writes the
   example config into its `XDG_CONFIG_HOME`, which is how the gemini rule
-  reaches the To review scope in those checks. The identity chain is tested
+  reaches the Teammates' PRs scope in those checks. The identity chain is tested
   with a fake `git` that answers `config --get github.user` alone and hands
   every other call to the real one, because `candidateRepos` runs git too.
-  `populated.json` and `pr-status.json` are 160x44, not 40: the sixth pane
-  needs three lines, and 44 keeps the first five panes on the lines the mouse
-  and line-number checks name.
+  `populated.json` and `pr-status.json` are 160x44, not 40: six panes need
+  the room, and the mouse and line-number checks name lines on that frame.
+  The pane order is `PANES` in `lib/layout.mjs` (Needs you, My PRs,
+  Teammates' PRs, In flight, Findings, Landed); the 1-6 keys follow it by
+  position, the height priorities name panes by id, and view state is keyed
+  by pane id, so a reorder moves the mouse and line-number checks and
+  nothing else.
   The refresh schedule (the snapshot, then the gh calls; the next refresh
   armed on completion for the last start plus `--refresh`, so a slow refresh
   is followed at once and never doubled; a tick that lands mid-refresh

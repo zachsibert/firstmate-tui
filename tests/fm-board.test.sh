@@ -69,22 +69,23 @@
 #                   secondmate-relayed decision, a green-unmerged PR, a done
 #                   task with a merged PR, recorded PRs (one live candidate
 #                   with a creation time), herdr statuses, a tmux task, a
-#                   remote cached home, reports and landed rows, an empty To
-#                   review pane, and a refresh block ({"next_in": 18}) standing
+#                   remote cached home, reports and landed rows, an empty
+#                   Teammates' PRs pane, and a refresh block ({"next_in": 18}) standing
 #                   in for the app's schedule; the refreshing, failed and
 #                   herdr-state variants are derived from it at run time
-#                   (variant). 44 rows: the sixth pane's three lines go below
-#                   Landed, so the first five panes keep the lines they had
+#                   (variant). 44 rows: six panes need the room; the mouse and
+#                   line-number checks name lines on this frame
 #   my-prs.json     160x44, My PRs as the union: the identity's own open PR in
 #                   a repository no task touches, a bot-authored PR recorded on
 #                   a task, the identity's PRs merged and closed inside the
-#                   window, a recorded PR the fetch did not return, and a To
-#                   review row that must stay out of My PRs
-#   to-review.json  160x44, To review: one PR per STATUS word (DRAFT, IN
+#                   window, a recorded PR the fetch did not return, and a
+#                   Teammates' PRs row that must stay out of My PRs
+#   to-review.json  160x44, Teammates' PRs: one PR per STATUS word (DRAFT, IN
 #                   REVIEW, CHANGES REQUESTED, APPROVED, MERGED), a request
 #                   through a team, a labelled gemini PR, a PR merged outside
-#                   the window and the identity's own PR, both dropped, with
-#                   the scope the fetch searched
+#                   the window and the identity's own PR, both dropped, the
+#                   AUTHOR column (a long login, a null author) and the scope
+#                   the fetch searched
 #   pr-ages.json    160x40, My PRs AGE sources: candidates with a
 #                   creation time, without one, with a future and a malformed
 #                   one, the camel-case alias, no-task candidates and a
@@ -321,9 +322,9 @@ assert_before "$frame" "Findings \(3\)" "Landed \(4\)" "pane order 4"
 # top border in renderPanes, or change paneBadge).
 assert_contains "$frame" "┌─ [1] Needs you (4) ─" "badge on Needs you"
 assert_contains "$frame" "┌─ [2] My PRs (3) ─" "badge on My PRs"
-assert_contains "$frame" "┌─ [3] In flight (7) ─" "badge on In flight"
-assert_contains "$frame" "┌─ [4] Findings (3) ─" "badge on Findings"
-assert_contains "$frame" "┌─ [5] Landed (4) ─" "badge on Landed"
+assert_contains "$frame" "┌─ [4] In flight (7) ─" "badge on In flight"
+assert_contains "$frame" "┌─ [5] Findings (3) ─" "badge on Findings"
+assert_contains "$frame" "┌─ [6] Landed (4) ─" "badge on Landed"
 assert_count "$frame" "┌─ [" 6 "exactly six badges, one per pane"
 # With --tags the badge is its own grey segment between the border segments (falsify: give the badge the
 # border style, or drop `badge` from STYLE_TAGS).
@@ -433,11 +434,14 @@ assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship
 # Frame geometry (falsify: change the fixture cols/rows, or break padding in render.mjs).
 assert_lines "$frame" 44 "populated frame is 44 lines"
 assert_widths "$frame" 160 "populated frame lines are 160 columns"
-# The sixth pane sits below Landed with the empty text of a pane whose scope has PRs but no request
-# (falsify: reorder PANES in lib/layout.mjs, or change the toreview empty text).
-assert_before "$frame" "Landed \(4\)" "To review \(0\)" "pane order 5: To review is the sixth pane, below Landed"
-assert_contains "$frame" "┌─ [6] To review (0) ─" "badge on To review"
-assert_row "$frame" '^│ no pull requests waiting for your review +│$' "populated: To review is empty (no toreview rows in the fixture)"
+# Teammates' PRs sits between My PRs and In flight, so the two PR panes read side by side, with the
+# empty text of a pane whose scope has PRs but no request (falsify: reorder PANES in lib/layout.mjs,
+# or change the toreview empty text).
+assert_before "$frame" "My PRs \(3\)" "Teammates' PRs \(0\)" "pane order 5: Teammates' PRs is the third pane, below My PRs"
+assert_before "$frame" "Teammates' PRs \(0\)" "In flight \(7\)" "pane order 6: In flight follows Teammates' PRs"
+assert_contains "$frame" "┌─ [3] Teammates' PRs (0) ─" "badge on Teammates' PRs"
+assert_row "$frame" '^│ no pull requests waiting for your review +│$' "populated: Teammates' PRs is empty (no toreview rows in the fixture)"
+assert_row "$frame" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' "populated: the empty Teammates' PRs pane still heads its AUTHOR column (falsify: size the column set by the rows present)"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
 assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys (falsify: drop . settings from FOOTER_KEYS)"
 
@@ -455,12 +459,12 @@ assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "enter on a group ro
 frame_k=$(render populated.json --keys "tab,tab,enter") || fail "keys enter worker: render exited non-zero"
 assert_contains "$frame_k" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus"
 frame_k=$(render populated.json --keys "?") || fail "keys ?: render exited non-zero"
-assert_contains "$frame_k" "enter        My PRs, To review, Landed or a Needs-you PR row: open the PR in the browser" "help overlay documents enter on Landed"
+assert_contains "$frame_k" "enter        My PRs, Teammates' PRs, Landed or Needs-you PR row: open it in the browser" "help overlay documents enter on Landed and names the two PR panes"
 assert_not_contains "$frame_k" "open the PR of the selected row" "help overlay no longer documents o"
 assert_contains "$frame_k" "l / right    expand the selected In flight group" "help overlay documents l/right"
 # The help lists the pane keys the way the badges show them (falsify: change the 1 - 5 lines in HELP_LINES).
 assert_contains "$frame_k" "each pane title carries its key: [1] Needs you" "help overlay ties the 1-5 keys to the title badges"
-assert_contains "$frame_k" "[2] My PRs  [3] In flight  [4] Findings  [5] Landed  [6] To review" "help overlay lists every badge"
+assert_contains "$frame_k" "[2] My PRs  [3] Teammates' PRs  [4] In flight  [5] Findings  [6] Landed" "help overlay lists every badge in screen order (falsify: leave the old order in HELP_LINES)"
 assert_contains "$frame_k" "0            show every pane (with all six hidden the board lists these keys)" "help overlay documents 0 and the landing page"
 
 # Opening a PR: enter in My PRs, on a Needs-you PR row and on a Landed row with a PR,
@@ -506,7 +510,7 @@ assert_before "$frame_prs" '^│ passing +IN REVIEW +ship-alpha' '^│ failing +
 # Medium width: REPO and AGE drop below 100 columns (falsify: change WIDE_BREAKPOINT in lib/layout.mjs).
 frame_med=$(render populated.json --cols 90 --rows 30) || fail "medium: render exited non-zero"
 assert_contains "$frame_med" "Needs you (4)" "medium keeps the six panes"
-assert_contains "$frame_med" "To review (0)" "medium: To review is drawn too"
+assert_contains "$frame_med" "Teammates' PRs (0)" "medium: Teammates' PRs is drawn too"
 assert_row "$frame_med" '^│ STATE +HERDR +ID +WHAT +HOME +│$' "medium keeps the HERDR column and drops REPO and AGE"
 assert_no_row "$frame_med" ' REPO +HOME' "medium drops REPO"
 assert_no_row "$frame_med" ' HOME +AGE' "medium drops AGE"
@@ -529,7 +533,7 @@ assert_row "$frame_empty" '^│ no pull requests of yours +│$' "empty My PRs m
 assert_row "$frame_empty" '^│ no workers in flight +│$' "empty in-flight message"
 assert_row "$frame_empty" '^│ no scout reports +│$' "empty findings message"
 assert_row "$frame_empty" '^│ nothing landed yet +│$' "empty landed message"
-assert_row "$frame_empty" '^│ no pull requests waiting for your review +│$' "empty To review message (falsify: change the toreview empty text in PANES)"
+assert_row "$frame_empty" '^│ no pull requests waiting for your review +│$' "empty Teammates' PRs message (falsify: change the toreview empty text in PANES)"
 # No herdr block under --no-herdr is the state "off" with the reason --no-herdr: the title line warns
 # once and no pane header says anything about herdr (falsify: drop the detail from factsFromFixture's
 # no-block branch, or the 'off' case from herdrWarning).
@@ -545,14 +549,14 @@ frame_narrow=$(render narrow.json) || fail "narrow: render exited non-zero"
 # Section headers carry the same key badge as the pane titles (falsify: drop `badge` from the section
 # entry in flattenRows, or the badge segment in renderList).
 assert_row "$frame_narrow" '^── \[1\] Needs you \(1\) ─+$' "narrow: section header with its badge and count only, padded with dashes"
-assert_contains "$frame_narrow" "── [2] My PRs (0)" "narrow: review section badge"
-assert_contains "$frame_narrow" "── [3] In flight (2)" "narrow: in-flight section badge"
-assert_contains "$frame_narrow" "── [4] Findings (0)" "narrow: findings section badge"
-assert_contains "$frame_narrow" "── [5] Landed (1)" "narrow: landed section badge"
-assert_contains "$frame_narrow" "── [6] To review (0)" "narrow: To review section badge"
+assert_contains "$frame_narrow" "── [2] My PRs (0)" "narrow: My PRs section badge"
+assert_contains "$frame_narrow" "── [3] Teammates' PRs (0)" "narrow: Teammates' PRs section badge, third in screen order"
+assert_contains "$frame_narrow" "── [4] In flight (2)" "narrow: in-flight section badge"
+assert_contains "$frame_narrow" "── [5] Findings (0)" "narrow: findings section badge"
+assert_contains "$frame_narrow" "── [6] Landed (1)" "narrow: landed section badge"
 assert_count "$frame_narrow" "── [" 6 "narrow: six badges, one per section"
 assert_not_contains "$frame_narrow" "┌" "narrow: no pane borders"
-assert_row "$frame_narrow" '^ STATE +ID +WHAT +HOME +$' "narrow: single shared column header without REPO, AGE or HERDR"
+assert_row "$frame_narrow" '^ STATE +ID +WHAT +HOME +$' "narrow: single shared column header without REPO, AGE, HERDR or AUTHOR"
 assert_row "$frame_narrow" '^ hold +decide-vendor +Pick the vendor for the addr… +main +$' "narrow: hold row in list mode, text truncated to the flex column (which is what the fixed columns leave after sizing to their values)"
 assert_row "$frame_narrow" '^ working +ship-alpha +harness busy \(claude-hook\) +main +$' "narrow: in-flight row"
 assert_row "$frame_narrow" '^ working +▸ notes +notes-child +notes \(cached\) *$' "narrow: cached home group row in list mode"
@@ -704,14 +708,14 @@ assert_widths "$frame_l" 160 "lost frame lines are 160 columns"
 # ---------------------------------------------------------- landed targets
 # Enter on a Landed row takes the first target the row has that this board can reach: its PR, else
 # its report on this host, else its worker pane while herdr lists it, else an ordinary footer notice
-# (landedTarget in lib/controller.mjs). landed-targets.json at 160x44 (the sixth pane's three lines go
-# below Landed, so the Landed lines are those of the five-pane board at 40): Landed's rows are lines 29-37
+# (landedTarget in lib/controller.mjs). landed-targets.json at 160x44 (Teammates' PRs takes four lines
+# between My PRs and In flight, so every pane below it sits four lines lower): Landed's rows are lines 33-41
 # (etl-index, ship-done, etl-pane, ship-old, etl-report, plain-done, mobile-fix, etl-none, old-scout)
 # and tab reaches the pane in four presses. The WHAT text names the first target that exists
 # (falsify: drop a rung from landedWhat in lib/model.mjs, the task or endpoint lookup that gives a
 # done row its pane, or the report_path resolution).
 frame_t=$(render landed-targets.json) || fail "landed targets: render exited non-zero"
-assert_contains "$frame_t" "┌─ [5] Landed (9) ─" "landed targets: nine rows, one per target shape"
+assert_contains "$frame_t" "┌─ [6] Landed (9) ─" "landed targets: nine rows, one per target shape"
 assert_row "$frame_t" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +hyperion +1d │$' "secondmate row with a PR names the PR"
 assert_row "$frame_t" '^│ done +09-14 +ship-done +Apply the widget migration · pane w1F:p1 +acme/widgets +main +2d │$' "main row whose done task still has its pane names the pane"
 assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table · pane w2C:p2 +- +hyperion +3d │$' "secondmate row whose ledger endpoint herdr lists names the pane"
@@ -799,8 +803,8 @@ assert_not_contains "$tags_t" "{red-fg}plain-done: nothing to open" "the nothing
 frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter none secondmate: render exited non-zero"
 assert_contains "$frame_t" "etl-none: nothing to open (no PR, report or pane)" "enter on a secondmate Landed row with nothing reads nothing to open"
 # A double-click follows the same rungs, because mouseAction reuses keyAction enter (falsify: give
-# 'activate' a PR-only action of its own). Line 33 is etl-report, the report-only secondmate row.
-frame_t=$(render_mouse landed-targets.json "dblclick:60,33") || fail "landed dblclick report: render exited non-zero"
+# 'activate' a PR-only action of its own). Line 37 is etl-report, the report-only secondmate row.
+frame_t=$(render_mouse landed-targets.json "dblclick:60,37") || fail "landed dblclick report: render exited non-zero"
 assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "double-click on a report-only Landed row views the report"
 assert_not_opened "double-click on a report-only Landed row calls no opener"
 assert_contains "$frame_t" "viewed /fixture/homes/hyperion/data/etl-report/report.md (viewer-cmd)" "double-click: the footer names the viewed report"
@@ -890,30 +894,30 @@ if [ -e /fixture/firstmate/state/view-state.json ]; then fail "the refused path 
 
 # ------------------------------------------------------------ pane toggles
 rm -f "$vs"
-# 5 hides Landed; its rows go to the other panes; the title lists it (falsify: drop the visible list from
+# 6 hides Landed; its rows go to the other panes; the title lists it (falsify: drop the visible list from
 # paneHeights, or the hidden skip in renderPanes).
-frame_p=$(render populated.json --view-state "$vs" --keys "5") || fail "panes 5: render exited non-zero"
-assert_contains "$frame_p" "· panes hidden: 5" "title lists the hidden pane number"
+frame_p=$(render populated.json --view-state "$vs" --keys "6") || fail "panes 6: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 6" "title lists the hidden pane number"
 assert_not_contains "$frame_p" "Landed (" "the hidden pane draws nothing"
 assert_count "$frame_p" "┌─" 5 "five pane frames remain"
 assert_lines "$frame_p" 44 "one pane hidden: the frame is still 44 lines"
 assert_widths "$frame_p" 160 "one pane hidden: lines are 160 columns"
-assert_contains "$frame_p" "pane hidden: Landed · 5 or 0 shows it again" "5 leaves a notice"
+assert_contains "$frame_p" "pane hidden: Landed · 6 or 0 shows it again" "6 leaves a notice"
 assert_file_contains "$vs" '"landed"' "the hidden pane is persisted"
 frame_p=$(render populated.json --view-state "$vs") || fail "panes reload: render exited non-zero"
 assert_count "$frame_p" "┌─" 5 "after a restart the pane stays hidden (falsify: drop hidden_panes from loadViewState)"
-# 6 hides To review, the sixth pane (falsify: drop the '6' case from keyAction, or paneForKey's bound).
-frame_p=$(render populated.json --view-state "$vs" --keys "6") || fail "panes 6: render exited non-zero"
-assert_contains "$frame_p" "· panes hidden: 5,6" "6 hides To review and the title lists it"
-assert_not_contains "$frame_p" "To review (" "the hidden To review pane draws nothing"
-assert_contains "$frame_p" "pane hidden: To review · 6 or 0 shows it again" "6 leaves a notice naming its key"
-assert_file_contains "$vs" '"toreview"' "the hidden To review pane is persisted under its id"
-frame_p=$(render populated.json --view-state "$vs" --keys "6") || fail "panes 6 again: render exited non-zero"
-assert_contains "$frame_p" "┌─ [6] To review (0)" "6 again brings To review back"
-assert_contains "$frame_p" "pane shown: To review" "6 again leaves the shown notice"
+# 3 hides Teammates' PRs, the third pane (falsify: drop the '3' case from keyAction, or move toreview in PANES).
+frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "panes 3: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 3,6" "3 hides Teammates' PRs and the title lists it"
+assert_not_contains "$frame_p" "Teammates' PRs (" "the hidden Teammates' PRs pane draws nothing"
+assert_contains "$frame_p" "pane hidden: Teammates' PRs · 3 or 0 shows it again" "3 leaves a notice naming its key"
+assert_file_contains "$vs" '"toreview"' "the hidden Teammates' PRs pane is persisted under its id, never its key"
+frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "panes 3 again: render exited non-zero"
+assert_contains "$frame_p" "┌─ [3] Teammates' PRs (0)" "3 again brings Teammates' PRs back"
+assert_contains "$frame_p" "pane shown: Teammates' PRs" "3 again leaves the shown notice"
 assert_file_not_contains "$vs" '"toreview"' "the shown pane leaves the persisted list"
-frame_p=$(render populated.json --view-state "$vs" --keys "1,2,4,6") || fail "panes 1,2,4,6: render exited non-zero"
-assert_contains "$frame_p" "· panes hidden: 1,2,4,5,6" "five panes hidden: the title lists all five"
+frame_p=$(render populated.json --view-state "$vs" --keys "1,2,3,5") || fail "panes 1,2,3,5: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 1,2,3,5,6" "five panes hidden: the title lists all five"
 assert_count "$frame_p" "┌─" 1 "five panes hidden: one frame"
 assert_contains "$frame_p" "In flight (7)" "five panes hidden: In flight remains"
 assert_lines "$frame_p" 44 "five panes hidden: still 44 lines"
@@ -922,7 +926,7 @@ assert_row "$frame_p" '^│ decide +1 live +!▸ hyperion ' "five panes hidden: 
 # The last pane goes too: with every pane hidden the grid gives way to the landing page, a centered key
 # list between the title line and the footer (falsify: bring back a shown <= 1 guard in toggle-pane, or
 # drop the landing branch from renderFrame).
-frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "panes last: render exited non-zero"
+frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "panes last: render exited non-zero"
 assert_count "$frame_p" "┌─" 0 "all panes hidden: no pane frame is drawn"
 assert_not_contains "$frame_p" "Needs you (" "all panes hidden: no pane header"
 assert_not_contains "$frame_p" "In flight (" "all panes hidden: no pane header for the last one hidden"
@@ -930,17 +934,18 @@ assert_row "$frame_p" '^ +all panes hidden +$' "landing page heading"
 assert_row "$frame_p" '^ firstmate-tui · /fixture/firstmate · 3 homes · all panes hidden ' "landing page: the title line leads with firstmate-tui (falsify: put fm-board back in titleLine)"
 assert_row "$frame_p" '^ +1  Needs you +$' "landing page: 1 brings Needs you back"
 assert_row "$frame_p" '^ +2  My PRs +$' "landing page: 2 brings My PRs back"
-assert_row "$frame_p" '^ +3  In flight +$' "landing page: 3 brings In flight back"
-assert_row "$frame_p" '^ +4  Findings +$' "landing page: 4 brings Findings back"
-assert_row "$frame_p" '^ +5  Landed +$' "landing page: 5 brings Landed back"
-assert_row "$frame_p" '^ +6  To review +$' "landing page: 6 brings To review back (falsify: drop the sixth pane from landingEntries)"
+assert_row "$frame_p" "^ +3  Teammates' PRs +\$" "landing page: 3 brings Teammates' PRs back (falsify: drop the third pane from landingEntries)"
+assert_row "$frame_p" '^ +4  In flight +$' "landing page: 4 brings In flight back"
+assert_row "$frame_p" '^ +5  Findings +$' "landing page: 5 brings Findings back"
+assert_row "$frame_p" '^ +6  Landed +$' "landing page: 6 brings Landed back"
 assert_row "$frame_p" '^ +0  show all +$' "landing page: 0 shows all"
 assert_row "$frame_p" '^ +r  refresh +$' "landing page: r"
 assert_row "$frame_p" '^ +\?  help +$' "landing page: ?"
 assert_row "$frame_p" '^ +q  quit +$' "landing page: q"
 assert_before "$frame_p" '^ +all panes hidden +$' '^ +1  Needs you +$' "landing page: heading first"
-assert_before "$frame_p" '^ +5  Landed +$' '^ +6  To review +$' "landing page: To review after Landed"
-assert_before "$frame_p" '^ +6  To review +$' '^ +0  show all +$' "landing page: 0 after the six panes"
+assert_before "$frame_p" '^ +2  My PRs +$' "^ +3  Teammates' PRs +\$" "landing page: Teammates' PRs after My PRs"
+assert_before "$frame_p" "^ +3  Teammates' PRs +\$" '^ +4  In flight +$' "landing page: In flight after Teammates' PRs"
+assert_before "$frame_p" '^ +6  Landed +$' '^ +0  show all +$' "landing page: 0 after the six panes"
 assert_before "$frame_p" '^ +0  show all +$' '^ +r  refresh +$' "landing page: r after 0"
 assert_contains "$frame_p" "3 homes · all panes hidden " "all panes hidden: the title says so instead of listing six numbers (falsify: drop allHidden from titleLine)"
 assert_not_contains "$frame_p" "panes hidden: 1,2,3,4,5,6" "all panes hidden: the title does not list the six numbers"
@@ -973,15 +978,16 @@ assert_contains "$frame_p" "all panes hidden · 1-6 shows a pane, 0 shows all" "
 assert_file_contains "$vs" '"hidden": []' "x on the landing page hides no row"
 frame_p=$(render populated.json --view-state "$vs" --keys "?") || fail "landing ?: render exited non-zero"
 assert_contains "$frame_p" "firstmate-tui keys" "? opens the help over the landing page"
-frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "landing 3: render exited non-zero"
-assert_count "$frame_p" "┌─" 1 "3 on the landing page brings In flight back alone"
-assert_contains "$frame_p" "┌─ [3] In flight (7)" "the returned pane carries its badge"
-assert_contains "$frame_p" "pane shown: In flight" "3 on the landing page leaves the usual notice"
-assert_contains "$frame_p" "· panes hidden: 1,2,4,5,6" "one pane back: the title lists the five still hidden"
+frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "landing 4: render exited non-zero"
+assert_count "$frame_p" "┌─" 1 "4 on the landing page brings In flight back alone"
+assert_contains "$frame_p" "┌─ [4] In flight (7)" "the returned pane carries its badge"
+assert_contains "$frame_p" "pane shown: In flight" "4 on the landing page leaves the usual notice"
+assert_contains "$frame_p" "· panes hidden: 1,2,3,5,6" "one pane back: the title lists the five still hidden"
 assert_file_contains "$vs" '"hidden_panes": [' "the returned pane is persisted"
-frame_p=$(render populated.json --view-state "$vs" --keys "6") || fail "landing then 6: render exited non-zero"
-assert_count "$frame_p" "┌─" 2 "6 after the landing page brings To review back beside In flight"
-assert_contains "$frame_p" "┌─ [6] To review (0)" "To review carries its badge when it returns"
+frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "landing then 3: render exited non-zero"
+assert_count "$frame_p" "┌─" 2 "3 after the landing page brings Teammates' PRs back beside In flight"
+assert_contains "$frame_p" "┌─ [3] Teammates' PRs (0)" "Teammates' PRs carries its badge when it returns"
+assert_before "$frame_p" "Teammates' PRs \(0\)" "In flight \(7\)" "the returned pane draws above In flight, in its screen position"
 frame_p=$(render populated.json --view-state "$vs" --keys "0") || fail "panes 0: render exited non-zero"
 assert_count "$frame_p" "┌─" 6 "0 shows every pane again"
 assert_contains "$frame_p" "all panes shown" "0 leaves a notice"
@@ -993,8 +999,8 @@ frame_p=$(render populated.json --keys "1,2,3,4,5,6") || fail "panes 1-6: render
 assert_row "$frame_p" '^ +all panes hidden +$' "1,2,3,4,5,6 in one sitting lands on the page"
 assert_count "$frame_p" "┌─" 0 "1,2,3,4,5,6: nothing else is drawn"
 frame_p=$(render populated.json --keys "1,2,3,4,5") || fail "panes 1-5: render exited non-zero"
-assert_count "$frame_p" "┌─" 1 "1,2,3,4,5 alone leaves To review on screen: six panes must go before the landing page (falsify: land with five hidden)"
-assert_contains "$frame_p" "┌─ [6] To review (0)" "1,2,3,4,5: the one pane left is To review"
+assert_count "$frame_p" "┌─" 1 "1,2,3,4,5 alone leaves Landed on screen: six panes must go before the landing page (falsify: land with five hidden)"
+assert_contains "$frame_p" "┌─ [6] Landed (4)" "1,2,3,4,5: the one pane left is Landed"
 frame_p=$(render populated.json --keys "1,2,3,4,5,6,0") || fail "panes 1-6,0: render exited non-zero"
 assert_count "$frame_p" "┌─" 6 "0 after 1,2,3,4,5,6 restores all six"
 assert_not_contains "$frame_p" "all panes hidden" "0 after 1,2,3,4,5,6 leaves the landing page"
@@ -1017,6 +1023,31 @@ assert_contains "$frame_p" "My PRs (2, 1 hidden)" "an old file's review:... hidd
 assert_row "$frame_p" '^│ CHECKS    STATUS     ID {20}TITLE ' "an old file's review column width applies to My PRs"
 assert_file_contains "$vs_old" '"mine:main:api#8"' "the next save writes the row key under the new pane id"
 assert_file_not_contains "$vs_old" 'review' "the next save drops the old pane id"
+# A file written while Teammates' PRs was the sixth pane, under key 6, keeps its meaning now that the
+# pane is third under key 3: hidden_panes, the hidden row key and the dragged width are all stored by
+# the pane id toreview, which did not change, so the pane comes back hidden at its new position, 3
+# shows it with its row still hidden and its ID column 20 wide, and the next save writes the same ids
+# and never a key number (falsify: key hidden_panes or columns by pane index, or rename the id).
+vs_moved="$SCRATCH/view-state-moved.json"
+printf '{"schema":"fm-board-view-state.v1","hidden":["toreview:main:api#16"],"hidden_panes":["toreview"],"columns":{"toreview":{"id":20}},"updated":"2026-09-17T00:00:00.000Z"}\n' > "$vs_moved"
+frame_p=$(render to-review.json --view-state "$vs_moved") || fail "panes moved id hidden: render exited non-zero"
+assert_not_contains "$frame_p" "Teammates' PRs (" "a file from before the reorder hides Teammates' PRs at its new position"
+assert_contains "$frame_p" "· panes hidden: 3" "the title lists the hidden pane under its new key"
+assert_count "$frame_p" "┌─" 5 "five panes are drawn"
+assert_before "$frame_p" "My PRs \(1\)" "In flight \(0\)" "with Teammates' PRs hidden, In flight follows My PRs"
+frame_p=$(render to-review.json --view-state "$vs_moved" --keys "3") || fail "panes moved id shown: render exited non-zero"
+assert_contains "$frame_p" "┌─ [3] Teammates' PRs (6, 1 hidden) ─" "3 shows the pane at its new position with the old file's hidden row still hidden"
+assert_before "$frame_p" "My PRs \(1\)" "Teammates' PRs \(6, 1 hidden\)" "the shown pane sits below My PRs"
+assert_before "$frame_p" "Teammates' PRs \(6, 1 hidden\)" "In flight \(0\)" "and above In flight"
+assert_not_contains "$frame_p" "api#16" "the row hidden under the old key stays hidden"
+assert_row "$frame_p" '^│ CHECKS +STATUS +ID {20}AUTHOR +TITLE ' "the old file's dragged ID width, 20, applies to the pane at its new position"
+assert_file_contains "$vs_moved" '"toreview:main:api#16"' "the next save keeps the row key under the same pane id"
+assert_file_contains "$vs_moved" '"toreview": {' "the next save keeps the column widths under the same pane id"
+assert_file_contains "$vs_moved" '"id": 20' "and the width itself"
+assert_file_contains "$vs_moved" '"hidden_panes": []' "the shown pane leaves hidden_panes"
+frame_p=$(render to-review.json --view-state "$vs_moved" --keys "3") || fail "panes moved id hidden again: render exited non-zero"
+if grep -Eq '^    "toreview"$' "$vs_moved"; then pass; else fail "hiding it again writes the pane id to hidden_panes"; fi
+assert_file_not_contains "$vs_moved" '"3"' "and never its key number"
 # The landing page replaces the narrow list too (falsify: pick the layout mode before the all-hidden check).
 frame_p=$(render narrow.json --keys "1,2,3,4,5,6") || fail "panes narrow landing: render exited non-zero"
 assert_row "$frame_p" '^ +all panes hidden +$' "narrow: the landing page replaces the list"
@@ -1028,9 +1059,9 @@ assert_lines "$frame_p" 24 "narrow landing page: 24 lines"
 # moveSelection): 1 hides Needs you, then enter opens the first My PRs PR.
 frame_o=$(render_open populated.json "1,enter") || fail "panes selection: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "after hiding the selected pane, enter acts on the next shown pane"
-frame_p=$(render narrow.json --keys "5") || fail "panes narrow: render exited non-zero"
-assert_not_contains "$frame_p" "── Landed" "list mode: the hidden pane's section is gone (falsify: drop the hidden skip in flattenRows)"
-assert_contains "$frame_p" "panes hidden: 5" "list mode: the title lists the hidden pane"
+frame_p=$(render narrow.json --keys "6") || fail "panes narrow: render exited non-zero"
+assert_not_contains "$frame_p" "[6] Landed" "list mode: the hidden pane's section is gone (falsify: drop the hidden skip in flattenRows)"
+assert_contains "$frame_p" "panes hidden: 6" "list mode: the title lists the hidden pane"
 assert_widths "$frame_p" 70 "list mode with a hidden pane: lines are 70 columns"
 
 # ---------------------------------------------------------- o and f are no-ops
@@ -1105,6 +1136,7 @@ frame_st=$(render pr-status.json) || fail "pr-status: render exited non-zero"
 assert_row "$frame_st" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "pr-status: the header reads CHECKS, STATUS, ID, TITLE, BASE, AGE"
 assert_no_row "$frame_st" '^│ CHECKS [^│]*(REPO|HOME|WHAT|REVIEW)' "pr-status: the review pane draws no REPO, HOME, WHAT or REVIEW column"
 assert_row "$frame_st" '^│ STATE +HERDR +ID +WHAT +REPO +HOME +AGE │$' "pr-status: the other panes keep the shared columns"
+assert_count "$frame_st" "AUTHOR" 1 "pr-status: AUTHOR heads the empty Teammates' PRs pane only; My PRs, whose rows carry authors too, draws none (falsify: add author to every PR pane in columnSpec)"
 # One row per status (falsify: change a branch of prStatus in lib/model.mjs).
 assert_row "$frame_st" '^│ pending +DRAFT +st-draft +Rework the geocoder cache with a two-tier LRU +main +2h │$' "isDraft reads DRAFT, with the title, base branch and PR age from the fetch"
 assert_row "$frame_st" '^│ passing +IN REVIEW +st-review +Paginate the address API: cursor tokens, [^│]*… +main +5h │$' "an open PR awaiting review reads IN REVIEW, and a long title ends in an ellipsis inside the TITLE column (falsify: pad instead of truncate in fit)"
@@ -1255,38 +1287,45 @@ assert_row "$frame_mp" '^│ unlisted +- +ship-gamma +https://github.com/acme/ap
 assert_row "$frame_mp" '^│ none +CLOSED +api#10 +Old spike +main +8h │$' "my-prs: the identity's PR closed 2h ago is listed as CLOSED"
 assert_row "$frame_mp" '^│ passing +MERGED +api#9 +Bump the retry budget +main +6h │$' "my-prs: the identity's PR merged 30m ago is listed as MERGED"
 assert_count "$frame_mp" " api#8 " 1 "my-prs: a toreview row draws once on the board (its api#8 id; the Needs you review row of ship-gamma repeats the title, not the id)"
-assert_before "$frame_mp" "To review \(1\)" '^│ failing +IN REVIEW +api#8 .*Retry on 429' "my-prs: that one row is under the To review header, not in My PRs"
+assert_before "$frame_mp" "Teammates' PRs \(1\)" '^│ failing +IN REVIEW +api#8 .*Retry on 429' "my-prs: that one row is under the Teammates' PRs header, not in My PRs"
 assert_before "$frame_mp" '^│ passing +IN REVIEW +dotfiles#5' '^│ passing +IN REVIEW +ship-alpha' "my-prs: inside IN REVIEW the 3h-old PR sorts before the 5h-old one"
 assert_before "$frame_mp" '^│ passing +IN REVIEW +ship-alpha' '^│ unlisted +- +ship-gamma' "my-prs: the unlisted recorded PR sorts after the open rows"
 assert_before "$frame_mp" '^│ unlisted +- +ship-gamma' '^│ none +CLOSED ' "my-prs: CLOSED sorts after the unlisted row"
 assert_before "$frame_mp" '^│ none +CLOSED ' '^│ passing +MERGED ' "my-prs: MERGED sorts last"
-assert_contains "$frame_mp" "┌─ [6] To review (1) ─" "my-prs: the one toreview row is in To review"
-assert_row "$frame_mp" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +2h │$' "my-prs: the toreview row draws in To review with the same six columns"
+assert_contains "$frame_mp" "┌─ [3] Teammates' PRs (1) ─" "my-prs: the one toreview row is in Teammates' PRs"
+assert_row "$frame_mp" '^│ failing +IN REVIEW +api#8 +teammate +Retry on 429 +main +2h │$' "my-prs: the toreview row draws in Teammates' PRs with its author between ID and TITLE"
 assert_widths "$frame_mp" 160 "my-prs frame lines are 160 columns"
 assert_lines "$frame_mp" 44 "my-prs frame is 44 lines"
 # The identity from the fixture reaches the Settings page (falsify: drop identity from prsFromFixture).
 frame_mp=$(render my-prs.json --install-root "$SCRATCH/nowhere" --keys ".") || fail "my-prs settings: render exited non-zero"
 assert_row "$frame_mp" '^ Identity +captain  \(from config\) +$' "my-prs: the fixture's identity and source show on the Settings page"
 
-# ---------------------------------------------------------------- To review
+# ----------------------------------------------------------- Teammates' PRs
 # The pane over tests/fixtures/to-review.json: one row per STATUS word, the identity's own review
 # winning over the PR's decision, the request through a team, the labelled gemini PR, a PR merged
-# outside the window and the identity's own PR both dropped, the six columns and the sort (falsify:
-# drop toReviewStatus, the author check or the window from toReviewRows, or reorder STATUS_ORDER).
+# outside the window and the identity's own PR both dropped, the seven columns with AUTHOR between ID
+# and TITLE (the login, `-` for a null author, content-sized, in this pane alone) and the sort
+# (falsify: drop toReviewStatus, the author check or the window from toReviewRows, reorder
+# STATUS_ORDER, or drop the author push from columnSpec or the author field from fetchedPrRow).
 frame_tr=$(render to-review.json) || fail "to-review: render exited non-zero"
-assert_contains "$frame_tr" "┌─ [6] To review (7) ─" "to-review: seven rows"
+assert_contains "$frame_tr" "┌─ [3] Teammates' PRs (7) ─" "to-review: seven rows under key 3"
 assert_contains "$frame_tr" "┌─ [2] My PRs (1) ─" "to-review: the one mine row stays in My PRs"
-assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "to-review: the six columns"
-assert_row "$frame_tr" '^│ pending +DRAFT +api#16 +Draft: split the geocoder +main +30m │$' "to-review: a draft reads DRAFT"
-assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +Gemini: index the parcel table +main +1h │$' "to-review: the labelled gemini PR reads IN REVIEW"
-assert_row "$frame_tr" '^│ failing +IN REVIEW +api#8 +Retry on 429 +develop +2h │$' "to-review: changes requested by someone else still reads IN REVIEW, with the base branch and failing checks"
-assert_row "$frame_tr" '^│ passing +IN REVIEW +etl#15 +ETL: nightly loader for the team +main +3h │$' "to-review: a request through the identity's team is a row like any other"
-assert_row "$frame_tr" '^│ passing +CHANGES REQUESTED +widgets#46 +Widget: captain asked for changes +main +4h │$' "to-review: the identity's own CHANGES_REQUESTED review reads CHANGES REQUESTED (falsify: read reviewDecision instead of my_review)"
-assert_row "$frame_tr" '^│ passing +APPROVED +widgets#45 +Widget: approved by captain +main +5h │$' "to-review: the identity's own approval reads APPROVED"
-assert_row "$frame_tr" '^│ passing +MERGED +etl#14 +ETL: merged after review +main +6h │$' "to-review: a reviewed PR merged 30m ago is listed as MERGED"
+assert_before "$frame_tr" "My PRs \(1\)" "Teammates' PRs \(7\)" "to-review: the two PR panes are adjacent, My PRs first"
+assert_before "$frame_tr" "Teammates' PRs \(7\)" "In flight \(0\)" "to-review: In flight follows Teammates' PRs"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' "to-review: the seven columns, AUTHOR between ID and TITLE"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "to-review: My PRs keeps its six columns and draws no AUTHOR"
+assert_count "$frame_tr" "AUTHOR" 1 "to-review: AUTHOR heads one pane only"
+assert_row "$frame_tr" '^│ pending +DRAFT +api#16 +teammate +Draft: split the geocoder +main +30m │$' "to-review: a draft reads DRAFT, its author's login beside its id"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +gemini-dev +Gemini: index the parcel table +main +1h │$' "to-review: the labelled gemini PR reads IN REVIEW, with its own author"
+assert_row "$frame_tr" '^│ failing +IN REVIEW +api#8 +- +Retry on 429 +develop +2h │$' "to-review: changes requested by someone else still reads IN REVIEW, with the base branch and failing checks, and a null author draws as - (falsify: draw an empty cell for a null author)"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +etl#15 +teammate +ETL: nightly loader for the team +main +3h │$' "to-review: a request through the identity's team is a row like any other"
+assert_row "$frame_tr" '^│ passing +CHANGES REQUESTED +widgets#46 +teammate +Widget: captain asked for changes +main +4h │$' "to-review: the identity's own CHANGES_REQUESTED review reads CHANGES REQUESTED (falsify: read reviewDecision instead of my_review)"
+assert_row "$frame_tr" '^│ passing +APPROVED +widgets#45 +teammate +Widget: approved by captain +main +5h │$' "to-review: the identity's own approval reads APPROVED"
+assert_row "$frame_tr" '^│ passing +MERGED +etl#14 +teammate +ETL: merged after review +main +6h │$' "to-review: a reviewed PR merged 30m ago is listed as MERGED"
 assert_not_contains "$frame_tr" "ETL: merged yesterday" "to-review: a PR merged 13h ago is outside the window"
 assert_not_contains "$frame_tr" "Retry budget: ask the API team" "to-review: the identity's own PR never lists, even when its team was asked"
 assert_row "$frame_tr" '^│ CHECKS +STATUS {13}ID ' "to-review: STATUS widens to CHANGES REQUESTED, its widest value, plus the gutter (falsify: cap extra below 17 in columnSpec)"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {6}TITLE ' "to-review: AUTHOR is content-sized, as wide as gemini-dev, its widest login, plus the gutter (falsify: give author a fixed width, or measure it over the board)"
 assert_before "$frame_tr" '^│ pending +DRAFT ' '^│ passing +IN REVIEW +gemini#120' "to-review: DRAFT sorts first"
 assert_before "$frame_tr" '^│ passing +IN REVIEW +gemini#120' '^│ failing +IN REVIEW +api#8' "to-review: inside IN REVIEW the 1h-old PR sorts before the 2h-old one"
 assert_before "$frame_tr" '^│ failing +IN REVIEW +api#8' '^│ passing +IN REVIEW +etl#15' "to-review: inside IN REVIEW the 2h-old PR sorts before the 3h-old one"
@@ -1295,56 +1334,85 @@ assert_before "$frame_tr" '^│ passing +CHANGES REQUESTED ' '^│ passing +APPR
 assert_before "$frame_tr" '^│ passing +APPROVED ' '^│ passing +MERGED ' "to-review: MERGED sorts last"
 assert_widths "$frame_tr" 160 "to-review frame lines are 160 columns"
 assert_lines "$frame_tr" 44 "to-review frame is 44 lines"
-# Keys on To review: 6 hides and shows it, tab reaches it after the shown panes, enter and a
+# Below WIDE_BREAKPOINT the pane keeps AUTHOR and AGE and drops BASE like My PRs; in the narrow list the
+# shared header has no AUTHOR and a row draws without its login (falsify: drop author with base below
+# the breakpoint, or add it to the shared column set).
+frame_tr=$(render to-review.json --cols 90 --rows 30) || fail "to-review 90: render exited non-zero"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +AGE │$' "90 columns: Teammates' PRs keeps AUTHOR and AGE and drops BASE"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +gemini-dev +Gemini: index the parcel tab… +1h │$' "90 columns: the row keeps its author and loses its base branch"
+assert_widths "$frame_tr" 90 "90-column to-review frame lines are 90 columns"
+frame_tr=$(render to-review.json --cols 70 --rows 30) || fail "to-review 70: render exited non-zero"
+assert_row "$frame_tr" '^ STATE +ID +WHAT +HOME *$' "70 columns: the shared list header has no AUTHOR"
+assert_not_contains "$frame_tr" "AUTHOR" "70 columns: no AUTHOR anywhere in the list"
+assert_row "$frame_tr" '^ passing +gemini#120 +Gemini: index the parcel table +main *$' "70 columns: a Teammates' PRs row in the shared list draws without its author"
+assert_not_contains "$frame_tr" "gemini-dev" "70 columns: the login is not drawn"
+assert_widths "$frame_tr" 70 "70-column to-review frame lines are 70 columns"
+# Keys on Teammates' PRs: 3 hides and shows it, tab reaches it right after My PRs, enter and a
 # double-click open its PR through the fake opener, x hides a row under the toreview id (falsify: drop
-# 'toreview' from OPEN_PANES, or the sixth pane from PANES).
-frame_tr=$(render to-review.json --keys "6") || fail "to-review 6: render exited non-zero"
-assert_not_contains "$frame_tr" "To review (" "6 hides To review"
-assert_contains "$frame_tr" "· panes hidden: 6" "6: the title lists the sixth pane"
-frame_o=$(render_open to-review.json "S-tab,enter") || fail "to-review enter: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/16" "shift-tab from Needs you lands on To review, the last pane with rows, and enter opens its first row, the DRAFT PR"
+# 'toreview' from OPEN_PANES, or move the pane in PANES).
+frame_tr=$(render to-review.json --keys "3") || fail "to-review 3: render exited non-zero"
+assert_not_contains "$frame_tr" "Teammates' PRs (" "3 hides Teammates' PRs"
+assert_contains "$frame_tr" "· panes hidden: 3" "3: the title lists the third pane"
+frame_o=$(render_open to-review.json "tab,tab,enter") || fail "to-review enter: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/16" "two tabs from Needs you land on Teammates' PRs, the pane after My PRs, and enter opens its first row, the DRAFT PR"
 assert_contains "$frame_o" "opened https://github.com/acme/api/pull/16 (api#16)" "to-review: the footer names the opened PR"
-frame_o=$(render_open to-review.json "S-tab,j,j,j,j,j,j,enter") || fail "to-review enter merged: render exited non-zero"
-assert_opened "https://github.com/acme/etl/pull/14" "enter on the MERGED To review row still opens its PR"
+frame_o=$(render_open to-review.json "tab,tab,j,j,j,j,j,j,enter") || fail "to-review enter merged: render exited non-zero"
+assert_opened "https://github.com/acme/etl/pull/14" "enter on the MERGED Teammates' PRs row still opens its PR"
 vs_tr="$SCRATCH/view-state-toreview.json"
 rm -f "${vs_tr:?}"
-frame_tr=$(render to-review.json --view-state "$vs_tr" --keys "S-tab,x") || fail "to-review x: render exited non-zero"
-assert_contains "$frame_tr" "To review (6, 1 hidden)" "x hides a To review row and the header counts it"
-assert_contains "$frame_tr" "hidden api#16" "x names the hidden To review row"
-assert_file_contains "$vs_tr" '"toreview:main:api#16"' "the hidden To review row is keyed under the toreview pane id"
-# Mouse: at 160x44 the five panes above are minimal (Needs you title 1, My PRs 5, In flight 9 with the
-# spare rows, Findings 25, Landed 29), so To review's title is line 33, its column header 34 and its
-# rows 35-41; a double-click on its second row opens the PR as enter does (falsify: drop the row zones
-# for the sixth pane).
-frame_m=$(render_mouse to-review.json "dblclick:30,36") || fail "to-review dblclick: render exited non-zero"
-assert_opened "https://github.com/MatthewsREIS/gemini/pull/120" "a double-click on To review's second row opens its PR"
+frame_tr=$(render to-review.json --view-state "$vs_tr" --keys "tab,tab,x") || fail "to-review x: render exited non-zero"
+assert_contains "$frame_tr" "Teammates' PRs (6, 1 hidden)" "x hides a Teammates' PRs row and the header counts it"
+assert_contains "$frame_tr" "hidden api#16" "x names the hidden Teammates' PRs row"
+assert_file_contains "$vs_tr" '"toreview:main:api#16"' "the hidden Teammates' PRs row is keyed under the toreview pane id"
+# Mouse: at 160x44 Needs you (title 1) and My PRs (title 5) are minimal above it, so Teammates' PRs'
+# title is line 9, its column header 10 and its rows 11-17; a double-click on its second row opens the
+# PR as enter does (falsify: drop the row zones for the third pane).
+frame_m=$(render_mouse to-review.json "dblclick:30,12") || fail "to-review dblclick: render exited non-zero"
+assert_opened "https://github.com/MatthewsREIS/gemini/pull/120" "a double-click on Teammates' PRs' second row opens its PR"
+# The AUTHOR column resizes like any fixed column and its width persists under the author key: on the
+# header line 10 the columns start at x=2 CHECKS (7), 11 STATUS (17), 30 ID (10), 42 AUTHOR (10) and
+# 54 TITLE, so the AUTHOR/TITLE gutter is cells 52-53 (falsify: leave author out of COLUMN_KEYS, so
+# sanitizeColumns drops the saved width, or out of the fixed columns boundaries() offers).
+rm -f "${vs_tr:?}"
+frame_tr=$(render to-review.json --view-state "$vs_tr" --mouse "drag:52,10->57") || fail "to-review drag author: render exited non-zero"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {11}TITLE ' "dragging the AUTHOR/TITLE boundary five cells right makes AUTHOR 15 wide"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +gemini-dev {7}Gemini: index the parcel table ' "the rows follow the AUTHOR width"
+assert_contains "$frame_tr" "AUTHOR 15 wide" "the footer names the column"
+assert_file_contains "$vs_tr" '"toreview": {' "the width is saved under the pane id"
+assert_file_contains "$vs_tr" '"author": 15' "and the author column key"
+frame_tr=$(render to-review.json --view-state "$vs_tr") || fail "to-review author width reload: render exited non-zero"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {11}TITLE ' "a restart reads the AUTHOR width back"
+frame_tr=$(render to-review.json --view-state "$vs_tr" --mouse "dblclick:57,10") || fail "to-review reset author: render exited non-zero"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {6}TITLE ' "a double-click on the moved boundary puts AUTHOR back to its automatic width"
+assert_file_not_contains "$vs_tr" '"author"' "the reset width leaves the file"
 # The scope text: with no rows and an empty scope the pane says where to add one; with a scope and no
 # rows it reads its empty text (falsify: drop SCOPE_EMPTY_TEXT from prPaneEmpty).
 frame_tr=$(render "$(variant to-review.json empty-scope '{"prs": {"candidate_prs": [], "toreview": {"scope": []}}}')") || fail "to-review empty scope: render exited non-zero"
-assert_row "$frame_tr" '^│ no repositories in scope: see Settings \(\.\) +│$' "an empty To review scope names the Settings page"
+assert_row "$frame_tr" '^│ no repositories in scope: see Settings \(\.\) +│$' "an empty Teammates' PRs scope names the Settings page"
 frame_tr=$(render "$(variant to-review.json empty-rows '{"prs": {"candidate_prs": []}}')") || fail "to-review empty rows: render exited non-zero"
 assert_row "$frame_tr" '^│ no pull requests waiting for your review +│$' "a scope with no requests reads the empty text"
 # The identity unknown, on a fixture: one row in each PR pane, whatever candidates the fixture carries
 # (falsify: drop identityMissing from mineRows or toReviewRows).
 frame_tr=$(render "$(variant to-review.json no-identity '{"prs": {"identity": null}}')") || fail "to-review no identity: render exited non-zero"
 assert_count "$frame_tr" "identity unknown: see Settings (.)" 2 "identity null in the fixture: one row in each PR pane"
-assert_contains "$frame_tr" "┌─ [6] To review (1) ─" "identity null: To review counts the one row"
+assert_contains "$frame_tr" "┌─ [3] Teammates' PRs (1) ─" "identity null: Teammates' PRs counts the one row"
+assert_row "$frame_tr" '^│ - +- +- +- +identity unknown: see Settings \(\.\) +- +- │$' "identity null: the Teammates' PRs row reads across its seven columns, - under AUTHOR"
 assert_contains "$frame_tr" "┌─ [2] My PRs (1) ─" "identity null: My PRs counts the one row"
 assert_not_contains "$frame_tr" "gemini#120" "identity null: the fixture's rows are not drawn"
 frame_tr=$(render "$(variant to-review.json no-identity '{"prs": {"identity": null}}')" --install-root "$SCRATCH/nowhere" --keys "." --cols 200) || fail "to-review no identity settings: render exited non-zero"
 assert_contains "$frame_tr" " Identity       identity unknown: set identity.github_login in the config file, or run gh auth login" "identity null: the Settings page warns, naming the config file in general when a fixture render read none"
-# --no-prs: To review reads the off text with no identity row (falsify: test the identity before prs.enabled).
+# --no-prs: Teammates' PRs reads the off text with no identity row (falsify: test the identity before prs.enabled).
 frame_tr=$(render to-review.json --no-prs) || fail "to-review --no-prs: render exited non-zero"
-assert_row "$frame_tr" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs: To review reads the off text"
+assert_row "$frame_tr" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs: Teammates' PRs reads the off text"
 assert_not_contains "$frame_tr" "identity unknown" "--no-prs: no identity row"
-# Without gh (the fixture's unavailable note): To review says what it needs (falsify: drop the
+# Without gh (the fixture's unavailable note): Teammates' PRs says what it needs (falsify: drop the
 # unavailable branch from prPaneEmpty).
 frame_tr=$(render "$(variant to-review.json no-gh '{"prs": {"candidate_prs": [], "toreview": {"unavailable": "gh not on PATH"}}}')") || fail "to-review no gh: render exited non-zero"
-assert_row "$frame_tr" '^│ gh not on PATH: To review needs the GitHub CLI +│$' "without gh To review names the CLI it needs"
+assert_row "$frame_tr" "^│ gh not on PATH: Teammates' PRs needs the GitHub CLI +│\$" "without gh Teammates' PRs names the CLI it needs"
 # The help names the sixth pane and its key (falsify: change the 1 - 6 lines in HELP_LINES).
 frame_tr=$(render to-review.json --keys "?") || fail "to-review help: render exited non-zero"
 assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] Needs you" "help overlay documents 1-6"
-assert_contains "$frame_tr" "[6] To review" "help overlay lists the To review badge"
+assert_contains "$frame_tr" "[3] Teammates' PRs" "help overlay lists the Teammates' PRs badge"
 assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes ' "the footer reads 1-6 panes"
 
 # The fetch's pure pieces, straight from lib/sources.mjs, copy fm-bearings-snapshot.sh's rules: the
@@ -1354,7 +1422,7 @@ assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  l/h expand 
 # identity's own review, the 12-hour keep rule on fetched PRs (open always; merged or closed only
 # while the finish time is less than twelve hours before now, a missing stamp dropped, a future one
 # kept), the candidate rule (PR URLs of every task including a secondmate's, then the origin remote
-# of live non-secondmate worktrees only, capped at ten), the To review scope (candidates first, the
+# of live non-secondmate worktrees only, capped at ten), the Teammates' PRs scope (candidates first, the
 # config file's repositories after, deduped), the four search strings (repo: qualifiers only while
 # the whole scope fits GitHub's 256 characters) and the aliased lookup. Two scratch git repositories
 # stand in for worktrees (falsify: change any branch of checksState, drop the .git strip in
@@ -1540,7 +1608,7 @@ done
 # identity once (`gh api user`, since the example config written to XDG_CONFIG_HOME names no login)
 # and then runs the four searches, all together, plus one lookup of the recorded PRs the author
 # searches did not return (ship-alpha's #41, ship-gamma's #7, then done ship-old's #30); r adds a
-# second set of searches and lookups and no second identity call. The To review searches carry
+# second set of searches and lookups and no second identity call. The Teammates' PRs searches carry
 # the scope as repo: qualifiers: the three candidate repositories of the stand-in snapshot and
 # MatthewsREIS/gemini from the config file, which no fleet task touches. The stand-in's
 # fm-bearings-snapshot.sh must not run at all, and no `pr list` may be issued, since the fake fails
@@ -1573,11 +1641,11 @@ if [ -f "$SCRATCH/xdg/fm-board/config.json" ]; then pass; else fail "the first l
 # open PR in a repository no task touches, its own PR that asked its team for a review, the
 # bot-authored PR recorded on ship-alpha (through the lookup), ship-gamma's recorded PR the lookup
 # answered null (unlisted, and with no status file on this host no age to fall back to), the PR
-# merged at run time inside the window; the PR closed in 2020 is dropped by the fetch. To review:
+# merged at run time inside the window; the PR closed in 2020 is dropped by the fetch. Teammates' PRs:
 # the labelled gemini PR and not the unlabelled one, the acme/api PR with no label rule (checks
 # failing), the request through the identity's team, the PR the identity approved (STATUS
 # APPROVED), the PR merged at run time after that approval, and never the identity's own PR (falsify:
-# drop the lookup from runGhPrs, the label rule or the author check from the To review filter, or
+# drop the lookup from runGhPrs, the label rule or the author check from the Teammates' PRs filter, or
 # myReview from ghSearch).
 assert_contains "$frame_r" "My PRs (5)" "live: My PRs counts its five rows"
 assert_row "$frame_r" '^│ passing +IN REVIEW +dotfiles#5 +Tidy the zsh prompt +main +[0-9]+d │$' "live: the identity's own PR outside the candidate repositories is in My PRs (the author search, not the repositories, is the scope)"
@@ -1588,15 +1656,16 @@ assert_row "$frame_r" '^│ passing +MERGED +api#9 +Bump the retry budget +main 
 assert_no_row "$frame_r" 'api#10|Old spike' "live: a PR closed in 2020 is outside the 12-hour window and dropped by the fetch"
 assert_no_row "$frame_r" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]*(Rename the widget table|widgets#30)' "live: ship-old's PR merged in 2020 is dropped by the window although the lookup returned it (its Landed and In flight rows stay)"
 assert_before "$frame_r" '^│ pending +IN REVIEW +api#12' '^│ passing +MERGED +api#9' "live: MERGED sorts after the open PRs"
-assert_contains "$frame_r" "To review (5)" "live: To review counts its five rows"
-assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#120 +Gemini: index the parcel table +main +[0-9]+d │$' "live: the gemini PR with the ready-to-merge label is in To review (a configured repository searched with no fleet work in it)"
+assert_contains "$frame_r" "Teammates' PRs (5)" "live: Teammates' PRs counts its five rows"
+assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#120 +teammate +Gemini: index the parcel table +main +[0-9]+d │$' "live: the gemini PR with the ready-to-merge label is in Teammates' PRs (a configured repository searched with no fleet work in it), its author from the GraphQL node under AUTHOR"
 assert_no_row "$frame_r" 'gemini#121|still cooking' "live: the gemini PR without the label is dropped by the label rule"
-assert_row "$frame_r" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +[0-9]+d │$' "live: a PR in a candidate repository with no label rule is in To review, its FAILURE conclusion mapped to failing"
-assert_row "$frame_r" '^│ passing +IN REVIEW +etl#15 +ETL: nightly loader for the team +main +[0-9]+d │$' "live: a request to the identity's team is in To review"
-assert_row "$frame_r" '^│ passing +APPROVED +widgets#45 +Widget: approved by captain +main +[0-9]+d │$' "live: a PR the identity already approved reads APPROVED"
-assert_row "$frame_r" '^│ passing +MERGED +etl#14 +ETL: merged after review +main +[0-9]+d │$' "live: a reviewed PR merged just now is in To review as MERGED"
-assert_count "$frame_r" "Retry budget: ask the API team" 1 "live: the identity's own PR that asked its team is in My PRs only, never in To review"
-assert_before "$frame_r" "My PRs \(5\)" "To review \(5\)" "live: To review is drawn below My PRs"
+assert_row "$frame_r" '^│ failing +IN REVIEW +api#8 +teammate +Retry on 429 +main +[0-9]+d │$' "live: a PR in a candidate repository with no label rule is in Teammates' PRs, its FAILURE conclusion mapped to failing"
+assert_row "$frame_r" '^│ passing +IN REVIEW +etl#15 +teammate +ETL: nightly loader for the team +main +[0-9]+d │$' "live: a request to the identity's team is in Teammates' PRs"
+assert_row "$frame_r" '^│ passing +APPROVED +widgets#45 +teammate +Widget: approved by captain +main +[0-9]+d │$' "live: a PR the identity already approved reads APPROVED"
+assert_row "$frame_r" '^│ passing +MERGED +etl#14 +teammate +ETL: merged after review +main +[0-9]+d │$' "live: a reviewed PR merged just now is in Teammates' PRs as MERGED"
+assert_count "$frame_r" "Retry budget: ask the API team" 1 "live: the identity's own PR that asked its team is in My PRs only, never in Teammates' PRs"
+assert_before "$frame_r" "My PRs \(5\)" "Teammates' PRs \(5\)" "live: Teammates' PRs is drawn right below My PRs"
+assert_before "$frame_r" "Teammates' PRs \(5\)" "In flight \(" "live: In flight follows the two PR panes"
 frame_r=$(render_live --keys "r" --prs --rows 60) || fail "refresh --prs: render exited non-zero"
 assert_fetch_log "$expected_live" "--prs is a no-op: the same calls (falsify: make --prs disable or double the fetch)"
 # --no-prs: no gh call at all, not even for the identity; both panes read the off state (falsify:
@@ -1607,9 +1676,9 @@ snapshot" "r with --no-prs runs only the snapshot again and logs no gh call"
 assert_contains "$frame_r" "PR checks off: start without --no-prs" "r with --no-prs says why the PR panes did not change (falsify: drop the notice)"
 assert_not_contains "$frame_r" "fetching" "--no-prs: nothing reads fetching after r"
 assert_row "$frame_r" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +- +- │$' "--no-prs: My PRs lists the recorded PRs with the off note"
-assert_row "$frame_r" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs: To review reads the off text"
+assert_row "$frame_r" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs: Teammates' PRs reads the off text"
 assert_not_contains "$frame_r" "identity unknown" "--no-prs: no identity row, since nothing needs the login"
-# Without gh on PATH the firstmate script is the fallback for My PRs and To review says why it has
+# Without gh on PATH the firstmate script is the fallback for My PRs and Teammates' PRs says why it has
 # nothing. The board runs here as node index.mjs under a PATH holding only node, bash and cat (the
 # stand-in scripts need the last two), so the PATH lookup finds no gh (falsify: drop the whichOnPath
 # check in fetchPrs, and the gh spawn fails instead of the script running; or drop the note from
@@ -1626,7 +1695,7 @@ prs --json --include-prs
 snapshot
 snapshot" "without gh on PATH, r runs the snapshot and fm-bearings-snapshot.sh --include-prs, and no gh (falsify: spawn gh without the PATH check)"
 assert_contains "$frame_r" "gh not on PATH: PR data from fm-bearings-snapshot.sh" "without gh the footer names the fallback (falsify: drop the note)"
-assert_row "$frame_r" '^│ gh not on PATH: To review needs the GitHub CLI +│$' "without gh To review says what it needs"
+assert_row "$frame_r" "^│ gh not on PATH: Teammates' PRs needs the GitHub CLI +│\$" "without gh Teammates' PRs says what it needs"
 assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "without gh My PRs still lists the recorded PRs (the script fallback needs no login)"
 assert_not_contains "$frame_r" "identity unknown" "without gh no identity row: the fallback lists recorded PRs whoever the captain is"
 frame_r=$(render populated.json --keys "r") || fail "refresh fixture: render exited non-zero"
@@ -1748,7 +1817,7 @@ rm -f "${FETCH_LOG:?}"
 frame_c=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/cfg-bad-xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr --rows 60) || fail "config malformed live: render exited non-zero"
 if grep -q "repo:MatthewsREIS/gemini" "$FETCH_LOG"; then fail "a malformed config still put the example's repository into the scope: $(cat "$FETCH_LOG")"; else pass; fi
 assert_not_contains "$frame_c" "gemini#120" "a malformed config: gemini is out of the scope, so its PRs are not listed"
-assert_contains "$frame_c" "To review (4)" "a malformed config: the four To review rows of the candidate repositories remain"
+assert_contains "$frame_c" "Teammates' PRs (4)" "a malformed config: the four Teammates' PRs rows of the candidate repositories remain"
 
 # ------------------------------------------------------------- settings page
 # The `.` page. Install identity comes from --install-root: INSTALL is a fake prefix (package.json
@@ -2117,7 +2186,7 @@ assert_row "$frame_s" '^ Settings +$' "--no-mouse: a double-click opens no subme
 # A click on the page lands on the page, never on the board row that would be under the pointer: the
 # board's selection from before the page opened is what enter acts on afterwards.
 rm -f "$OPENER_LOG"
-frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,." --mouse "click:30,29 wheel:down:30,29" --keys "escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings click through: render exited non-zero"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,." --mouse "click:30,33 wheel:down:30,29" --keys "escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings click through: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "a click and a wheel on the page leave the board's selection where it was"
 
 # ------------------------------------------------------------ refresh schedule
@@ -2178,17 +2247,17 @@ assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh
 assert_contains "$tags_f" "{red-fg}refresh failed 40s ago, retrying in 20s{/red-fg}" "PR fetch failed: the label is red"
 assert_contains "$frame_f" "┌─ [2] My PRs (3) (stale) ─" "PR fetch failed: the review header is marked stale"
 assert_count "$frame_f" "(stale)" 2 "PR fetch failed: a fixture error with no per-pane block marks both PR panes stale and nothing else"
-assert_contains "$frame_f" "┌─ [6] To review (0) (stale) ─" "PR fetch failed: To review is marked stale too"
+assert_contains "$frame_f" "┌─ [3] Teammates' PRs (0) (stale) ─" "PR fetch failed: Teammates' PRs is marked stale too"
 # A failure of one pane's searches alone: that pane is stale, the other PR pane is not (falsify: read
 # the top-level error in paneStale instead of the pane's own).
-frame_f=$(render "$(variant populated.json review-failed '{"prs": {"toreview": {"error": "To review: exit 1"}}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: To review: exit 1"}}')") || fail "To review fetch failed: render exited non-zero"
-assert_count "$frame_f" "(stale)" 1 "To review fetch failed: one pane is stale"
-assert_contains "$frame_f" "┌─ [6] To review (0) (stale) ─" "To review fetch failed: To review is the stale pane"
-assert_contains "$frame_f" "┌─ [2] My PRs (3) ─" "To review fetch failed: My PRs, whose searches succeeded, is not stale"
+frame_f=$(render "$(variant populated.json review-failed '{"prs": {"toreview": {"error": "review searches: exit 1"}}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: review searches: exit 1"}}')") || fail "Teammates' PRs fetch failed: render exited non-zero"
+assert_count "$frame_f" "(stale)" 1 "Teammates' PRs fetch failed: one pane is stale"
+assert_contains "$frame_f" "┌─ [3] Teammates' PRs (0) (stale) ─" "Teammates' PRs fetch failed: Teammates' PRs is the stale pane"
+assert_contains "$frame_f" "┌─ [2] My PRs (3) ─" "Teammates' PRs fetch failed: My PRs, whose searches succeeded, is not stale"
 frame_f=$(render "$(variant populated.json mine-failed '{"prs": {"mine": {"error": "My PRs: exit 1"}}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: My PRs: exit 1"}}')") || fail "My PRs fetch failed: render exited non-zero"
 assert_count "$frame_f" "(stale)" 1 "My PRs fetch failed: one pane is stale"
 assert_contains "$frame_f" "┌─ [2] My PRs (3) (stale) ─" "My PRs fetch failed: My PRs is the stale pane and keeps its rows"
-assert_contains "$frame_f" "┌─ [6] To review (0) ─" "My PRs fetch failed: To review is not stale"
+assert_contains "$frame_f" "┌─ [3] Teammates' PRs (0) ─" "My PRs fetch failed: Teammates' PRs is not stale"
 assert_row "$frame_f" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "PR fetch failed: the previous PR rows stay on screen"
 # A failed snapshot: the four snapshot panes are marked stale and My PRs is not (falsify:
 # swap the pane test in paneStale).
@@ -2196,11 +2265,11 @@ frame_f=$(render "$(variant populated.json snap-failed '{"snapshot_error": "exit
 assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh failed 5s ago, retrying in 25s $' "snapshot failed: the title line names the failure"
 assert_count "$frame_f" "(stale)" 4 "snapshot failed: four panes are marked stale"
 assert_contains "$frame_f" "┌─ [1] Needs you (4) (stale) ─" "snapshot failed: Needs you is stale"
-assert_contains "$frame_f" "┌─ [3] In flight (7) (stale) ─" "snapshot failed: In flight is stale"
-assert_contains "$frame_f" "┌─ [4] Findings (3) (stale) ─" "snapshot failed: Findings is stale"
-assert_contains "$frame_f" "┌─ [5] Landed (4) (stale) ─" "snapshot failed: Landed is stale"
+assert_contains "$frame_f" "┌─ [4] In flight (7) (stale) ─" "snapshot failed: In flight is stale"
+assert_contains "$frame_f" "┌─ [5] Findings (3) (stale) ─" "snapshot failed: Findings is stale"
+assert_contains "$frame_f" "┌─ [6] Landed (4) (stale) ─" "snapshot failed: Landed is stale"
 assert_contains "$frame_f" "┌─ [2] My PRs (3) ─" "snapshot failed: My PRs, whose fetch succeeded, is not stale"
-assert_contains "$frame_f" "┌─ [6] To review (0) ─" "snapshot failed: To review is not stale either"
+assert_contains "$frame_f" "┌─ [3] Teammates' PRs (0) ─" "snapshot failed: Teammates' PRs is not stale either"
 # The failure text stays in the facts but the label keeps the spec's words: a failure with no age given
 # reads 0s ago (falsify: require failed_ago in refreshFromFixture).
 frame_f=$(render "$(variant populated.json failed-noage '{"refresh": {"failed": "snapshot: exit 1", "next_in": 30}}')") || fail "failed no age: render exited non-zero"
@@ -2260,15 +2329,15 @@ assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start: Needs yo
 assert_count "$frame_ld" "⠋ loading GitHub checks…" 1 "cold start: My PRs alone names the GitHub checks"
 assert_line "$frame_ld" 4 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Needs you's first body line is the spinner"
 assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "cold start: My PRs' first body line is the spinner"
-assert_line "$frame_ld" 12 '^│ ⠋ loading fleet snapshot… +│$' "cold start: In flight's first body line is the spinner"
-assert_line "$frame_ld" 30 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Findings' first body line is the spinner"
-assert_line "$frame_ld" 34 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Landed's first body line is the spinner"
-assert_count "$frame_ld" "⠋ loading GitHub review requests…" 1 "cold start: To review alone names the GitHub review requests (falsify: name one source for both PR panes)"
-assert_line "$frame_ld" 38 '^│ ⠋ loading GitHub review requests… +│$' "cold start: To review's first body line is its own spinner"
+assert_line "$frame_ld" 16 '^│ ⠋ loading fleet snapshot… +│$' "cold start: In flight's first body line is the spinner"
+assert_line "$frame_ld" 34 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Findings' first body line is the spinner"
+assert_line "$frame_ld" 38 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Landed's first body line is the spinner"
+assert_count "$frame_ld" "⠋ loading GitHub review requests…" 1 "cold start: Teammates' PRs alone names the GitHub review requests (falsify: name one source for both PR panes)"
+assert_line "$frame_ld" 12 '^│ ⠋ loading GitHub review requests… +│$' "cold start: Teammates' PRs' first body line, right under My PRs, is its own spinner"
 for empty_text in "no captain decisions, holds or blocked workers" "no pull requests of yours" "no workers in flight" "no scout reports" "nothing landed yet" "no pull requests waiting for your review"; do
   assert_not_contains "$frame_ld" "$empty_text" "cold start: the spinner replaces the empty text (falsify: draw the empty text beside the loading line)"
 done
-assert_contains "$frame_ld" "┌─ [3] In flight (0) ─" "cold start: the headers count zero rows and carry no stale marker"
+assert_contains "$frame_ld" "┌─ [4] In flight (0) ─" "cold start: the headers count zero rows and carry no stale marker"
 assert_count "$frame_ld" "(stale)" 0 "cold start: nothing has failed, so nothing is stale"
 assert_widths "$frame_ld" 120 "cold start: every line is still 120 columns"
 assert_contains "$tags_ld" "{blue-fg}⠋ loading fleet snapshot…" "cold start --tags: the spinner line is dimmed like the empty text (falsify: give it the row style)"
@@ -2278,7 +2347,7 @@ assert_contains "$tags_ld" "{blue-fg}⠋ loading fleet snapshot…" "cold start 
 # rows under the loading line).
 frame_ld=$(render "$(variant populated.json snap-landed '{"prs": null, "refresh": {"refreshing": true}}')") || fail "snapshot landed: render exited non-zero"
 assert_count "$frame_ld" "loading" 2 "snapshot landed: the two PR panes spin and nothing else"
-assert_row "$frame_ld" '^│ ⠋ loading GitHub review requests… +│$' "snapshot landed: To review spins on its own fetch"
+assert_row "$frame_ld" '^│ ⠋ loading GitHub review requests… +│$' "snapshot landed: Teammates' PRs spins on its own fetch"
 assert_line "$frame_ld" 11 '^│ ⠋ loading GitHub checks… +│$' "snapshot landed: My PRs' first body line is the spinner"
 assert_row "$frame_ld" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "snapshot landed: the recorded PR rows stay under the spinner"
 assert_contains "$frame_ld" "┌─ [2] My PRs (2) ─" "snapshot landed: the header counts the recorded rows"
@@ -2294,7 +2363,7 @@ frame_ld=$(render cold-start.json --no-prs) || fail "cold start --no-prs: render
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start --no-prs: the four snapshot panes still spin"
 assert_not_contains "$frame_ld" "GitHub checks" "cold start --no-prs: My PRs does not spin"
 assert_line "$frame_ld" 8 '^│ no pull requests of yours +│$' "cold start --no-prs: My PRs reads its empty text"
-assert_line "$frame_ld" 38 '^│ PR fetch off \(--no-prs\) +│$' "cold start --no-prs: To review reads the off text (falsify: drop PRS_OFF_TEXT from prPaneEmpty)"
+assert_line "$frame_ld" 12 '^│ PR fetch off \(--no-prs\) +│$' "cold start --no-prs: Teammates' PRs reads the off text (falsify: drop PRS_OFF_TEXT from prPaneEmpty)"
 # Data on screen: a refresh over landed data spins nothing, so rows are never covered (falsify:
 # key the loading state on refreshing alone). The populated frame without a running refresh spins
 # nothing either.
@@ -2324,7 +2393,7 @@ assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "narrow cold start: t
 assert_line "$frame_ld" 3 '^── \[1\] Needs you \(0\) ─+$' "narrow cold start: the first section header"
 assert_line "$frame_ld" 4 '^ ⠋ loading fleet snapshot… +$' "narrow cold start: the spinner line follows the section header"
 assert_line "$frame_ld" 6 '^ ⠋ loading GitHub checks… +$' "narrow cold start: My PRs' line names the GitHub checks"
-assert_line "$frame_ld" 14 '^ ⠋ loading GitHub review requests… +$' "narrow cold start: To review's line names the review requests"
+assert_line "$frame_ld" 8 '^ ⠋ loading GitHub review requests… +$' "narrow cold start: Teammates' PRs' line names the review requests"
 assert_not_contains "$frame_ld" "no workers in flight" "narrow cold start: no empty text beside the spinner"
 assert_widths "$frame_ld" 70 "narrow cold start: every line is 70 columns"
 # A failed first fetch shows the failure text, not the spinner: a PR fetch that failed before any
@@ -2350,7 +2419,7 @@ assert_count "$frame_ld" "loading" 1 "herdr connecting: one spinner on the board
 assert_row "$frame_ld" '^│ ⠋ loading herdr… +│$' "herdr connecting: In flight names herdr"
 assert_before "$frame_ld" "In flight \(7\)" "⠋ loading herdr…" "herdr connecting: the line is in In flight"
 assert_before "$frame_ld" "⠋ loading herdr…" "working +working +ship-alpha" "herdr connecting: the rows follow the spinner line"
-assert_contains "$frame_ld" "┌─ [3] In flight (7) ─" "herdr connecting: the header still counts the rows"
+assert_contains "$frame_ld" "┌─ [4] In flight (7) ─" "herdr connecting: the header still counts the rows"
 frame_ld=$(render "$(variant populated.json herdr-connecting-idle '{"herdr": {"state": "connecting"}}')") || fail "herdr connecting idle: render exited non-zero"
 assert_count "$frame_ld" "loading" 0 "herdr connecting with no refresh running: no spinner"
 frame_ld=$(render "$(variant cold-start.json cold-connecting '{"herdr": {"state": "connecting", "agents": []}}')") || fail "cold start connecting: render exited non-zero"
@@ -2359,42 +2428,42 @@ assert_not_contains "$frame_ld" "loading herdr" "cold start connecting: herdr is
 
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x44 the lines are: 0 title,
-# 1 Needs you title, 3-6 its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 8 Ready for
-# review title, 10-12 its rows (ship-alpha #41, api#8, ship-gamma #7), 14 In flight title, 15 its
-# column header, 16-22 its rows (ship-alpha, tmux-task, remote-sm group, scout-beta, hyperion group,
-# ship-gamma, ship-old), 26 Findings title, 28-30 its rows (scout-beta, mobile-fix, old-scout),
-# 32 Landed title, 34-37 its rows (etl-index, ship-old, mobile-fix, old-scout), 39 To review title,
-# 41 its empty text, 43 footer.
+# 1 Needs you title, 3-6 its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 8 My PRs
+# title, 10-12 its rows (ship-alpha #41, api#8, ship-gamma #7), 14 Teammates' PRs title, 15 its
+# column header, 16 its empty text, 18 In flight title, 19 its column header, 20-26 its rows
+# (ship-alpha, tmux-task, remote-sm group, scout-beta, hyperion group, ship-gamma, ship-old),
+# 30 Findings title, 32-34 its rows (scout-beta, mobile-fix, old-scout), 36 Landed title, 38-41 its
+# rows (etl-index, ship-old, mobile-fix, old-scout), 43 footer.
 #
 # A left click selects: the pane gets the focus border and the row the inverse style, the same as
 # tab/j/k would leave them (falsify: drop the 'select' case from applyAction, or the row zones from
 # renderPanes).
-tags_m=$(render populated.json --mouse "click:30,29" --tags) || fail "mouse click: render exited non-zero"
+tags_m=$(render populated.json --mouse "click:30,33" --tags) || fail "mouse click: render exited non-zero"
 assert_row "$tags_m" '\{inverse\}report *\{/inverse\}.*mobile-fix' "click on the second Findings row selects it"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[4\].*Findings \(3\)' "click on a Findings row focuses the Findings pane"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[5\].*Findings \(3\)' "click on a Findings row focuses the Findings pane"
 assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[1\]' "click: Needs you lost the focus border"
 assert_no_row "$tags_m" '\{inverse\}blocked' "click: the old selection is no longer inverse"
 # The selection a click leaves is what the keys then act on (falsify: set view.row without view.pane in 'select').
-frame_m=$(render populated.json --mouse "click:30,29" --keys "x") || fail "mouse click then x: render exited non-zero"
+frame_m=$(render populated.json --mouse "click:30,33" --keys "x") || fail "mouse click then x: render exited non-zero"
 assert_contains "$frame_m" "Findings (2, 1 hidden)" "x after a click hides the clicked row"
 assert_contains "$frame_m" "hidden mobile-fix" "x after a click names the clicked row"
 # A click on a pane title focuses the pane, cursor on its first row (falsify: drop the title zone, or return
 # 'none' for a non-row hit in mouseAction).
-tags_m=$(render populated.json --mouse "click:5,26" --tags) || fail "mouse title click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[4\].*Findings \(3\)' "click on the Findings title focuses Findings"
+tags_m=$(render populated.json --mouse "click:5,30" --tags) || fail "mouse title click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[5\].*Findings \(3\)' "click on the Findings title focuses Findings"
 assert_row "$tags_m" '\{inverse\}scout +\{/inverse\}.*scout-beta' "click on the Findings title puts the cursor on its first row"
-frame_m=$(render populated.json --mouse "click:5,26" --keys "enter") || fail "mouse title click then enter: render exited non-zero"
+frame_m=$(render populated.json --mouse "click:5,30" --keys "enter") || fail "mouse title click then enter: render exited non-zero"
 assert_contains "$frame_m" "would view /fixture/firstmate/data/scout-beta/report.md" "enter after a title click acts on that pane's first row"
 # A click on a pane's empty space (its column header) focuses the pane too (falsify: drop the pane zone).
-tags_m=$(render populated.json --mouse "click:30,15" --tags) || fail "mouse empty click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[3\].*In flight \(7\)' "click on In flight's column header focuses In flight"
+tags_m=$(render populated.json --mouse "click:30,19" --tags) || fail "mouse empty click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[4\].*In flight \(7\)' "click on In flight's column header focuses In flight"
 # A click on the title line or the footer changes nothing (falsify: give those lines a zone).
 frame_m=$(render populated.json --mouse "click:30,0 click:30,43") || fail "mouse chrome click: render exited non-zero"
 if [ "$frame_m" = "$frame" ]; then pass; else fail "a click on the title line or footer changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # The narrow list has zones too (falsify: drop the zones from renderList).
-tags_m=$(render narrow.json --mouse "click:10,12" --tags) || fail "mouse narrow click: render exited non-zero"
+tags_m=$(render narrow.json --mouse "click:10,14" --tags) || fail "mouse narrow click: render exited non-zero"
 assert_row "$tags_m" '\{inverse\}merged +\{/inverse\}.*ship-old' "list mode: a click on the Landed row selects it"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[5\].*Landed \(1\)' "list mode: the Landed section header takes the focus style"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[6\].*Landed \(1\)' "list mode: the Landed section header takes the focus style"
 tags_m=$(render narrow.json --mouse "click:10,2" --tags) || fail "mouse narrow title click: render exited non-zero"
 assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[1\].*Needs you \(1\)' "list mode: a click on a section header focuses that section"
 
@@ -2408,19 +2477,19 @@ frame_m=$(render_mouse populated.json "click:30,11 click:30,11") || fail "mouse 
 assert_not_opened "two single clicks a second apart on one row open nothing"
 frame_m=$(render_mouse populated.json "click:30,10 click:30,11 click:30,11 click:30,10") || fail "mouse clicks on different rows: render exited non-zero"
 assert_not_opened "clicks alternating between rows never make a double-click"
-frame_m=$(render_mouse populated.json "dblclick:30,20") || fail "mouse dblclick group: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,24") || fail "mouse dblclick group: render exited non-zero"
 assert_row "$frame_m" '^│ decide +1 live +!▾ hyperion ' "double-click on the hyperion group row expands it"
 assert_contains "$frame_m" "In flight (12)" "double-click on a group: only that group's rows are added"
 assert_not_opened "double-click on a group row opens no PR"
-frame_m=$(render_mouse populated.json "dblclick:30,20 dblclick:30,20") || fail "mouse dblclick group twice: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,24 dblclick:30,24") || fail "mouse dblclick group twice: render exited non-zero"
 assert_row "$frame_m" '^│ decide +1 live +!▸ hyperion ' "a second double-click on the group row collapses it again"
-frame_m=$(render_mouse populated.json "dblclick:60,28") || fail "mouse dblclick findings: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:60,32") || fail "mouse dblclick findings: render exited non-zero"
 assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "double-click on a Findings row views its report through --viewer-cmd"
-frame_m=$(render_mouse populated.json "dblclick:30,16") || fail "mouse dblclick worker: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,20") || fail "mouse dblclick worker: render exited non-zero"
 assert_contains "$frame_m" "herdr is off (--no-herdr); cannot focus" "double-click on an In flight worker means herdr focus, refused here as enter is"
 assert_not_opened "double-click on a worker opens no PR"
 assert_not_viewed "double-click on a worker views no report"
-frame_m=$(render_mouse populated.json "dblclick:60,37") || fail "mouse dblclick landed no url: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:60,41") || fail "mouse dblclick landed no url: render exited non-zero"
 assert_not_opened "double-click on a Landed row without a PR opens nothing"
 assert_viewed "/fixture/firstmate/data/old-scout/report.md" "double-click on a Landed row without a PR views its report, as enter does (falsify: give the double-click its own action instead of keyAction enter)"
 
@@ -2510,14 +2579,14 @@ assert_row "$buttons" '^left select$' "the same left-button press selects the ro
 
 # The wheel moves the selection three rows in the focused pane, whichever pane the pointer is over, and
 # clamps at the ends (falsify: change WHEEL_ROWS, or hit-test the wheel's pointer).
-frame_m=$(render_mouse populated.json "wheel:down:30,35" --keys "enter") || fail "mouse wheel: render exited non-zero"
+frame_m=$(render_mouse populated.json "wheel:down:30,39" --keys "enter") || fail "mouse wheel: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "wheel down over Landed moves the focused Needs you selection three rows to the review row, which enter opens"
-tags_m=$(render populated.json --mouse "wheel:down:30,35" --tags) || fail "mouse wheel --tags: render exited non-zero"
+tags_m=$(render populated.json --mouse "wheel:down:30,39" --tags) || fail "mouse wheel --tags: render exited non-zero"
 assert_row "$tags_m" '\{inverse\}review ' "wheel down: the fourth Needs you row is selected"
-assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[5\]' "wheel: the pane under the pointer is not focused"
-tags_m=$(render populated.json --mouse "wheel:up:30,35 wheel:down:30,35 wheel:down:30,35" --tags) || fail "mouse wheel clamp: render exited non-zero"
+assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[6\]' "wheel: the pane under the pointer is not focused"
+tags_m=$(render populated.json --mouse "wheel:up:30,39 wheel:down:30,39 wheel:down:30,39" --tags) || fail "mouse wheel clamp: render exited non-zero"
 assert_row "$tags_m" '\{inverse\}review ' "wheel up at the top stays, two wheel downs clamp at the last row"
-tags_m=$(render populated.json --mouse "wheel:down:30,35 wheel:up:30,35" --tags) || fail "mouse wheel back: render exited non-zero"
+tags_m=$(render populated.json --mouse "wheel:down:30,39 wheel:up:30,39" --tags) || fail "mouse wheel back: render exited non-zero"
 assert_row "$tags_m" '\{inverse\}blocked\{/inverse\}' "wheel down then up is back on the first row"
 # A wheel move breaks a double-click: click, wheel, click on the same row is two singles (falsify: keep
 # lastClick across a wheel action).
@@ -2526,19 +2595,19 @@ assert_not_opened "click, wheel and click on one row are two single clicks"
 
 # --no-mouse: every gesture is ignored and the frame is the plain one (falsify: drop the opts.mouse guard
 # in driveOnce, or make --no-mouse set anything but opts.mouse).
-frame_m=$(render populated.json --no-mouse --mouse "click:30,29 dblclick:30,11 wheel:down:30,35") || fail "--no-mouse: render exited non-zero"
+frame_m=$(render populated.json --no-mouse --mouse "click:30,33 dblclick:30,11 wheel:down:30,39") || fail "--no-mouse: render exited non-zero"
 if [ "$frame_m" = "$frame" ]; then pass; else fail "--no-mouse changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 frame_m=$(render_mouse populated.json "dblclick:30,11" --no-mouse) || fail "--no-mouse dblclick: render exited non-zero"
 assert_not_opened "--no-mouse: a double-click opens nothing"
-frame_m=$(render populated.json --no-mouse --mouse "click:30,29 x") || fail "--no-mouse keys in list: render exited non-zero"
+frame_m=$(render populated.json --no-mouse --mouse "click:30,33 x") || fail "--no-mouse keys in list: render exited non-zero"
 assert_contains "$frame_m" "Needs you (3, 1 hidden)" "--no-mouse: the key tokens of the list still apply (x hid the row the keyboard selection was on)"
 assert_contains "$frame_m" "hidden scout-beta" "--no-mouse: the click was ignored, so x acted on the first Needs you row, not the clicked Findings row"
 # The landing page has no mouse targets (falsify: give renderLanding zones).
 frame_l=$(render populated.json --keys "1,2,3,4,5,6")
-frame_m=$(render populated.json --keys "1,2,3,4,5,6" --mouse "click:30,20 dblclick:30,20 wheel:down:30,20") || fail "mouse on landing: render exited non-zero"
+frame_m=$(render populated.json --keys "1,2,3,4,5,6" --mouse "click:30,20 dblclick:30,24 wheel:down:30,20") || fail "mouse on landing: render exited non-zero"
 if [ "$frame_m" = "$frame_l" ]; then pass; else fail "mouse events changed the landing page: $(diff <(printf '%s\n' "$frame_l") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # A click while the help is up closes it (falsify: ignore mouse events under view.help).
-frame_m=$(render populated.json --keys "?" --mouse "click:30,29") || fail "mouse click on help: render exited non-zero"
+frame_m=$(render populated.json --keys "?" --mouse "click:30,33") || fail "mouse click on help: render exited non-zero"
 assert_not_contains "$frame_m" "firstmate-tui keys" "a click closes the help overlay"
 
 # The help lists the gestures and binds nothing to the right button (falsify: drop the mouse block from
@@ -2564,7 +2633,7 @@ else
   pass
 fi
 if printf '%s\n' "$out" | grep -Fq -- "--mouse needs a value"; then pass; else fail "--mouse without a value is named in the error: $out"; fi
-frame_m=$(render populated.json --mouse "click:30,29,x") || fail "mouse comma list: render exited non-zero"
+frame_m=$(render populated.json --mouse "click:30,33,x") || fail "mouse comma list: render exited non-zero"
 assert_contains "$frame_m" "hidden mobile-fix" "a comma-separated list keeps the comma inside X,Y and reads the rest as keys"
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--no-mouse"; then pass; else fail "wrapper --help lists --no-mouse"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--mouse <list>"; then pass; else fail "wrapper --help lists --mouse"; fi

@@ -4,20 +4,30 @@
 
 import { width } from './text.mjs';
 
-// The six panes in screen order. To review was added after the first five
-// and sits last so the keys 1-5 and every saved view-state file keep their
-// meaning (hidden_panes stores pane ids; the new id simply joins the set).
+// The six panes in screen order, which is also the order of the 1-6 keys
+// (lib/controller.mjs paneForKey reads PANES by position). The two PR panes
+// sit together so the captain's own PRs and the teammates' PRs read side by
+// side. A saved view-state file keeps its meaning across a reorder because
+// hidden_panes, hidden row keys and column widths are stored by pane id,
+// never by key number (lib/viewstate.mjs).
 export const PANES = [
   { id: 'needs', title: 'Needs you', empty: 'no captain decisions, holds or blocked workers' },
   { id: 'mine', title: 'My PRs', empty: 'no pull requests of yours' },
+  { id: 'toreview', title: "Teammates' PRs", empty: 'no pull requests waiting for your review' },
   { id: 'inflight', title: 'In flight', empty: 'no workers in flight' },
   { id: 'findings', title: 'Findings', empty: 'no scout reports' },
   { id: 'landed', title: 'Landed', empty: 'nothing landed yet' },
-  { id: 'toreview', title: 'To review', empty: 'no pull requests waiting for your review' },
 ];
 
-// The two panes that draw pull requests (CHECKS, STATUS, ID, TITLE, BASE, AGE).
+// The two PR panes that draw pull requests (CHECKS, STATUS, ID, TITLE, BASE,
+// AGE; Teammates' PRs adds AUTHOR between ID and TITLE).
 export const PR_PANES = new Set(['mine', 'toreview']);
+
+// The index of a pane id in PANES, so a rule that names panes (the height
+// priorities below) survives a reorder.
+function paneIndex(id) {
+  return PANES.findIndex((p) => p.id === id);
+}
 
 export const MIN_ROWS = 20;
 export const MIN_COLS = 40;
@@ -50,7 +60,7 @@ export function layoutMode(cols) {
 // shared header for every pane and ignores overrides.
 export const GUTTER = 2;
 export const COLUMN_CAP = 24; // widest a fixed column grows on its own
-export const COLUMN_KEYS = ['tag', 'extra', 'id', 'text', 'repo', 'home', 'base', 'age'];
+export const COLUMN_KEYS = ['tag', 'extra', 'id', 'author', 'text', 'repo', 'home', 'base', 'age'];
 
 // The columns of one pane, before any width: `cols` is the terminal width,
 // which decides the breakpoints. In list mode every pane shares the shared set
@@ -58,11 +68,18 @@ export const COLUMN_KEYS = ['tag', 'extra', 'id', 'text', 'repo', 'home', 'base'
 //
 //   shared            STATE INFO ID WHAT (flex) REPO HOME AGE; below
 //                     WIDE_BREAKPOINT REPO and AGE go
-//   My PRs, To review CHECKS STATUS ID TITLE (flex) BASE AGE: the PR's title,
+//   My PRs            CHECKS STATUS ID TITLE (flex) BASE AGE: the PR's title,
 //                     base branch and age, no REPO or HOME (repo, home and url
 //                     stay on the row for enter and the notices); below
 //                     WIDE_BREAKPOINT BASE goes and AGE stays, since the age is
 //                     the column the captain reads the pane by
+//   Teammates' PRs    the same with AUTHOR (the PR author's GitHub login, `-`
+//                     when GitHub names none) between ID and TITLE: who is
+//                     waiting on the review is what the pane is read for, so
+//                     AUTHOR stays below WIDE_BREAKPOINT too, and only the
+//                     narrow list, whose one shared header has no room for a
+//                     column five panes never fill, leaves it out. My PRs has
+//                     no AUTHOR: the author there is the captain
 function columnSpec(cols, paneId) {
   const mode = layoutMode(cols);
   const wide = cols >= WIDE_BREAKPOINT;
@@ -70,6 +87,7 @@ function columnSpec(cols, paneId) {
   if (mode === 'panes') spec.push({ key: 'extra', label: EXTRA_LABEL[paneId] || 'INFO', cap: 17 /* "CHANGES REQUESTED" */ });
   spec.push({ key: 'id', label: 'ID', cap: COLUMN_CAP });
   if (mode === 'panes' && PR_PANES.has(paneId)) {
+    if (paneId === 'toreview') spec.push({ key: 'author', label: 'AUTHOR', cap: COLUMN_CAP });
     spec.push({ key: 'text', label: 'TITLE', flex: true });
     if (wide) spec.push({ key: 'base', label: 'BASE', cap: COLUMN_CAP });
     spec.push({ key: 'age', label: 'AGE', cap: 6, align: 'right' });
@@ -122,8 +140,8 @@ export function columns(cols, innerWidth, paneId, { rows = [], overrides = null 
     while (col && room() < minWidth(flex) && col.width > min) col.width -= 1;
   };
   for (const c of spec.filter((c) => c.override).sort((a, b) => b.width - a.width)) shrink(c, minWidth(c));
-  for (const key of ['repo', 'home', 'base', 'id', 'extra', 'tag']) shrink(spec.find((c) => c.key === key && !c.override), key === 'id' ? 12 : 8);
-  for (const key of ['repo', 'home', 'base', 'id', 'extra', 'tag']) {
+  for (const key of ['repo', 'home', 'base', 'author', 'id', 'extra', 'tag']) shrink(spec.find((c) => c.key === key && !c.override), key === 'id' ? 12 : 8);
+  for (const key of ['repo', 'home', 'base', 'author', 'id', 'extra', 'tag']) {
     const c = spec.find((x) => x.key === key && !x.override);
     shrink(c, c ? minWidth(c) : 0);
   }
@@ -178,10 +196,14 @@ export function maxWidth(spec, columnId) {
 // Content heights (rows inside the borders) for the six panes. Every shown
 // pane gets at least one content row; spare rows go where the demand is (Needs
 // you, In flight and the two PR panes first), then to In flight and Needs you,
-// which are the panes the captain watches most. `visible[i] === false`
+// which are the panes the captain watches most. Both orders name panes by id,
+// so they follow the panes wherever PANES puts them. `visible[i] === false`
 // switches pane i off (the 1-6 keys): it draws nothing and its rows go to the
 // panes still shown. The result always has one entry per pane, 0 for a hidden
 // one.
+const DEMAND_PRIORITY = ['needs', 'inflight', 'mine', 'toreview', 'findings', 'landed'].map(paneIndex);
+const SPARE_PRIORITY = ['inflight', 'needs', 'mine', 'toreview', 'findings', 'landed'].map(paneIndex);
+
 export function paneHeights(totalRows, demands, visible = []) {
   const rows = Math.max(totalRows, MIN_ROWS);
   const shown = PANES.map((_, i) => visible[i] !== false);
@@ -191,7 +213,7 @@ export function paneHeights(totalRows, demands, visible = []) {
   let spare = rows - chrome - borders - shownCount;
   const heights = PANES.map((_, i) => (shown[i] ? 1 : 0));
   const want = PANES.map((_, i) => Math.max(1, demands[i] || 0));
-  const priority = [0, 2, 1, 5, 3, 4].filter((i) => shown[i]);
+  const priority = DEMAND_PRIORITY.filter((i) => shown[i]);
   let progressed = true;
   while (spare > 0 && progressed) {
     progressed = false;
@@ -204,7 +226,7 @@ export function paneHeights(totalRows, demands, visible = []) {
       }
     }
   }
-  for (const i of [2, 0, 1, 5, 3, 4]) {
+  for (const i of SPARE_PRIORITY) {
     if (spare <= 0) break;
     if (!shown[i]) continue;
     heights[i] += spare;

@@ -18,10 +18,10 @@ options:
                          still running is skipped
   --no-prs               skip the live GitHub PR fetch (gh api graphql; fm-bearings-snapshot.sh
                          --include-prs when gh is not on PATH) so My PRs shows recorded
-                         PR URLs only, with the file-time age marked ~, and To review
-                         reads off; --prs is accepted and does nothing (it is the default)
+                         PR URLs only, with the file-time age marked ~, and Teammates'
+                         PRs reads off; --prs is accepted and does nothing (it is the default)
   --config <path>        the board's config file: the GitHub login the two PR panes are
-                         built around and the To review label rules (default:
+                         built around and the Teammates' PRs label rules (default:
                          $(herdr plugin config-dir firstmate.board)/config.json via the
                          wrapper, else $XDG_CONFIG_HOME/fm-board/config.json, else
                          ~/.config/fm-board/config.json; never inside FM_HOME). Written

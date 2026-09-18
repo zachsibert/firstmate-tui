@@ -153,8 +153,8 @@ common flags, after `open` or with no subcommand:
                          terminal's own text selection alone
 
 more flags, same places: --all-homes-needs, --opener-cmd <argv>, --viewer-cmd <argv>,
-  --view-state <path>, --config <path> (the GitHub login and the To review label
-  rules), --herdr-cmd <argv>, --herdr-socket <path>, --snapshot-timeout <s>;
+  --view-state <path>, --config <path> (the GitHub login and the Teammates' PRs
+  label rules), --herdr-cmd <argv>, --herdr-socket <path>, --snapshot-timeout <s>;
   test mode: --render-once, --fixture <json>, --cols N, --rows N, --keys <list>,
   --mouse <list>, --expand <all|ids>, --tags, --headless, --curl-cmd <argv>,
   --install-root <dir>. The README's Launch section explains each one.
