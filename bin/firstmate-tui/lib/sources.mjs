@@ -223,13 +223,15 @@ export const GH_PR_SORT = 'sort:updated-desc';
 
 // The PullRequest fields every GraphQL answer carries. `commits(last: 1)` is
 // the head commit, whose statusCheckRollup contexts are the CHECKS column
-// (each a CheckRun { status, conclusion } or a StatusContext { state }, the
-// two shapes checksState reads); latestReviews is one review per reviewer,
-// from which the identity's own APPROVED or CHANGES_REQUESTED is taken.
-// mergeStateStatus is GitHub's merge-box word (CLEAN, DIRTY, BLOCKED,
+// (each a CheckRun { name status conclusion startedAt completedAt checkSuite
+// { app workflowRun } } or a StatusContext { context state createdAt }, the
+// two shapes checksState reads: the name, app, workflow and times let it
+// judge the newest run of each check alone); latestReviews is one review per
+// reviewer, from which the identity's own APPROVED or CHANGES_REQUESTED is
+// taken. mergeStateStatus is GitHub's merge-box word (CLEAN, DIRTY, BLOCKED,
 // UNSTABLE, BEHIND, HAS_HOOKS, DRAFT, UNKNOWN); with `mergeable` it tells a
 // PR that is ready for the captain from one that conflicts with its base.
-export const GH_PR_FIELDS = 'number title url headRefName baseRefName reviewDecision mergeable mergeStateStatus isDraft state createdAt mergedAt closedAt author { login } repository { nameWithOwner } labels(first: 30) { nodes { name } } latestReviews(first: 30) { nodes { state author { login } } } commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state } } } } } } }';
+export const GH_PR_FIELDS = 'number title url headRefName baseRefName reviewDecision mergeable mergeStateStatus isDraft state createdAt mergedAt closedAt author { login } repository { nameWithOwner } labels(first: 30) { nodes { name } } latestReviews(first: 30) { nodes { state author { login } } } commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion startedAt completedAt checkSuite { app { name } workflowRun { workflow { name } } } } ... on StatusContext { context state createdAt } } } } } } }';
 export const SEARCH_GRAPHQL = `query($q: String!, $n: Int!) { search(query: $q, type: ISSUE, first: $n) { issueCount nodes { ... on PullRequest { ${GH_PR_FIELDS} } } } }`;
 
 // owner/name from a GitHub URL or remote (https://github.com/o/r/pull/1,
@@ -241,17 +243,85 @@ export function repoSlug(url) {
 }
 
 // The CHECKS cell of one PR from its check contexts (gh's statusCheckRollup
-// list, or the GraphQL contexts nodes: the same two shapes), mapped exactly
-// as the script maps it: no checks is none; any failure-like conclusion is
-// failing; any check neither completed nor successful is pending; else
-// passing.
+// list, or the GraphQL contexts nodes: the same two shapes). GitHub keeps
+// every run of a check on the head commit, so a re-run leaves the run it
+// superseded (cancelled, failed or skipped) in the list beside the new one;
+// only the newest run of each check is judged (newestRuns): no checks is
+// none; any newest run with a failure-like conclusion is failing (CANCELLED
+// included, so a check whose newest or only run was cancelled still fails);
+// any newest run neither completed nor successful is pending; else passing.
+// A context with no name (the fm-bearings-snapshot.sh shape, or an older
+// record) cannot be grouped and is judged on its own, as every context was
+// before the grouping.
 const FAILING = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED']);
 export function checksState(rollup) {
   const checks = (Array.isArray(rollup) ? rollup : []).map((c) => c || {});
   if (checks.length === 0) return 'none';
-  if (checks.some((c) => FAILING.has(String(c.conclusion ?? c.state ?? '')))) return 'failing';
-  if (checks.some((c) => String(c.status ?? '') !== 'COMPLETED' && String(c.state ?? '') !== 'SUCCESS')) return 'pending';
+  const states = newestRuns(checks).map(runState);
+  if (states.includes('failing')) return 'failing';
+  if (states.includes('pending')) return 'pending';
   return 'passing';
+}
+
+// One run's own word, the per-context mapping fm-bearings-snapshot.sh uses.
+function runState(c) {
+  if (FAILING.has(String(c.conclusion ?? c.state ?? ''))) return 'failing';
+  if (String(c.status ?? '') !== 'COMPLETED' && String(c.state ?? '') !== 'SUCCESS') return 'pending';
+  return 'passing';
+}
+
+const str = (v) => (typeof v === 'string' && v.trim() ? v : null);
+
+// The check a context is a run of: its name (a CheckRun's name, a
+// StatusContext's context) within its app and workflow when the record
+// carries them (GraphQL: checkSuite.app.name and
+// checkSuite.workflowRun.workflow.name; gh's --json list: workflowName and
+// no app), so two workflows' `build` jobs stay two checks. Null when the
+// context has no name.
+function checkKey(c) {
+  const name = str(c.name) || str(c.context);
+  if (!name) return null;
+  const suite = c.checkSuite && typeof c.checkSuite === 'object' ? c.checkSuite : {};
+  const app = suite.app && typeof suite.app === 'object' ? str(suite.app.name) : null;
+  const wfRun = suite.workflowRun && typeof suite.workflowRun === 'object' ? suite.workflowRun : {};
+  const workflow = str(c.workflowName) || (wfRun.workflow && typeof wfRun.workflow === 'object' ? str(wfRun.workflow.name) : null);
+  return JSON.stringify([app || '', workflow || '', name]);
+}
+
+// How new one run of a check is, as a tuple compared left to right: the
+// latest time the record carries (completedAt for a finished run, startedAt
+// for one still running, a StatusContext's createdAt), so a re-run in
+// progress outranks the run it supersedes and a status updated to SUCCESS
+// outranks its PENDING; then completedAt, then startedAt, then the later
+// position in the list. A time the record lacks reads as the oldest.
+function runRank(c, i) {
+  const at = (v) => parseTime(v) ?? -1;
+  const completed = at(c.completedAt);
+  const started = at(c.startedAt);
+  return [Math.max(completed, started, at(c.createdAt)), completed, started, i];
+}
+
+function laterRank(a, b) {
+  for (let k = 0; k < a.length; k += 1) if (a[k] !== b[k]) return a[k] > b[k];
+  return false;
+}
+
+// The contexts checksState judges: every nameless one, and the newest run of
+// each named check.
+function newestRuns(checks) {
+  const nameless = [];
+  const newest = new Map();
+  checks.forEach((c, i) => {
+    const key = checkKey(c);
+    if (key === null) {
+      nameless.push(c);
+      return;
+    }
+    const rank = runRank(c, i);
+    const prev = newest.get(key);
+    if (!prev || laterRank(rank, prev.rank)) newest.set(key, { c, rank });
+  });
+  return nameless.concat([...newest.values()].map((e) => e.c));
 }
 
 // One gh PR record -> the candidate_prs[] shape lib/model.mjs reads. `task` is
