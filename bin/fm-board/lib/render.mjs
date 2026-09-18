@@ -14,11 +14,10 @@ export const HELP_LINES = [
   '',
   '  j / down     next row            k / up       previous row',
   '  tab          next pane           shift-tab    previous pane',
-  '  enter        Ready for review or a Needs-you PR row: open the PR in the browser',
+  '  enter        Ready for review, Landed or a Needs-you PR row: open the PR in the browser',
   '               In flight group row: expand or collapse it',
   '               In flight worker or Needs-you worker: focus its herdr pane',
   '               Findings row: open the report in the viewer (glow, $EDITOR, vim, less)',
-  '  o            open the PR of the selected row in the browser (any pane)',
   '  l / right    expand the selected In flight group',
   '  h / left     collapse the group (from the group row or one of its children)',
   '  x            hide the selected row from view (x on a shown hidden row unhides it)',
@@ -104,8 +103,8 @@ function titleLine(model, cols, view) {
   return line([seg(padRight(text, cols), view.stale ? 'bad' : 'title')], cols);
 }
 
-const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  o open PR  l/h expand  x hide  H hidden  1-5 panes  r refresh  ? help  q quit';
-const FOOTER_KEYS_SHORT = ' j/k  tab  enter  o open  l/h  x hide  H  1-5 panes  r  ? help  q quit';
+const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  ? help  q quit';
+const FOOTER_KEYS_SHORT = ' j/k  tab  enter  l/h  x hide  H  1-5 panes  r  ? help  q quit';
 const FOOTER_KEYS_MIN = ' ? help';
 
 // The key hint and the transient notice share the footer; the notice wins.
