@@ -30,18 +30,45 @@ M1, the read-only board, is implemented in this repository, plus the M1b follow-
 
 - a firstmate home with `bin/fm-fleet-snapshot.sh` (and `bin/fm-bearings-snapshot.sh` for `--prs`)
 - herdr 0.8.x or newer (socket API protocol 20); `--no-herdr` runs without it
-- Node 20 or newer (already a firstmate dependency) and npm for the one dependency
+- Node 20 or newer (already a firstmate dependency); npm only for the development install, since a release tarball carries the one dependency
 - `jq` and `bash` (already firstmate dependencies)
 - for the Findings viewer: `glow` (`brew install glow`) is used first; otherwise `$EDITOR`, then `vim`, then `less`
 
 ## Install
+
+One command installs the latest release, or upgrades the one you have:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash
+```
+
+It downloads `fm-board-<tag>.tar.gz` and its `.sha256` from the [GitHub Release](https://github.com/zachsibert/firstmate-tui/releases), verifies the checksum, unpacks into `~/.local/share/fm-board` (`$XDG_DATA_HOME/fm-board` when that is set) and writes an `fm-board` command into `~/.local/bin`. The tarball carries the one dependency, so no npm step runs. It prints where everything went, plus a one-line note if `~/.local/bin` is not on your `PATH`. It writes nothing else: no shell rc file, no herdr config.
+
+Variants (arguments go after `bash -s --`):
+
+```sh
+# a beta: the newest release, prereleases included
+curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --pre
+
+# one exact version
+curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --version v0.2.0-beta.1
+
+# other locations
+curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash -s -- --prefix /opt/fm-board --bin-dir /usr/local/bin
+```
+
+To upgrade, run the same command again: the installed tree is replaced as a whole and the command is rewritten, so moving between a beta and a release is the same step. To uninstall, delete the prefix directory and the `fm-board` command. `bin/install.sh --help` lists every flag, including `--from-file <tarball>` for a tarball you already have. The installer needs `curl`, `tar` and `shasum` or `sha256sum`; the board itself still needs the [Requirements](#requirements) above.
+
+Once installed, `fm-board` stands for `bin/fm-board.sh` in every command below (`fm-board open`, `fm-board --help`), and the plugin directory to link is `~/.local/share/fm-board/bin/fm-board`.
+
+### Development install
 
 ```sh
 git clone https://github.com/zachsibert/firstmate-tui.git
 cd firstmate-tui/bin/fm-board && npm ci
 ```
 
-`npm ci` installs the single pinned dependency, `neo-blessed` 0.2.0 (MIT), into `bin/fm-board/node_modules`. The terminal library sits behind one adapter module (`bin/fm-board/lib/tui-blessed.mjs`) so it can be swapped without touching the model, layout or renderer.
+`npm ci` installs the single pinned dependency, `neo-blessed` 0.2.0 (MIT), into `bin/fm-board/node_modules`. The terminal library sits behind one adapter module (`bin/fm-board/lib/tui-blessed.mjs`) so it can be swapped without touching the model, layout or renderer. From a checkout the command is `bin/fm-board.sh`.
 
 ## Launch
 
@@ -67,7 +94,7 @@ Without `FM_HOME` the launcher stops and prints two lines, each a command to cop
 `open --detached` keeps the old placement: the herdr plugin route when the plugin is linked, otherwise a hidden workspace (`herdr workspace create --no-focus` plus `pane run`, the same pattern firstmate's away-mode daemon uses). `focus` brings that pane forward. To link the plugin once:
 
 ```sh
-herdr plugin link "$PWD/bin/fm-board"
+herdr plugin link "$PWD/bin/fm-board"     # from a checkout; after an install: ~/.local/share/fm-board/bin/fm-board
 echo "$FM_HOME" > "$(herdr plugin config-dir firstmate.board)/fm-home"   # actions carry no FM_HOME
 ```
 
@@ -116,13 +143,35 @@ Below 100 columns the REPO and AGE columns are dropped; below 80 columns the fiv
 
 ```sh
 tests/fm-board.test.sh
+tests/install.test.sh
 ```
 
 The test renders fixtures under `tests/fixtures/` through `--render-once --fixture <json> --no-herdr` and asserts on the printed frame: every pane populated, every pane empty, a narrow terminal, the `--prs` path, the width breakpoints, In flight groups collapsed and expanded, Needs you with and without `--all-homes-needs`, lost and unknown panes (plain and with `--tags`), hide / unhide / show-hidden with a restart in between, the `[n]` key badge on every pane title in both layouts, pane toggles with one, four and all five panes hidden (the landing page, its restart from a saved all-hidden state, and `0` bringing the grid back), and the wrapper: `open` prints the same frame as `run`, `open --detached --no-herdr` refuses (against a fake `herdr` on `HERDR_BIN_PATH` and PATH that logs any call, so nothing reaches a live server), and its error paths. Key behavior goes through `--keys`; PR opens go to `--opener-cmd bash tests/fake-opener.sh` and report views to `--viewer-cmd bash tests/fake-viewer.sh`, which only record their arguments (the same fake is put on PATH as `glow` to pin the viewer chain), so the suite never launches a browser or an editor. The `r` key runs against a stand-in firstmate home whose `bin/fm-fleet-snapshot.sh` and `bin/fm-bearings-snapshot.sh` only log that they ran, so the suite asserts that `r` re-runs the snapshot, and the PR fetch only with `--prs`, without touching GitHub. `o` and `f` are asserted to be no-ops. No real firstmate home, herdr server or TTY is needed.
 
+`tests/install.test.sh` covers distribution without touching GitHub. It builds the release tarball with `scripts/package.sh` (the same script the release workflow runs) into a scratch directory, checks its layout and checksum file, refuses a tag that does not match `package.json`, flags a `-beta` tag as a prerelease, installs the tarball with `bin/install.sh --from-file` into a scratch prefix and bin dir (also from stdin, the way `curl | bash` runs it) and proves the installed `fm-board` command renders a fixture frame. It then upgrades in place, rejects a wrong checksum and a damaged tarball without touching the existing install, refuses a prefix holding unrelated files, and checks that the default paths under a scratch `HOME` leave nothing else behind. It needs `npm` for the vendoring step.
+
+## Releasing
+
+Releases are GitHub Releases, published by `.github/workflows/release.yml` when a tag is pushed. To cut one:
+
+```sh
+# 1. set the version in bin/fm-board/package.json and its lockfile, commit on main
+(cd bin/fm-board && npm version 0.2.0 --no-git-tag-version)    # 0.2.0-beta.1 for a beta
+git commit -am "fm-board 0.2.0"
+
+# 2. tag v<version> and push the tag
+git tag v0.2.0
+git push origin main v0.2.0
+```
+
+The workflow runs `scripts/package.sh`, which refuses a tag that is not `v` plus the `version` in `package.json` (a mistyped tag fails the job and publishes nothing), builds `fm-board-<tag>.tar.gz` with the production `node_modules` vendored and `fm-board-<tag>.tar.gz.sha256` beside it, and creates the release with the built-in `GITHUB_TOKEN` (`contents: write`, nothing broader), the install command for that tag and auto-generated notes. A tag with a suffix, `v0.2.0-beta.1`, is published as a prerelease: the default install skips it and `--pre` picks it up, so teammates can try a beta while the plain install stays on the last release. A plain `vX.Y.Z` becomes the latest release. After editing the workflow, lint it with `actionlint` and run `tests/install.test.sh`, which builds the tarball the same way.
+
 ## Layout of the code
 
 ```
+bin/install.sh               installer: download a release tarball (or --from-file), verify the checksum, unpack into --prefix, write the fm-board command into --bin-dir
+scripts/package.sh           build fm-board-<tag>.tar.gz and its .sha256; run by the release workflow and by tests/install.test.sh
+.github/workflows/release.yml  publish a GitHub Release from a pushed v* tag (prerelease when the tag has a suffix)
 bin/fm-board.sh              bash wrapper: FM_HOME, node and herdr checks, open --detached/focus, view-state path, exec index.mjs
 bin/fm-board/index.mjs       entry: argument parsing, --render-once, interactive run
 bin/fm-board/lib/args.mjs    option definitions
