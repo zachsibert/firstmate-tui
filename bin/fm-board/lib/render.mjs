@@ -3,7 +3,7 @@
 // styled segments so the neo-blessed adapter can color them and the
 // --render-once mode can print them plain. Nothing here touches a terminal.
 
-import { columns, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights, PANES, TAG_WIDTH_MIN } from './layout.mjs';
+import { columns, GUTTER, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights } from './layout.mjs';
 import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, upgradeOffer } from './settings.mjs';
 import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
@@ -30,12 +30,15 @@ export const HELP_LINES = [
   '  r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)',
   '  .            settings page: installed version, latest release, upgrade or a beta',
   '               (each install asks y first; . or esc brings the board back)',
+  '  =            reset every column width to its automatic size',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
   'mouse (off with --no-mouse; hold your terminal\'s text-selection modifier to select text)',
   '  click        select that row and focus its pane; a pane title focuses the pane',
   '  double-click the same as enter on that row',
   '  wheel        move the selection three rows in the focused pane',
+  '  drag         a column boundary in a pane\'s header row resizes that column; the',
+  '               width is kept across restarts. double-click the boundary to reset it',
   '',
   'The board is read-only: it never answers, merges or dispatches. Hidden rows and',
   'panes are view state in the board\'s own file, never in a firstmate home.',
@@ -68,13 +71,22 @@ function line(segments, cols) {
   return fitSegments(segments, cols, 'row');
 }
 
+// The GUTTER cells after column `index`: blank in the row's style, or, while
+// the captain drags the boundary at that index in this pane (view.drag), a
+// bar in the first cell so the boundary is seen moving on the header and on
+// every row of the pane.
+function gutterSegments(index, base, drag) {
+  if (drag && drag.index === index) return [seg(V, 'drag'), seg(' '.repeat(GUTTER - 1), base)];
+  return [seg(' '.repeat(GUTTER), base)];
+}
+
 // One segment per cell so a single cell can carry its own color. Styles are
 // space-separated tag names (lib/tui-blessed.mjs composes them):
 //   whole row   selected > grey (a hidden row shown by H) > bad (blocked,
 //               failed, failing, or a lost pane in a pane without a HERDR
 //               column) > flag > row
 //   HERDR cell  "pane lost" adds `lost` (red); "unknown" adds `grey`
-function rowSegments(row, spec, selected, paneId = null) {
+function rowSegments(row, spec, selected, paneId = null, drag = null) {
   const herdrCell = paneId === 'inflight' && spec.some((c) => c.key === 'extra');
   const bad = row.tag === 'blocked' || row.tag === 'failed' || row.tag === 'failing' || (row.lost && !herdrCell);
   const base = selected ? 'selected' : row.hidden ? 'grey' : bad ? 'bad' : row.flag ? 'flag' : 'row';
@@ -87,18 +99,21 @@ function rowSegments(row, spec, selected, paneId = null) {
       else if (row.unknown) style = `${base} grey`;
     }
     out.push(seg(fit(value, c.width, c.align), style));
-    if (i < spec.length - 1) out.push(seg(' ', base));
+    if (i < spec.length - 1) out.push(...gutterSegments(i, base, drag));
   });
   return out;
 }
 
-function headSegments(spec) {
-  const parts = [];
+// The column header: one segment when nothing is dragged, so the plain and
+// --tags frames stay the same as before; segments around the bar otherwise.
+function headSegments(spec, drag = null) {
+  const out = [];
   spec.forEach((c, i) => {
-    parts.push(fit(c.label, c.width, c.align));
-    if (i < spec.length - 1) parts.push(' ');
+    out.push(seg(fit(c.label, c.width, c.align), 'colhead'));
+    if (i < spec.length - 1) out.push(...gutterSegments(i, 'colhead', drag));
   });
-  return [seg(parts.join(''), 'colhead')];
+  if (drag) return out;
+  return [seg(out.map((s) => s.text).join(''), 'colhead')];
 }
 
 // The toggle key of a pane, shown btop-style before its title: `[1]`.
@@ -169,19 +184,12 @@ export function scrollStart(rowCount, height, selected, previousStart = 0) {
   return Math.max(0, start);
 }
 
-// One STATE column width for the whole frame: the widest state word on the
-// board, at least TAG_WIDTH_MIN, so "awaiting merge" fits when present and the
-// grid stays aligned across panes.
-export function tagColumnWidth(model) {
-  let w = TAG_WIDTH_MIN;
-  for (const pane of model.panes) for (const row of pane.rows) w = Math.max(w, width(row.tag || ''));
-  return w;
-}
-
 // Each renderer returns { lines, zones }: zones[y] says what line y is, in the
 // shape lib/layout.mjs hitTest() reads (a pane title, a row, the pane's other
 // cells, or null for the frame's own chrome), so a mouse click can be mapped
-// back to the row it landed on without a second copy of the geometry.
+// back to the row it landed on without a second copy of the geometry. The
+// column-header line's zone also carries the drawn columns and where they
+// start (`header`), which is what boundaryAt() measures a drag against.
 function renderPanes(model, cols, rows, view) {
   const lines = [];
   const zones = [];
@@ -193,11 +201,14 @@ function renderPanes(model, cols, rows, view) {
     model.panes.map((p) => !p.hidden),
   );
   const inner = cols - 4; // two border cells and one space padding each side
-  const tagWidth = tagColumnWidth(model);
+  const textX = 2; // the row text starts after the border cell and its padding
   model.panes.forEach((pane, idx) => {
     if (pane.hidden) return;
     const focused = view.pane === idx;
-    const spec = columns(cols, inner, pane.id, tagWidth);
+    // Fixed columns size to this pane's own rows; the captain's dragged widths
+    // for the pane replace them (lib/layout.mjs columns).
+    const spec = columns(cols, inner, pane.id, { rows: pane.rows, overrides: view.columns[pane.id] });
+    const drag = view.drag && view.drag.paneId === pane.id ? view.drag : null;
     const borderStyle = focused ? 'border-focus' : 'border';
     // `[1] Needs you (4) · ...`: the toggle key leads the title as its own dim
     // segment, so the plain frame reads the badge and --tags can grey it.
@@ -212,8 +223,8 @@ function renderPanes(model, cols, rows, view) {
     const bodyZones = [];
     const paneZone = { kind: 'pane', pane: idx };
     if (height >= 2) {
-      body.push(headSegments(spec));
-      bodyZones.push(paneZone);
+      body.push(headSegments(spec, drag));
+      bodyZones.push({ ...paneZone, header: { x0: textX, spec } });
     }
     // While the pane waits for its first data the spinner line leads the body
     // (in place of the empty text, or above the rows In flight already has
@@ -235,7 +246,7 @@ function renderPanes(model, cols, rows, view) {
       view.scrollOut[idx] = start;
       const visible = pane.rows.slice(start, start + roomForRows);
       visible.forEach((r, i) => {
-        body.push(rowSegments(r, spec, focused && start + i === view.row, pane.id));
+        body.push(rowSegments(r, spec, focused && start + i === view.row, pane.id, drag));
         bodyZones.push({ kind: 'row', pane: idx, row: start + i });
       });
       hiddenAbove = start;
@@ -288,7 +299,10 @@ function renderList(model, cols, rows, view) {
   lines.push(titleLine(model, cols));
   zones.push(null);
   const inner = cols - 1;
-  const spec = columns(cols, inner, 'inflight', tagColumnWidth(model));
+  // One header over every section: the fixed columns size to the widest value
+  // in any shown pane, and the captain's dragged widths do not apply here (the
+  // header line carries no column geometry, so nothing on it is a boundary).
+  const spec = columns(cols, inner, 'inflight', { rows: model.panes.flatMap((p) => (p.hidden ? [] : p.rows)) });
   lines.push(line([seg(' ', 'row'), ...headSegments(spec)], cols));
   zones.push(null);
   const flat = flattenRows(model);
@@ -504,10 +518,13 @@ function overlayHelp(lines, cols) {
   return lines;
 }
 
-// view: { pane, row, scroll[], help, notice, noticeBad, page, settings }
-// (the app's view also carries `expanded`, `hidden`, `hiddenPanes` and
-// `showHidden`, which only buildModel reads). page is 'board' or 'settings';
-// with 'settings' the frame is the Settings page over view.settings.
+// view: { pane, row, scroll[], help, notice, noticeBad, page, settings,
+// columns, drag } (the app's view also carries `expanded`, `hidden`,
+// `hiddenPanes` and `showHidden`, which only buildModel reads). page is
+// 'board' or 'settings'; with 'settings' the frame is the Settings page over
+// view.settings. columns is the captain's column widths by pane id and column
+// key (view state) and drag the boundary being dragged, { paneId, index, ... }
+// (lib/controller.mjs), whose bar the pane draws.
 // Returns { lines, cols, rows, mode, scroll, zones } where scroll holds the
 // start offsets actually used so the app can keep them for the next frame and
 // zones maps each line to what it shows (lib/layout.mjs hitTest). mode is
@@ -526,6 +543,8 @@ export function renderFrame(model, size, view = {}) {
     noticeBad: Boolean(view.noticeBad),
     page: view.page === 'settings' && view.settings ? 'settings' : 'board',
     settings: view.settings || null,
+    columns: view.columns && typeof view.columns === 'object' ? view.columns : {},
+    drag: view.drag || null,
   };
   const mode = v.page === 'settings' ? 'settings' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
   let drawn;

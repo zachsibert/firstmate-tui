@@ -107,6 +107,8 @@ export async function runApp(opts) {
       expanded: new Set(),
       hidden: loaded.state.hidden,
       hiddenPanes: loaded.state.hiddenPanes,
+      columns: loaded.state.columns, // dragged column widths by pane id and column key (view state)
+      drag: null, // the column boundary being dragged, or null (lib/controller.mjs)
       showHidden: false,
       help: false,
       frame: null, // the last drawn frame's { cols, rows, zones }: what the mouse points at
@@ -210,13 +212,14 @@ export async function runApp(opts) {
     draw();
   };
 
-  // View state: hidden rows and panes, written to the board's own file only.
+  // View state: hidden rows and panes and the dragged column widths, written
+  // to the board's own file only.
   const persist = () => {
     if (!viewStatePath.path) {
       notice(viewStatePath.problem || 'view state not saved: no config directory (set XDG_CONFIG_HOME or HOME)', true, 10000);
       return;
     }
-    const err = saveViewState(viewStatePath.path, { hidden: state.view.hidden, hiddenPanes: state.view.hiddenPanes });
+    const err = saveViewState(viewStatePath.path, { hidden: state.view.hidden, hiddenPanes: state.view.hiddenPanes, columns: state.view.columns });
     if (err) notice(`view state not saved: ${err}`, true, 15000);
   };
 

@@ -17,13 +17,18 @@
 // Mouse: with `mouse` true the screen listens for the library's mouse events,
 // which is what turns the terminal's mouse reporting on (and off again on
 // destroy, and around suspend/resume for the viewer, both inside the library).
+// For an xterm-like TERM the library's program.enableMouse (neo-blessed 0.2.0
+// lib/program.js) switches on modes 1000 (button presses and releases), 1002
+// (motion while a button is held), 1003 (all motion) and 1005 (UTF-8 cells),
+// so the terminal already reports a drag; nothing more is asked of it here.
 // normalizeMouse() turns each event into the plain object
-// lib/controller.mjs reads: { type: 'down' | 'up' | 'wheel', button, x, y,
-// dir, time }, cells from 0 at the top-left. Motion and drag reports are
-// dropped, drags by the motion flag in their button code because the library
-// labels them presses (isMotion); nothing here decides what a click means.
-// With `mouse` false no listener is added, so the terminal keeps its own click
-// and text selection.
+// lib/controller.mjs reads: { type: 'down' | 'up' | 'drag' | 'wheel',
+// button, x, y, dir, time }, cells from 0 at the top-left; `drag` is motion
+// with a button held, told from a press by the motion flag in the report's
+// button code (motionCode), because the library labels both 'mousedown'.
+// Motion with no button held is dropped; nothing here decides what a click or
+// a drag means. With `mouse` false no listener is added, so the terminal
+// keeps its own click and text selection.
 //
 // A segment style is one or more space-separated names from STYLE_TAGS
 // ("selected lost" is an inverse row whose cell is also red); toTags() opens
@@ -45,6 +50,7 @@ const STYLE_TAGS = {
   notice: ['{yellow-fg}', '{/yellow-fg}'],
   help: ['{yellow-fg}', '{/yellow-fg}'],
   flag: ['{yellow-fg}', '{/yellow-fg}'],
+  drag: ['{bold}{yellow-fg}', '{/yellow-fg}{/bold}'], // the boundary bar while a column is dragged
   row: ['', ''],
 };
 
@@ -114,24 +120,32 @@ export function splitMouseReports(s) {
   return parts && parts.length >= 2 ? parts : null;
 }
 
-// The button code of an X10, urxvt or SGR report carries 32 when the pointer
-// moved to another cell: with a button held in mode 1002, without one in 1003,
-// both of which the library turns on. neo-blessed 0.2.0 turns only the
-// no-button codes into 'mousemove' and reports a drag with the left button
-// held as 'mousedown left' (program.js _bindMouse, verified on a pty), so a
-// click whose pointer slipped one cell would reach the controller as two
-// presses. The wire code is on the event as raw[0]; X10 and urxvt add 32 to it.
-function isMotion(data) {
+// The button code of an X10, urxvt or SGR report when it carries the motion
+// flag (32: the pointer moved to another cell, with a button held in mode
+// 1002, without one in 1003, both of which the library turns on), else null.
+// neo-blessed 0.2.0 turns only the no-button codes into 'mousemove' and
+// reports a drag with the left button held as 'mousedown left' (program.js
+// _bindMouse, verified on a pty), so a drag has to be told from a press here:
+// unread, a click whose pointer slipped one cell would reach the controller
+// as two presses. The wire code is on the event as raw[0]; X10 and urxvt add
+// 32 to it, SGR does not. A wheel code (64) is never motion.
+function motionCode(data) {
   const raw = Array.isArray(data.raw) ? data.raw[0] : null;
-  if (!Number.isInteger(raw)) return false;
+  if (!Number.isInteger(raw)) return null;
   const code = data.type === 'sgr' ? raw : raw - 32;
-  return (code & 32) !== 0;
+  return (code & 32) !== 0 && (code & 64) === 0 ? code : null;
 }
 
 export function normalizeMouse(data) {
   if (!data || !Number.isInteger(data.x) || !Number.isInteger(data.y)) return null;
-  if (isMotion(data)) return null;
   const button = data.button === 'left' || data.button === 'right' || data.button === 'middle' ? data.button : null;
+  const motion = motionCode(data);
+  if (motion !== null) {
+    // Button bits 3 is motion with nothing held: not the board's. Anything
+    // else is a drag with that button.
+    if ((motion & 3) === 3 || data.action === 'mousemove' || !button) return null;
+    return { type: 'drag', button, x: data.x, y: data.y };
+  }
   switch (data.action) {
     case 'mousedown':
       return button ? { type: 'down', button, x: data.x, y: data.y } : null;
@@ -142,7 +156,7 @@ export function normalizeMouse(data) {
     case 'wheeldown':
       return { type: 'wheel', dir: 'down', x: data.x, y: data.y };
     default:
-      return null; // mousemove and drags are not the board's
+      return null; // mousemove without a button is not the board's
   }
 }
 

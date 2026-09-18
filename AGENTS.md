@@ -100,15 +100,36 @@ the findings watermark belong to later milestones.
   in `lib/settings.mjs`, over that page's own `kind: 'settings'` zones)
   against the `zones` the renderer returns with every frame, so gestures are
   tested through `--render-once --mouse <list>` (event tokens and key names
-  in order) and never a real pointer. That harness never loads neo-blessed,
+  in order) and never a real pointer. The column drag takes the same path:
+  the column-header line's zone carries the drawn columns (`header`),
+  `boundaryAt` in `lib/layout.mjs` reads it, the controller's
+  `drag-start` / `drag-move` / `drag-end` and `reset-column` actions apply
+  it, and the harness drives it with `drag:X1,Y->X2`, `move:X,Y` and
+  `release:X,Y`. The adapter turns a motion report with a button held into
+  a `drag` event (the library labels it a press); mode 1002 is already among
+  the modes `enableMouse` switches on. That harness never loads neo-blessed,
   so a change to the adapter is also checked by running the interactive
   board on a pseudo-terminal (Python `pty.fork`; macOS `script` refuses
   piped stdio) with `--opener-cmd bash tests/fake-opener.sh` and the raw
   reports a terminal sends (X10 `ESC [ M`, button+32, col+33, line+33:
   press 32, release 35, drag 64; SGR `ESC [ < b;col+1;line+1 M` or `m`),
-  counting opener lines. neo-blessed 0.2.0 parses one report per chunk,
+  counting opener lines. Inside herdr the same check runs in a lab session
+  (firstmate's `bin/fm-herdr-lab.sh`: provision, `viewer start` for a
+  120x40 client, `workspace create`, `pane run` the board with `--no-herdr
+  --no-prs --view-state <scratch file>` so it makes no herdr call of its own,
+  `pane send-text` with the raw report bytes, `pane read`, teardown); it
+  proves the parse and the adapter inside a herdr pane, not herdr's routing
+  of a real pointer. neo-blessed 0.2.0 parses one report per chunk,
   labels a drag as `mousedown left` and emits two keypress events for one
   carriage return; the adapter's comments say how each is handled.
+- Column widths are computed, never fixed: `columns()` in `lib/layout.mjs`
+  sizes each fixed column to the widest value it shows in that pane (between
+  its label and a cap), applies the captain's dragged widths from view state,
+  and gives the one flexible column the rest, with a two-cell gutter. The
+  tests pin a header as `LABEL {W}NEXT` where W is the column's width (its
+  padding plus the gutter), so a fixture change that widens a value, or a key
+  that hides the widest row, moves those regexes on purpose; write new ones
+  with `+` unless the width is the point of the check.
 - Run `tests/fm-board.test.sh` after any change; it needs Node and nothing
   else. Add a fixture under `tests/fixtures/` when a new data shape appears,
   and name in the test comment what would make the check fail. Key behavior

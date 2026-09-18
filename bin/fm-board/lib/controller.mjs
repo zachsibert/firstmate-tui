@@ -18,6 +18,19 @@
 // the focused pane. Only the left button acts: herdr keeps the right button
 // for its own pane menu, so nothing here is bound to it.
 //
+// Column widths: a left press on a pane's column-header line within a cell of
+// the gutter between two columns (lib/layout.mjs boundaryAt) starts a drag of
+// that boundary; each motion report with the button held moves the fixed
+// column beside it by the pointer's travel, clamped between its label width
+// plus one and what the flexible column can spare; the release ends the drag
+// and saves the width (view.columns, by pane id and column key, in the
+// board's view-state file). While it lasts, view.drag names the boundary and
+// the renderer draws a bar there on the header and every row. A second press
+// on the same boundary within DBLCLICK_MS is a double-click and resets that
+// column to its automatic width; the = key, and the Settings page's `Reset
+// column widths` entry, reset every column of every pane. A key pressed
+// mid-drag ends the drag first.
+//
 // Actions on a row:
 //   enter   group row: expand or collapse; Ready for review, Landed or Needs
 //           you row with a PR URL: open it; In flight worker or Needs you
@@ -32,6 +45,7 @@
 //           Any pane may go, the last one too: with all five hidden the frame
 //           is the landing page (lib/render.mjs) and only 0-5, r, ? and q act
 //   r       refresh (the snapshot and the PR checks, unless --no-prs)
+//   =       reset every column width to its automatic size (view state)
 //   .       the Settings page (lib/settings.mjs): installed version, latest
 //           release, upgrade and betas through the launcher, read-only flags;
 //           while it is open every key goes to settingsKeyAction and every
@@ -39,7 +53,7 @@
 //           back with its selection intact
 //   ?       help       q / ctrl-c  quit
 
-import { hitTest, PANES } from './layout.mjs';
+import { boundaryAt, hitTest, PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
 import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
 
@@ -174,6 +188,8 @@ export function keyAction(model, view, key) {
       return { type: 'settings' };
     case 'r':
       return { type: 'refresh' };
+    case '=':
+      return { type: 'reset-columns' };
     case 'H':
       return { type: 'toggle-hidden' };
     case '0':
@@ -211,34 +227,81 @@ export function keyAction(model, view, key) {
   }
 }
 
+// Two marks { time } are within the double-click window of each other.
+function within(mark, ev) {
+  const since = mark && Number.isFinite(mark.time) && Number.isFinite(ev.time) ? ev.time - mark.time : NaN;
+  return since >= 0 && since <= DBLCLICK_MS;
+}
+
 // A mouse event, from the terminal adapter or the --mouse list:
-//   { type: 'down' | 'up' | 'wheel', button: 'left' | 'right' | 'middle',
-//     x, y, dir: 'up' | 'down', time }
+//   { type: 'down' | 'up' | 'drag' | 'wheel', button: 'left' | 'right' |
+//     'middle', x, y, dir: 'up' | 'down', time }
 // x and y count cells from 0 at the top-left; time is milliseconds on any
-// one clock. view.frame is the last drawn frame's { cols, rows, zones }
-// (renderFrame) and view.lastClick the previous left click on a row
-// { pane, row, time }, which is how a double-click is recognized here rather
-// than by the terminal library. view.lastActivate, { pane, row, time } set by
-// applyAction when a double-click acts (absent until the first one), is the
-// guard: a press on that row within DBLCLICK_MS of it only selects and starts
-// no new pair, so one gesture opens a PR exactly once however many presses
-// the terminal reports for it; a press after the window, or enter at any
-// time, acts as usual. Actions: select (pane focus and cursor, also for a
-// title or empty space), activate (a double-click: the enter action for that
-// row), wheel, none. Only the left button acts.
+// one clock; `drag` is motion with the button held. view.frame is the last
+// drawn frame's { cols, rows, zones } (renderFrame) and view.lastClick the
+// previous left click, on a row { pane, row, time } or on a column boundary
+// { boundary: { pane, index }, time }, which is how a double-click is
+// recognized here rather than by the terminal library. view.lastActivate,
+// { pane, row, time } set by applyAction when a double-click acts (absent
+// until the first one), is the guard: a press on that row within DBLCLICK_MS
+// of it only selects and starts no new pair, so one gesture opens a PR
+// exactly once however many presses the terminal reports for it; a press
+// after the window, or enter at any time, acts as usual. view.drag is the
+// column drag in progress or null.
+// Actions: select (pane focus and cursor, also for a title or empty space),
+// activate (a double-click: the enter action for that row), wheel,
+// drag-start / drag-move / drag-end (a column boundary), reset-column (a
+// double-click on a boundary), none. Only the left button acts.
 export function mouseAction(model, view, ev) {
-  if (!ev || ev.type === 'up' || allPanesHidden(model)) return { type: 'none' };
+  if (!ev || allPanesHidden(model)) return { type: 'none' };
+  const drag = view.drag || null;
+  if (drag) {
+    if (ev.type === 'drag') return { type: 'drag-move', x: ev.x };
+    if (ev.type === 'up') return { type: 'drag-end' };
+    if (ev.type === 'down' && ev.button === 'left') {
+      // A press while the drag is still open: the harness's dblclick (two
+      // presses, no release), or a terminal that skipped the release. On the
+      // same boundary inside the window it is the double-click that resets
+      // the column; anywhere else it ends the drag.
+      const b = boundaryAt(view.frame, ev.x, ev.y);
+      if (b && b.pane === drag.pane && b.index === drag.index && within(drag, ev)) return { type: 'reset-column', paneId: drag.paneId, columnId: drag.columnId, label: drag.label };
+      return { type: 'drag-end' };
+    }
+    return { type: 'none' };
+  }
+  if (ev.type === 'up' || ev.type === 'drag') return { type: 'none' };
   if (ev.type === 'wheel') return { type: 'wheel', dir: ev.dir === 'up' ? -1 : 1 };
   if (ev.type !== 'down' || ev.button !== 'left') return { type: 'none' };
+  const boundary = boundaryAt(view.frame, ev.x, ev.y);
+  if (boundary) {
+    const pane = model.panes[boundary.pane];
+    if (!pane || pane.hidden) return { type: 'none' };
+    const last = view.lastClick;
+    if (last && last.boundary && last.boundary.pane === boundary.pane && last.boundary.index === boundary.index && within(last, ev)) {
+      return { type: 'reset-column', paneId: pane.id, columnId: boundary.columnId, label: boundary.label };
+    }
+    return {
+      type: 'drag-start',
+      pane: boundary.pane,
+      paneId: pane.id,
+      index: boundary.index,
+      columnId: boundary.columnId,
+      label: boundary.label,
+      startX: ev.x,
+      startWidth: boundary.width,
+      sign: boundary.sign,
+      min: boundary.min,
+      max: boundary.max,
+      time: ev.time,
+      click: { boundary: { pane: boundary.pane, index: boundary.index }, time: ev.time },
+    };
+  }
   const hit = hitTest(view.frame, ev.x, ev.y);
   if (!hit) return { type: 'none' };
   const pane = model.panes[hit.pane];
   if (!pane || pane.hidden) return { type: 'none' };
   if (hit.kind !== 'row') return { type: 'select', pane: hit.pane, row: hit.pane === view.pane ? view.row : 0 };
-  const sameRowWithin = (mark) => {
-    const since = mark && Number.isFinite(mark.time) && Number.isFinite(ev.time) ? ev.time - mark.time : NaN;
-    return Boolean(mark) && mark.pane === hit.pane && mark.row === hit.row && since >= 0 && since <= DBLCLICK_MS;
-  };
+  const sameRowWithin = (mark) => Boolean(mark) && mark.pane === hit.pane && mark.row === hit.row && within(mark, ev);
   if (sameRowWithin(view.lastActivate)) return { type: 'select', pane: hit.pane, row: hit.row };
   if (sameRowWithin(view.lastClick)) {
     return { type: 'activate', pane: hit.pane, row: hit.row, time: ev.time, action: keyAction(model, { ...view, pane: hit.pane, row: hit.row }, 'enter') };
@@ -252,13 +315,37 @@ function clampSelection(ctx) {
   ctx.view.row = v.row;
 }
 
+// The captain's column widths in the view: view.columns[paneId][columnId].
+function overrideOf(view, paneId, columnId) {
+  const pane = view.columns && view.columns[paneId];
+  return pane && Number.isInteger(pane[columnId]) ? pane[columnId] : undefined;
+}
+
+function setOverride(view, paneId, columnId, w) {
+  if (!view.columns || typeof view.columns !== 'object') view.columns = {};
+  if (!view.columns[paneId]) view.columns[paneId] = {};
+  view.columns[paneId][columnId] = w;
+}
+
+function clearOverride(view, paneId, columnId) {
+  const pane = view.columns && view.columns[paneId];
+  if (!pane) return;
+  delete pane[columnId];
+  if (!Object.keys(pane).length) delete view.columns[paneId];
+}
+
+function overrideCount(view) {
+  return Object.values(view.columns || {}).reduce((n, pane) => n + Object.keys(pane || {}).length, 0);
+}
+
 // The Settings page, open: one action from settingsKeyAction or
 // settingsMouseAction (lib/settings.mjs decides what a key or a click means)
 // applied to view.settings, with the effects handed to the host:
 // settingsFetch() fetches the release data, settingsUpgrade(running) starts
 // the launcher's upgrade and later calls finishUpgrade, relaunch() exits the
 // board with RELAUNCH_EXIT. Closing the page never touches the board's
-// selection, expanded groups or hidden rows.
+// selection, expanded groups or hidden rows. `reset-columns` is the one entry
+// that acts on the board's view, through the same applyAction as the = key.
 function applySettingsAction(ctx, action) {
   const { view } = ctx;
   const s = view.settings;
@@ -311,6 +398,9 @@ function applySettingsAction(ctx, action) {
     case 'relaunch':
       ctx.relaunch();
       return;
+    case 'reset-columns':
+      applyAction(ctx, action);
+      return;
     case 'notice':
       ctx.notice(action.text, action.bad);
       return;
@@ -324,7 +414,7 @@ function applySettingsAction(ctx, action) {
 //        settingsUpgrade(running), relaunch(), quit() }.
 // rebuild() must replace ctx.model from the current view (the expanded set,
 // the hidden set and the hidden panes change which rows and panes exist);
-// persist() saves view.hidden and view.hiddenPanes.
+// persist() saves view.hidden, view.hiddenPanes and view.columns.
 export function handleKey(ctx, key) {
   const { view } = ctx;
   if (view.help) {
@@ -336,12 +426,13 @@ export function handleKey(ctx, key) {
     applySettingsAction(ctx, settingsKeyAction(view.settings, key));
     return;
   }
+  if (view.drag) applyAction(ctx, { type: 'drag-end' });
   applyAction(ctx, keyAction(ctx.model, view, key));
 }
 
 export function handleMouse(ctx, ev) {
   const { view } = ctx;
-  if (!ev || ev.type === 'up') return;
+  if (!ev) return;
   if (view.help) {
     if (ev.type === 'down') view.help = false;
     return;
@@ -350,6 +441,8 @@ export function handleMouse(ctx, ev) {
     applySettingsAction(ctx, settingsMouseAction(view.settings, view, ev, { dblclickMs: DBLCLICK_MS }));
     return;
   }
+  // A release or a motion report means nothing unless a drag is open.
+  if ((ev.type === 'up' || ev.type === 'drag') && !view.drag) return;
   applyAction(ctx, mouseAction(ctx.model, view, ev));
 }
 
@@ -375,6 +468,67 @@ function applyAction(ctx, action) {
       const count = paneCount(ctx.model, view.pane);
       if (count > 0) view.row = Math.max(0, Math.min(count - 1, view.row + action.dir * WHEEL_ROWS));
       view.lastClick = null;
+      return;
+    }
+    case 'drag-start':
+      // `before` is the override the drag may replace (undefined for an
+      // automatic width), so a drag that ends where it began leaves nothing
+      // behind; `moved` says whether any motion arrived.
+      view.drag = {
+        pane: action.pane,
+        paneId: action.paneId,
+        index: action.index,
+        columnId: action.columnId,
+        label: action.label,
+        startX: action.startX,
+        startWidth: action.startWidth,
+        sign: action.sign,
+        min: action.min,
+        max: action.max,
+        time: action.time,
+        before: overrideOf(view, action.paneId, action.columnId),
+        moved: false,
+      };
+      view.lastClick = action.click;
+      return;
+    case 'drag-move': {
+      const d = view.drag;
+      if (!d) return;
+      const w = Math.max(d.min, Math.min(d.max, d.startWidth + d.sign * (action.x - d.startX)));
+      setOverride(view, d.paneId, d.columnId, w);
+      d.moved = true;
+      return;
+    }
+    case 'drag-end': {
+      const d = view.drag;
+      if (!d) return;
+      view.drag = null;
+      if (!d.moved) return;
+      // Dragged back to the automatic width: no override to keep.
+      if (d.before === undefined && overrideOf(view, d.paneId, d.columnId) === d.startWidth) clearOverride(view, d.paneId, d.columnId);
+      const w = overrideOf(view, d.paneId, d.columnId);
+      if (w === d.before) return;
+      ctx.persist();
+      ctx.notice(w === undefined ? `${d.label} back to its automatic width` : `${d.label} ${w} wide · double-click the boundary resets it, = resets every column`);
+      return;
+    }
+    case 'reset-column': {
+      view.drag = null;
+      view.lastClick = null;
+      const had = overrideOf(view, action.paneId, action.columnId) !== undefined;
+      clearOverride(view, action.paneId, action.columnId);
+      if (had) ctx.persist();
+      ctx.notice(had ? `${action.label} back to its automatic width` : `${action.label} already has its automatic width`);
+      return;
+    }
+    case 'reset-columns': {
+      view.drag = null;
+      const n = overrideCount(view);
+      view.columns = {};
+      if (n) {
+        ctx.persist();
+        ctx.notice(`column widths reset: ${n} custom width${n === 1 ? '' : 's'} dropped, every column automatic again`);
+      } else ctx.notice('no custom column widths to reset; every column is automatic');
       return;
     }
     case 'quit':
