@@ -109,6 +109,11 @@ export async function runBearingsPrs(fmHome, { timeoutMs }) {
     timeoutMs,
   });
   if (r.error) return { candidate_prs: [], error: r.error };
+  // Without gh the script still exits 0, lists nothing and says so in its prs
+  // status line ("unavailable (gh not found)"). Since PR data is on by default,
+  // the board treats that as a failed fetch and names it, not as an empty list.
+  const status = typeof r.value.prs === 'string' ? r.value.prs : '';
+  if (/^unavailable\b/.test(status)) return { candidate_prs: [], error: status };
   return { candidate_prs: Array.isArray(r.value.candidate_prs) ? r.value.candidate_prs : [], error: null };
 }
 

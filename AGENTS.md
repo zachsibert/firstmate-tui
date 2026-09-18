@@ -25,8 +25,8 @@ the findings watermark belong to later milestones.
   PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
   `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
   report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended)
-  and refreshing its own data (`r`: the snapshot, plus the live PR fetch when
-  `--prs` is on). It never moves or closes a herdr pane; the captain splits
+  and refreshing its own data (`r`: the snapshot and the live PR fetch
+  together, unless `--no-prs`). It never moves or closes a herdr pane; the captain splits
   panes himself, so do not bring back an `f` toggle or a `pane move` action.
   `enter` is the one key that opens a PR; do not bring back the separate `o`
   key the scout report's M2 row still lists. Answers, merges and dispatch stay
@@ -60,7 +60,11 @@ the findings watermark belong to later milestones.
   tests/fake-viewer.sh`, never a real browser or editor (a one-shot render
   without `--viewer-cmd` only reports the resolved viewer for that reason).
   The `r` key is tested against a stand-in home whose snapshot scripts only
-  log that they ran (see `render_live` in the test). Nothing in the suite may
+  log that they ran (see `render_live` in the test); the refresh schedule
+  (both scripts per tick, a tick that lands mid-refresh skipped) is tested by
+  running the app with `--headless` against a stand-in whose snapshot sleeps
+  and stopping it with a signal, so `--headless` must never load
+  `neo-blessed`. Nothing in the suite may
   call a real herdr: if a test ever needs one, fake it and point
   `HERDR_BIN_PATH` at the fake as well as PATH, because herdr sets
   `HERDR_BIN_PATH` inside its panes and PATH alone still reaches the captain's

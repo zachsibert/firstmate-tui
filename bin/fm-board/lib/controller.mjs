@@ -19,7 +19,7 @@
 //   1-5     show or hide one pane (Needs you .. Landed); 0 shows all five.
 //           Any pane may go, the last one too: with all five hidden the frame
 //           is the landing page (lib/render.mjs) and only 0-5, r, ? and q act
-//   r       refresh (the snapshot, and the PR checks when --prs is on)
+//   r       refresh (the snapshot and the PR checks, unless --no-prs)
 //   ?       help       q / ctrl-c  quit
 
 import { PANES } from './layout.mjs';

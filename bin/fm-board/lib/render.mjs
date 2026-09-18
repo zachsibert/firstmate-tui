@@ -26,7 +26,7 @@ export const HELP_LINES = [
   '  1 - 5        show or hide a pane; each pane title carries its key: [1] Needs you',
   '               [2] Ready for review  [3] In flight  [4] Findings  [5] Landed',
   '  0            show every pane (with all five hidden the board lists these keys)',
-  '  r            refresh now: the snapshot, and the PR checks when --prs is on',
+  '  r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
   'The board is read-only: it never answers, merges or dispatches. Hidden rows and',

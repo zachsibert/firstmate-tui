@@ -16,12 +16,15 @@
 #                             [--keys <list>] [--expand <all|ids>] [--opener-cmd <argv>]
 #                             [--viewer-cmd <argv>] [--view-state <file>] [--tags]
 #                                      print one frame to stdout and exit
+#   fm-board.sh --headless [flags]     run the refresh schedule with no terminal
+#                                      (test mode; stop it with a signal)
 #
 # --detached is the wrapper's own flag and applies to `open` only. Every other
 # flag is passed through to bin/fm-board/index.mjs unchanged; see
-# `fm-board.sh --help` for the list (--home, --refresh, --prs, --no-herdr,
+# `fm-board.sh --help` for the list (--home, --refresh, --no-prs, --no-herdr,
 # --all-homes-needs, --opener-cmd, --viewer-cmd, --view-state, --herdr-cmd,
-# --herdr-socket, --snapshot-timeout, --keys, --expand, --tags).
+# --herdr-socket, --snapshot-timeout, --keys, --expand, --tags, --headless;
+# --prs is accepted and does nothing, live PR data being the default).
 #
 # FM_HOME resolution: the FM_HOME environment variable, else the one-line file
 # "$HERDR_PLUGIN_CONFIG_DIR/fm-home" (written once by the captain when the
@@ -65,6 +68,7 @@ esac
 
 want_herdr=1
 render_once=0
+headless=0
 detached=0
 fixture=
 view_state=
@@ -76,6 +80,7 @@ while [ "$#" -gt 0 ]; do
     --no-herdr) want_herdr=0; pass+=("$1") ;;
     --detached) detached=1 ;;
     --render-once) render_once=1; pass+=("$1") ;;
+    --headless) headless=1; pass+=("$1") ;;
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
@@ -189,7 +194,7 @@ if [ "$want_herdr" -eq 1 ]; then
   command -v "$herdr_bin" >/dev/null 2>&1 || die "herdr is required for the live overlay (found none as '$herdr_bin'); install herdr 0.8.x or pass --no-herdr"
 fi
 
-if [ "$command" = run ] && [ "$render_once" -eq 0 ] && [ ! -d "$BOARD_DIR/node_modules/neo-blessed" ]; then
+if [ "$command" = run ] && [ "$render_once" -eq 0 ] && [ "$headless" -eq 0 ] && [ ! -d "$BOARD_DIR/node_modules/neo-blessed" ]; then
   die "neo-blessed is not installed; run: (cd '$BOARD_DIR' && npm ci)"
 fi
 
