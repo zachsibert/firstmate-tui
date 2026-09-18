@@ -19,7 +19,9 @@
 //             record | null, checkout, git, launcher, repo, error }
 //   flags     read-only { label, value } lines (settingsFlags)
 //   identity  { login, source, reason } (lib/identity.mjs), the login the two
-//             PR panes are built around; the app updates it when it resolves
+//             PR panes are built around, or null while the app is still
+//             resolving it (the Identity line then reads so, not as a
+//             warning); the app updates it when it resolves
 //   config    { path, problem, status, error, review } (lib/config.mjs
 //             loadOrCreateConfig plus the config's review block): where the
 //             config file is and whether it was created, loaded or replaced
@@ -39,7 +41,7 @@
 // confirmation is pending cancels it. Only `y` on the keyboard confirms.
 
 import { hitTest } from './layout.mjs';
-import { describeIdentity, identityKnown } from './identity.mjs';
+import { describeIdentity, identityUnknown } from './identity.mjs';
 
 export const DEFAULT_REPO = 'zachsibert/firstmate-tui';
 
@@ -112,15 +114,16 @@ export function settingsFlags(opts) {
 
 // The read-only block after the flags: who the PR panes are built around,
 // where the config file is and what it says about To review. Pure entries,
-// no actions. `bad` marks the two warnings (unknown identity, a config file
-// replaced by the defaults); a line with an empty label continues the one
-// above it (the per-repository label rules).
+// no actions. `bad` marks the two warnings (an identity resolved unknown, a
+// config file replaced by the defaults; a null identity is still being
+// resolved and reads so, not as a warning); a line with an empty label
+// continues the one above it (the per-repository label rules).
 export function settingsInfo(s) {
-  const identity = s.identity || { login: null, source: 'unknown', reason: null };
+  const identity = s.identity ?? null;
   const config = s.config || { path: null, status: 'none', error: null, review: null };
   const lines = [];
-  lines.push({ label: 'Identity', value: describeIdentity(identity, config.path), bad: !identityKnown(identity) });
-  if (!identityKnown(identity) && identity.reason) lines.push({ label: '', value: `  tried: ${identity.reason}`, bad: false });
+  lines.push({ label: 'Identity', value: describeIdentity(identity, config.path), bad: identityUnknown(identity) });
+  if (identityUnknown(identity) && identity.reason) lines.push({ label: '', value: `  tried: ${identity.reason}`, bad: false });
   // The path, then what became of it: nothing when the file was read, the
   // example note when it was just written, the reason when the defaults are
   // in effect instead. With no path at all the reason stands alone.

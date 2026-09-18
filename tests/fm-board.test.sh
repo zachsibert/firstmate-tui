@@ -126,8 +126,11 @@
 #   cold-start.json 120x40, the first refresh in flight with nothing landed:
 #                   no snapshot, no prs block, no herdr block, so every pane
 #                   shows its loading spinner (the two PR panes each naming
-#                   their own GitHub source); the landed, failed, frame and
-#                   narrow variants are derived from it at run time
+#                   their own GitHub source, since a fixture without an
+#                   identity stands for a known login); the landed, failed,
+#                   frame, narrow and identity-pending (prs.identity null:
+#                   both PR panes spin on the identity instead) variants are
+#                   derived from it at run time
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -1395,20 +1398,57 @@ frame_tr=$(render "$(variant to-review.json empty-scope '{"prs": {"candidate_prs
 assert_row "$frame_tr" '^│ no repositories in scope: see Settings \(\.\) +│$' "an empty Teammates' PRs scope names the Settings page"
 frame_tr=$(render "$(variant to-review.json empty-rows '{"prs": {"candidate_prs": []}}')") || fail "to-review empty rows: render exited non-zero"
 assert_row "$frame_tr" '^│ no pull requests waiting for your review +│$' "a scope with no requests reads the empty text"
-# The identity unknown, on a fixture: one row in each PR pane, whatever candidates the fixture carries
-# (falsify: drop identityMissing from mineRows or toReviewRows).
-frame_tr=$(render "$(variant to-review.json no-identity '{"prs": {"identity": null}}')") || fail "to-review no identity: render exited non-zero"
-assert_count "$frame_tr" "identity unknown: see Settings (.)" 2 "identity null in the fixture: one row in each PR pane"
-assert_contains "$frame_tr" "┌─ [3] Teammates' PRs (1) ─" "identity null: Teammates' PRs counts the one row"
-assert_row "$frame_tr" '^│ - +- +- +- +identity unknown: see Settings \(\.\) +- +- │$' "identity null: the Teammates' PRs row reads across its seven columns, - under AUTHOR"
-assert_contains "$frame_tr" "┌─ [2] My PRs (1) ─" "identity null: My PRs counts the one row"
-assert_not_contains "$frame_tr" "gemini#120" "identity null: the fixture's rows are not drawn"
-frame_tr=$(render "$(variant to-review.json no-identity '{"prs": {"identity": null}}')" --install-root "$SCRATCH/nowhere" --keys "." --cols 200) || fail "to-review no identity settings: render exited non-zero"
-assert_contains "$frame_tr" " Identity       identity unknown: set identity.github_login in the config file, or run gh auth login" "identity null: the Settings page warns, naming the config file in general when a fixture render read none"
+# The identity resolved unknown, on a fixture (an identity object with no login: every rung failed):
+# one row in each PR pane, whatever candidates the fixture carries (falsify: drop identityMissing
+# from mineRows or toReviewRows).
+UNKNOWN_IDENTITY='{"login": null, "source": "unknown", "reason": "fixture: no login"}'
+frame_tr=$(render "$(variant to-review.json no-identity "{\"prs\": {\"identity\": $UNKNOWN_IDENTITY}}")") || fail "to-review no identity: render exited non-zero"
+assert_count "$frame_tr" "identity unknown: see Settings (.)" 2 "identity unknown in the fixture: one row in each PR pane"
+assert_contains "$frame_tr" "┌─ [3] Teammates' PRs (1) ─" "identity unknown: Teammates' PRs counts the one row"
+assert_row "$frame_tr" '^│ - +- +- +- +identity unknown: see Settings \(\.\) +- +- │$' "identity unknown: the Teammates' PRs row reads across its seven columns, - under AUTHOR"
+assert_contains "$frame_tr" "┌─ [2] My PRs (1) ─" "identity unknown: My PRs counts the one row"
+assert_not_contains "$frame_tr" "gemini#120" "identity unknown: the fixture's rows are not drawn"
+frame_tr=$(render "$(variant to-review.json no-identity "{\"prs\": {\"identity\": $UNKNOWN_IDENTITY}}")" --install-root "$SCRATCH/nowhere" --keys "." --cols 200) || fail "to-review no identity settings: render exited non-zero"
+assert_contains "$frame_tr" " Identity       identity unknown: set identity.github_login in the config file, or run gh auth login" "identity unknown: the Settings page warns, naming the config file in general when a fixture render read none"
+assert_contains "$frame_tr" "tried: fixture: no login" "identity unknown: the Settings page lists the fixture's reason"
+# The same while a refresh runs: the row, never a spinner, once the rungs have answered (falsify:
+# spin on !identityKnown in paneLoadingSource, or read a login of null as pending).
+frame_tr=$(render "$(variant to-review.json unknown-refreshing "{\"prs\": {\"identity\": $UNKNOWN_IDENTITY}, \"refresh\": {\"refreshing\": true}}")") || fail "to-review unknown refreshing: render exited non-zero"
+assert_count "$frame_tr" "identity unknown: see Settings (.)" 2 "identity unknown while refreshing: the row stays in both PR panes"
+assert_not_contains "$frame_tr" "resolving" "identity unknown while refreshing: no resolving line over a resolved identity"
+# The identity not resolved yet (null in the fixture, the app's state until its first refresh has
+# asked the rungs) while that refresh runs: both PR panes spin on it in the shape of the other
+# spinner lines, list nothing and count zero, and neither the identity row nor the fetch spinner
+# shows (falsify: read null as unknown in identityFromFixture, drop identityResolving from the two
+# builders or from paneLoadingSource, or gate the resolving line on the pane's fetchedAt, which
+# to-review.json sets).
+PENDING_IDENTITY='{"prs": {"identity": null}, "refresh": {"refreshing": true}}'
+frame_tr=$(render "$(variant to-review.json identity-pending "$PENDING_IDENTITY")") || fail "to-review identity pending: render exited non-zero"
+assert_count "$frame_tr" "⠋ resolving GitHub identity…" 2 "identity pending: both PR panes spin on the identity"
+assert_row "$frame_tr" '^│ ⠋ resolving GitHub identity… +│$' "identity pending: the resolving line has the spinner glyph, the verb, the source and the ellipsis, nothing else"
+assert_not_contains "$frame_tr" "identity unknown" "identity pending: the identity row is not drawn before the rungs have answered"
+assert_not_contains "$frame_tr" "loading GitHub" "identity pending: the fetch spinners wait for the login"
+assert_contains "$frame_tr" "┌─ [2] My PRs (0) ─" "identity pending: My PRs counts zero rows"
+assert_contains "$frame_tr" "┌─ [3] Teammates' PRs (0) ─" "identity pending: Teammates' PRs counts zero rows"
+assert_not_contains "$frame_tr" "gemini#120" "identity pending: the fixture's rows are not drawn for nobody"
+# Between the first draw and the first refresh (no refresh block) a pending identity reads the empty
+# text like the other panes, never the row (falsify: fire identityRow on !identityKnown).
+frame_tr=$(render "$(variant to-review.json identity-pending-idle '{"prs": {"identity": null}}')") || fail "to-review identity pending idle: render exited non-zero"
+assert_not_contains "$frame_tr" "identity unknown" "identity pending, no refresh: no identity row"
+assert_not_contains "$frame_tr" "resolving" "identity pending, no refresh: no spinner outside a refresh"
+assert_row "$frame_tr" '^│ no pull requests waiting for your review +│$' "identity pending, no refresh: Teammates' PRs reads its empty text"
+# The Settings page while resolving: the Identity line says so, with no tried: line (falsify: default a
+# null identity to unknown in settingsInfo).
+frame_tr=$(render "$(variant to-review.json identity-pending "$PENDING_IDENTITY")" --install-root "$SCRATCH/nowhere" --keys "." --cols 200) || fail "to-review identity pending settings: render exited non-zero"
+assert_row "$frame_tr" '^ Identity +resolving: the config file, then gh api user, then git config github.user +$' "identity pending: the Settings page says the identity is being resolved"
+assert_not_contains "$frame_tr" "tried:" "identity pending: nothing has been tried yet"
 # --no-prs: Teammates' PRs reads the off text with no identity row (falsify: test the identity before prs.enabled).
 frame_tr=$(render to-review.json --no-prs) || fail "to-review --no-prs: render exited non-zero"
 assert_row "$frame_tr" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs: Teammates' PRs reads the off text"
 assert_not_contains "$frame_tr" "identity unknown" "--no-prs: no identity row"
+frame_tr=$(render "$(variant to-review.json identity-pending-noprs "$PENDING_IDENTITY")" --no-prs) || fail "to-review pending --no-prs: render exited non-zero"
+assert_not_contains "$frame_tr" "resolving" "--no-prs: no resolving line either, since nothing needs the login (falsify: test identityPending before prs.enabled)"
+assert_row "$frame_tr" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs while the identity is pending: Teammates' PRs still reads the off text"
 # Without gh (the fixture's unavailable note): Teammates' PRs says what it needs (falsify: drop the
 # unavailable branch from prPaneEmpty).
 frame_tr=$(render "$(variant to-review.json no-gh '{"prs": {"candidate_prs": [], "toreview": {"unavailable": "gh not on PATH"}}}')") || fail "to-review no gh: render exited non-zero"
@@ -1797,6 +1837,27 @@ frame_i=$(FM_BOARD_TEST_GH_LOGIN_FAIL=1 render_identity "$SCRATCH/ident-none" --
 assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 2 "identity unknown: r asks gh again (falsify: never retry, or retry while known)"
 frame_i=$(render_identity "$SCRATCH/ident-gh" --keys "r") || fail "identity known r: render exited non-zero"
 assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "identity known: r does not ask gh again"
+
+# A fetch with the identity unknown asks nothing and leaves both panes unfetched (fetchPrs marks them
+# skipped, mergePrs keeps a null fetchedAt), so the first-fetch spinner still follows once r resolves
+# the login; a later fetch that answers stamps them as usual (falsify: drop `skipped` from fetchPrs'
+# unknown branch, or stamp fetchedAt for a skipped pane in mergePrs).
+skipped_out=$(node --input-type=module -e "
+  import { initialPrs, mergePrs } from '$ROOT/bin/firstmate-tui/lib/model.mjs';
+  import { fetchPrs } from '$ROOT/bin/firstmate-tui/lib/sources.mjs';
+  const unknown = { login: null, source: 'unknown', reason: 'nothing answered' };
+  const known = { login: 'captain', source: 'gh', reason: null };
+  const r = await fetchPrs('/nowhere', null, { identity: unknown, config: null, timeoutMs: 1000, env: { PATH: '$FAKE_BIN' } });
+  const show = (...parts) => console.log(parts.map(String).join(' '));
+  show('fetch', r.mine.skipped === true, r.toreview.skipped === true, r.mine.rows.length, r.mine.error, r.toreview.error);
+  const after = mergePrs(initialPrs(true, null), r, 100, unknown);
+  show('merged', after.fetchedAt, after.mine.fetchedAt, after.toreview.fetchedAt, after.error, after.candidate_prs.length, JSON.stringify(after.toreview.scope), after.identity.source);
+  const landed = mergePrs(after, { mine: { rows: [{ url: 'u', pane: 'mine' }], error: null }, toreview: { rows: [], error: null, scope: ['a/b'] }, note: null }, 200, known);
+  show('landed', landed.fetchedAt, landed.mine.fetchedAt, landed.toreview.fetchedAt, landed.candidate_prs.length, landed.identity.login);
+") || fail "skipped fetch checks: node exited non-zero: $skipped_out"
+for expected in "fetch true true 0 null null" "merged null null null null 0 [] unknown" "landed 200 200 200 1 captain"; do
+  if printf '%s\n' "$skipped_out" | grep -Fxq -- "$expected"; then pass; else fail "skipped fetch: expected line '$expected' in: $skipped_out"; fi
+done
 
 # -------------------------------------------------------------------- config
 # The config file's chain and its one-time write: --config first, else the plugin directory the
@@ -2248,6 +2309,9 @@ rm -f "${FETCH_LOG:?}"
 FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$SLOW_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --headless --refresh 5 --no-herdr > "$SCRATCH/headless.log" 2>&1 &
 headless_pid=$!
 sleep 19
+# The launcher runs node as a child, so a signal to the launcher alone leaves the board running (and
+# appending to FETCH_LOG every refresh for the rest of the suite): signal the child first, then the launcher.
+pkill -TERM -P "$headless_pid" 2>/dev/null
 kill "$headless_pid" 2>/dev/null
 wait "$headless_pid" 2>/dev/null
 headless_log=$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')
@@ -2376,6 +2440,35 @@ assert_contains "$frame_ld" "┌─ [4] In flight (0) ─" "cold start: the head
 assert_count "$frame_ld" "(stale)" 0 "cold start: nothing has failed, so nothing is stale"
 assert_widths "$frame_ld" 120 "cold start: every line is still 120 columns"
 assert_contains "$tags_ld" "{blue-fg}⠋ loading fleet snapshot…" "cold start --tags: the spinner line is dimmed like the empty text (falsify: give it the row style)"
+# The identity not yet resolved on a cold start (cold-start.json with prs.identity null, the app's
+# state until its first refresh has asked the rungs, which follows the snapshot): the two PR panes
+# spin on the identity, in the exact shape of the other spinner lines, in place of the fetch
+# spinners, and the unknown row is nowhere; cold-start.json itself stands for a known login, so it
+# keeps showing the fetch spinners above (falsify: read a null identity as unknown in
+# identityMissing, give the resolving line its own style, or leave it on a hard-coded glyph).
+frame_ld=$(render "$(variant cold-start.json identity-pending '{"prs": {"identity": null}}')") || fail "cold start identity pending: render exited non-zero"
+tags_ld=$(render "$(variant cold-start.json identity-pending '{"prs": {"identity": null}}')" --tags) || fail "cold start identity pending --tags: render exited non-zero"
+assert_count "$frame_ld" "⠋ resolving GitHub identity…" 2 "cold start identity pending: both PR panes spin on the identity"
+assert_line "$frame_ld" 8 '^│ ⠋ resolving GitHub identity… +│$' "cold start identity pending: My PRs' first body line is the resolving spinner"
+assert_line "$frame_ld" 12 '^│ ⠋ resolving GitHub identity… +│$' "cold start identity pending: Teammates' PRs' first body line is the resolving spinner"
+assert_not_contains "$frame_ld" "identity unknown" "cold start identity pending: the identity row is not drawn before the rungs have answered"
+assert_not_contains "$frame_ld" "loading GitHub" "cold start identity pending: the fetch spinners wait for the login"
+assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start identity pending: the four snapshot panes still spin on the snapshot"
+assert_contains "$frame_ld" "┌─ [2] My PRs (0) ─" "cold start identity pending: the header counts zero rows"
+assert_contains "$frame_ld" "┌─ [3] Teammates' PRs (0) ─" "cold start identity pending: Teammates' PRs counts zero rows"
+assert_widths "$frame_ld" 120 "cold start identity pending: every line is still 120 columns"
+assert_contains "$tags_ld" "{blue-fg}⠋ resolving GitHub identity…" "cold start identity pending --tags: the resolving line is dimmed like the other spinner lines"
+frame_ld=$(render "$(variant cold-start.json identity-pending-frame3 '{"prs": {"identity": null}, "refresh": {"refreshing": true, "loading_frame": 3}}')") || fail "cold start identity pending frame 3: render exited non-zero"
+assert_count "$frame_ld" "⠸ resolving GitHub identity…" 2 "cold start identity pending: loading_frame moves the resolving glyph with the others"
+assert_count "$frame_ld" "⠸ loading fleet snapshot…" 4 "cold start identity pending frame 3: the snapshot panes show the same glyph"
+frame_ld=$(render "$(variant cold-start.json identity-pending '{"prs": {"identity": null}}')" --no-prs) || fail "cold start identity pending --no-prs: render exited non-zero"
+assert_not_contains "$frame_ld" "resolving" "cold start identity pending --no-prs: nothing needs the login, so nothing spins on it"
+assert_not_contains "$frame_ld" "identity unknown" "cold start identity pending --no-prs: no identity row"
+assert_line "$frame_ld" 8 '^│ no pull requests of yours +│$' "cold start identity pending --no-prs: My PRs reads its empty text"
+frame_ld=$(render "$(variant cold-start.json identity-pending-narrow '{"prs": {"identity": null}, "cols": 70, "rows": 24}')") || fail "narrow cold start identity pending: render exited non-zero"
+assert_line "$frame_ld" 6 '^ ⠋ resolving GitHub identity… +$' "narrow cold start identity pending: My PRs' line spins on the identity"
+assert_line "$frame_ld" 8 '^ ⠋ resolving GitHub identity… +$' "narrow cold start identity pending: Teammates' PRs' line spins on the identity"
+assert_widths "$frame_ld" 70 "narrow cold start identity pending: every line is 70 columns"
 # The snapshot landed, the PR fetch still running (populated.json with prs null and refreshing):
 # only My PRs spins, above the recorded PR rows it already has from the snapshot, and the
 # four snapshot panes keep their rows (falsify: key the review pane on the snapshot, or drop the
@@ -2490,6 +2583,13 @@ assert_count "$frame_c" "loading" 0 "cached launch: no spinner anywhere (falsify
 assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "cached launch: a cached PR row is on screen with its columns"
 assert_row "$frame_c" '^│ blocked +- +scout-beta +blocked: gh auth expired ' "cached launch: a cached Needs you row is on screen"
 assert_widths "$frame_c" 120 "cached launch: every line is still 120 columns"
+# A cached launch while the identity is still being resolved (prs.identity null): the PR panes keep
+# the cached rows, drawn around the login the cache was fetched for, and never spin on the identity
+# (falsify: restore the cache only over a known identity in restoreFromCache).
+frame_c=$(render "$(variant cold-start.json cached-pending '{"prs": {"identity": null}, "now": "2026-09-16T12:12:00Z"}')" --cache "$CACHE") || fail "cache identity pending: render exited non-zero"
+assert_contains "$frame_c" "┌─ [2] My PRs (3) (cached 12m ago) ─" "cached launch, identity pending: My PRs draws the cached PR rows"
+assert_not_contains "$frame_c" "resolving" "cached launch, identity pending: no resolving line over cached rows"
+assert_not_contains "$frame_c" "identity unknown" "cached launch, identity pending: no identity row either"
 # The cached rows are live for the cursor: j selects the second Needs you row (falsify: draw the
 # cached rows as the empty text).
 tags_c=$(render "$fx_cc" --cache "$CACHE" --tags --keys "j") || fail "cache select: render exited non-zero"
@@ -3293,7 +3393,7 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
       > "$SCRATCH/pty-$name.out" 2>&1
   }
   pty_ok() { # <name> <label>: the driver saw every marker it waited for and the board exited on q
-    if grep -q "not seen\|killed\|still running" "$SCRATCH/pty-$1.out"; then fail "$2: $(tr '\n' ';' < "$SCRATCH/pty-$1.out")"; else pass; fi
+    if grep -q "not seen\|must not be\|killed\|still running" "$SCRATCH/pty-$1.out"; then fail "$2: $(tr '\n' ';' < "$SCRATCH/pty-$1.out")"; else pass; fi
   }
   pty_terms=""
   for t in xterm-256color screen tmux-256color; do
@@ -3323,6 +3423,55 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   run_pty xterm-256color lf "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\n" "sleep:1.2" "send:q" exit
   pty_ok lf "pty: LF alone leaves the board running until q"
   assert_not_opened "pty: LF alone (ctrl-j) opens nothing"
+  # A live start with the PR fetch on, against a stand-in whose snapshot sleeps 2 s and a gh that
+  # sleeps 2 s before answering, so each state stays on screen long enough to be told apart. With
+  # nothing to name the login (gh not logged in, github.user unset, the example config): both PR
+  # panes spin on the identity, the identity row appears only once the rungs have answered, and r
+  # spins again before the row returns. With gh logged in: the resolving line, then the fetch
+  # spinner, then the rows. The library repaints changed cells only, so a phrase drawn over other
+  # text can reach the driver with letters missing: the resolving line is waited for as a whole
+  # once the snapshot's redraw has laid the panes out afresh (2 s in, the rungs still 2 s away),
+  # the later lines are ones whose every cell differs from what they replace, and the last row
+  # waited for lands on a blank line, with 60 rows so every row fits. `absent` checks the row was
+  # not drawn before the spinner (falsify: fire identityRow on !identityKnown, and the row is drawn
+  # first, so the resolving wait times out; drop the draw after the identity resolves, and the fetch
+  # spinner is never seen; stamp fetchedAt for a skipped fetch, and r's second resolving line is
+  # followed by the empty text, not the row).
+  IDENT_HOME="$SCRATCH/firstmate-ident"
+  mkdir -p "$IDENT_HOME/bin" "$SCRATCH/slow-gh-bin"
+  # shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
+  printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\nsleep 2\ncat "%s"\n' "$FAKE_HOME/snapshot.json" > "$IDENT_HOME/bin/fm-fleet-snapshot.sh"
+  cp "$FAKE_HOME/bin/fm-bearings-snapshot.sh" "$IDENT_HOME/bin/fm-bearings-snapshot.sh"
+  chmod +x "$IDENT_HOME/bin/fm-fleet-snapshot.sh" "$IDENT_HOME/bin/fm-bearings-snapshot.sh"
+  # shellcheck disable=SC2016 # the wrapper passes its own arguments on at run time
+  printf '#!/usr/bin/env bash\nsleep 2\nexec "%s/gh" "$@"\n' "$FAKE_BIN" > "$SCRATCH/slow-gh-bin/gh"
+  chmod +x "$SCRATCH/slow-gh-bin/gh"
+  run_pty_identity() { # <name> <gh login failure: 1 or empty> <actions...>: the interactive board with the PR fetch on, against the slow stand-in, the slowed fake gh and the fake git, in its own config directory
+    local name=$1 ghfail=$2
+    shift 2
+    rm -f "${FETCH_LOG:?}"
+    FM_HOME="$IDENT_HOME" XDG_CONFIG_HOME="${PTY_XDG:-$SCRATCH/ident-pty-$name}" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_BOARD_TEST_GH_LOGIN_FAIL="$ghfail" PATH="$SCRATCH/slow-gh-bin:$IDENT_BIN:$FAKE_BIN:$PATH" \
+      FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" \
+      python3 "$PTY" --term xterm-256color --rows 60 --timeout 20 --capture "$SCRATCH/pty-$name.bin" "$@" -- \
+      "$BOARD" run --no-herdr --opener-cmd "$FAKE_OPENER" \
+      > "$SCRATCH/pty-$name.out" 2>&1
+  }
+  run_pty_identity ident-none 1 "wait:resolvingGitHubidentity" "absent:identityunknown" "wait:identityunknown:seeSettings(.)" "send:r" "wait:resolvingGitHub" "wait:identityunknown" "sleep:0.4" "send:q" exit
+  pty_ok ident-none "pty identity unknown: the resolving line first, the row once the rungs have answered, and r repeats both"
+  assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 2 "pty identity unknown: the start and r each asked gh once"
+  if grep -q "api graphql" "$FETCH_LOG"; then fail "pty identity unknown: a search ran with no login: $(cat "$FETCH_LOG")"; else pass; fi
+  run_pty_identity ident-gh "" "wait:resolvingGitHubidentity" "absent:identityunknown" "wait:loadingGitHubchecks" "wait:Bumptheretrybudget" "sleep:0.4" "send:q" exit
+  pty_ok ident-gh "pty identity known: the resolving line, then loading GitHub checks, then the rows gh answered"
+  assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "pty identity known: one gh api user call"
+  assert_count "$(cat "$FETCH_LOG")" "gh api graphql " 5 "pty identity known: the four searches and the lookup ran once the login was known"
+  # A warm launch: the previous run wrote the state cache on quit, so the next launch in the same
+  # config directory draws the cached PR rows around the login they were fetched for, marked cached,
+  # and never spins on the identity while the launch refresh resolves it again (falsify: set
+  # prs.identity to null for every first resolution in lib/app.mjs, and the cached rows give way
+  # to the resolving line).
+  PTY_XDG="$SCRATCH/ident-pty-ident-gh" run_pty_identity ident-gh-warm "" "wait:cached" "sleep:4.5" "absent:resolvingGitHub" "absent:identityunknown" "wait:Bumptheretrybudget" "sleep:0.4" "send:q" exit
+  pty_ok ident-gh-warm "pty warm launch: the cached rows stay on screen through the identity resolution"
+  assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "pty warm launch: the identity is still resolved once"
 else
   echo "note: the pseudo-terminal section was skipped; it needs python3 on PATH and bin/firstmate-tui/node_modules (npm ci in bin/firstmate-tui)"
 fi

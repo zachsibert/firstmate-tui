@@ -30,8 +30,11 @@
 // startup, written from the example when absent, and the GitHub login the two
 // PR panes are built around is resolved on the first refresh (the file, then
 // `gh api user`, then git; lib/identity.mjs) and cached for the session; a
-// manual r resolves it again only while it is unknown. The Settings page shows
-// both.
+// manual r resolves it again only while it is unknown. Until the rungs have
+// answered the identity is null (pending): the two PR panes spin on it the
+// way the other four spin on the snapshot, and r sets it back to null while
+// it asks again, so the identity row shows only for a resolved unknown login.
+// The Settings page shows both.
 //
 // Cold start: until the first snapshot and the first PR fetch land, the panes
 // have nothing to show, so each draws a spinner line naming what it waits on
@@ -409,10 +412,20 @@ export async function runApp(opts) {
     }
     state.ledgers = collectLedgers(state.snapshot, state.homes);
     // The identity: once per session, again on r only while it is unknown.
+    // Pending (null) while the rungs are asked, so the PR panes spin on it
+    // instead of keeping the identity row; the draw starts the spinner. PR
+    // rows restored from the state cache are drawn around the login they were
+    // fetched for, and keep it (and their cached marker) until the live answer
+    // replaces it: pending never blanks a pane that has a login to show.
     if (!state.identity || (manual && !identityKnown(state.identity))) {
+      state.identity = null;
+      state.view.settings.identity = null;
+      if (!identityKnown(state.prs.identity)) state.prs = { ...state.prs, identity: null };
+      draw();
       state.identity = await resolveIdentityLive({ config: state.config, askGh: state.prs.enabled && whichOnPath('gh', process.env), timeoutMs });
       state.view.settings.identity = state.identity;
       state.prs = { ...state.prs, identity: state.identity };
+      draw(); // the panes switch from the resolving line to the fetch line or the identity row at once
     }
     const prs = state.prs.enabled ? await fetchPrs(state.fmHome, state.snapshot, { identity: state.identity, config: state.config, timeoutMs }) : null;
     let prsFailure = null;

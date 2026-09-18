@@ -17,6 +17,10 @@ actions, run in order:
                          every whitespace character removed, contains needle
                          (the library repaints only changed cells, so a phrase
                          arrives without its spaces); --timeout bounds it
+  absent:<needle>        check at once that the same text does not contain
+                         needle (what the program must not have drawn so far,
+                         such as a message that belongs after a wait was met);
+                         a hit is reported and fails the run like a timeout
   sleep:<seconds>        pump output for this long
   exit                   wait for the program to exit (--timeout bounds it)
 
@@ -135,6 +139,13 @@ def main():
                 print(f'wait {arg!r}: seen')
             if status:
                 break
+        elif kind == 'absent':
+            needle = arg.encode('utf-8')
+            if needle in clean(bytes(captured[since:])):
+                print(f'absent {arg!r}: drawn although it must not be')
+                status = 3
+                break
+            print(f'absent {arg!r}: confirmed absent')
         elif kind == 'sleep':
             pump(time.time() + float(arg))
             print(f'sleep {arg}')

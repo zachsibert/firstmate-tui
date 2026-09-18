@@ -123,8 +123,15 @@ milestones.
   `toreview`, absent means `mine`) says where it draws, and `facts.prs.mine`
   and `facts.prs.toreview` carry each pane's own fetch state so one pane can
   be stale while the other is fresh (`mergePrs` in `lib/model.mjs` is the one
-  place that folds a fetch into the previous facts). A fixture's `prs.identity`
-  absent stands for a known login; `null` is the unknown identity.
+  place that folds a fetch into the previous facts). The identity has three
+  states (`lib/identity.mjs`): `null` is unresolved (the app before its first
+  refresh has asked the rungs, and again while `r` asks for an unknown one),
+  a login is known, and `{ login: null, source: 'unknown' }` is resolved
+  unknown; the PR panes spin on the first (`resolving GitHub identity`) and
+  show their identity row only for the last, and a fetch with the identity
+  unknown is `skipped`, leaving both panes unfetched. A fixture's
+  `prs.identity` absent stands for a known login, `null` for unresolved, and
+  an object without a login for resolved unknown.
 - Needs you's `review` row, In flight's `repairing PR` state and My PRs'
   `READY` / `REPAIRING` words are one set of definitions in `lib/model.mjs`
   (`parkedForCaptain`, `isRepairing`, `prReadiness`, `fleetPrTasks`); change
@@ -163,7 +170,11 @@ milestones.
   so a change to the adapter is also checked by running the interactive
   board on a pseudo-terminal (`tests/pty-keys.py`, Python `pty.fork`; macOS
   `script` refuses piped stdio; the suite's last section drives it for the
-  Enter key) with `--opener-cmd bash tests/fake-opener.sh` and the raw
+  Enter key and the identity spinner; the driver sees only the cells the
+  library repaints, so a phrase drawn over other text can reach a `wait:`
+  with its unchanged letters missing: wait for text that lands on blank
+  cells or after a full redraw, and `absent:` checks what must not have been
+  drawn yet) with `--opener-cmd bash tests/fake-opener.sh` and the raw
   reports a terminal sends (X10 `ESC [ M`, button+32, col+33, line+33:
   press 32, release 35, drag 64; SGR `ESC [ < b;col+1;line+1 M` or `m`),
   counting opener lines. Inside herdr the same check runs in a lab session
@@ -225,7 +236,10 @@ milestones.
   is followed at once and never doubled; a tick that lands mid-refresh
   skipped) is tested by running the app with `--headless` against a stand-in
   whose snapshot sleeps and stopping it with a signal, so `--headless` must
-  never load `neo-blessed`. The title line's countdown, `refreshing...` and
+  never load `neo-blessed`. The launcher runs node as a child, so that
+  signal goes to the child first (`pkill -P`) and then to the launcher; a
+  signal to the launcher alone leaves the board running and appending to the
+  fetch log for the rest of the suite. The title line's countdown, `refreshing...` and
   failure label render from a fixture `refresh` block (`index.mjs` documents
   it) because a one-shot render has no schedule; the panes' loading spinner
   comes from the same block (`refreshing: true` with no snapshot or `prs`

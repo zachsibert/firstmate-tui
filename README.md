@@ -161,7 +161,7 @@ firstmate-tui
 ```
 
 The launcher checks the home, Node and herdr, then the board fills the terminal with six bordered panes.
-Each pane's body starts with a spinner line naming what it waits on (the fleet snapshot, the GitHub checks or the GitHub review requests) until that data first lands, about five seconds for the snapshot and a few more for GitHub.
+Each pane's body starts with a spinner line naming what it waits on (the fleet snapshot, then for the two pull request panes your GitHub identity, then the GitHub checks or the GitHub review requests) until that data first lands, about five seconds for the snapshot and a few more for GitHub.
 From the second launch on, the board draws what it showed last time at once, each pane title marked `(cached 12m ago)` until that pane's live data lands, and puts the cursor back on the row you were on; [state-cache.json](#state-cachejson) explains both.
 The first launch also writes the board's config file from the shipped example, so you have a real file to edit; [Configuration](#configuration) says where it lives and what is in it.
 Press `?` inside the board for the keys, `.` for the Settings page and `q` to quit.
@@ -171,6 +171,7 @@ When a firstmate home sits above the current directory the `export` names it, bu
 
 The two pull request panes are built around one GitHub login, yours.
 The board takes it from the config file's `identity.github_login` when set, else from the account gh is logged in as (`gh api user`, once per session), else from git's `github.user` setting.
+While the board asks them, on the first refresh and again on `r` while the login is unknown, both panes show the spinner line `resolving GitHub identity`.
 When none of the three answers, both panes show one row, `identity unknown: see Settings (.)`, and fetch nothing; [Troubleshooting](#troubleshooting) has the fix.
 
 Inside herdr, `firstmate-tui` runs in the pane you type it in.
@@ -370,6 +371,7 @@ The board retries on every tick and `r` retries at once; the red text clears on 
 
 **Both pull request panes show one row, `identity unknown: see Settings (.)`.**
 Symptom: My PRs and Teammates' PRs each show that single row and fetch nothing, the footer shows once `GitHub identity unknown (<what was tried>); set identity.github_login in <config path> or run gh auth login`, and the Settings page's Identity line reads `identity unknown: set identity.github_login in <config path>, or run gh auth login`.
+A spinner line reading `resolving GitHub identity` in both panes for a few seconds after a start is not this: it is the board asking the three sources, and the row appears only once all three have failed.
 Cause: the board could not learn your GitHub login: the config file's `identity.github_login` is `null`, gh is not logged in (or not installed, or the board runs with `--no-prs`), and git has no `github.user` setting.
 Fix: either write your login into the config file's `identity.github_login`, or run `gh auth login` once.
 Then press `r`; while the identity is unknown a refresh asks again, so no restart is needed.

@@ -599,7 +599,9 @@ export const GH_MISSING = 'gh not on PATH';
 // resolved identity; without gh the firstmate script runs for My PRs instead
 // and `note` says so, for the footer to show once, while To review lists
 // nothing and says why. An unknown identity fetches nothing: both panes come
-// back empty with no error, and the model draws the identity row.
+// back empty with no error and marked `skipped`, so mergePrs leaves them
+// unfetched (the first-fetch spinner still follows once r resolves the
+// login) and the model draws the identity row meanwhile.
 export async function fetchPrs(fmHome, snapshot, { identity, config, timeoutMs, env = process.env }) {
   const empty = () => ({ rows: [], error: null, note: null });
   if (!whichOnPath('gh', env)) {
@@ -610,7 +612,7 @@ export async function fetchPrs(fmHome, snapshot, { identity, config, timeoutMs, 
       note: r.error ? null : 'gh not on PATH: PR data from fm-bearings-snapshot.sh, open PRs only, without titles, base branches or PR creation times; Teammates\' PRs needs gh',
     };
   }
-  if (!identityKnown(identity)) return { mine: empty(), toreview: { ...empty(), scope: [] }, note: null };
+  if (!identityKnown(identity)) return { mine: { ...empty(), skipped: true }, toreview: { ...empty(), scope: [], skipped: true }, note: null };
   if (!snapshot) return { mine: { ...empty(), error: 'no fleet snapshot to name the candidate repositories' }, toreview: { ...empty(), scope: [], error: 'no fleet snapshot to name the candidate repositories' }, note: null };
   const r = await runGhPrs(snapshot, { identity, config, timeoutMs, env });
   const notes = [r.mine.note, r.toreview.note].filter(Boolean);
