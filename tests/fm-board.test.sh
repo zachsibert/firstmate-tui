@@ -1108,8 +1108,8 @@ else
 fi
 assert_contains "$out" "FM_HOME is not set" "wrapper names FM_HOME in its error"
 assert_lines "$out" 2 "the FM_HOME error is exactly two lines"
-assert_row "$out" '^fm-board: FM_HOME is not set\. In a terminal:  export FM_HOME=/path/to/firstmate   \(the directory holding bin/fm-fleet-snapshot\.sh\), then run this again\.$' "line 1 carries the export command"
-assert_row "$out" '^fm-board: for a herdr plugin action, which carries no FM_HOME:  mkdir -p "\$\(herdr plugin config-dir firstmate\.board\)" && echo /path/to/firstmate > "\$\(herdr plugin config-dir firstmate\.board\)/fm-home"$' "line 2 carries the fm-home command in its herdr-less form"
+assert_row "$out" '^firstmate-tui: FM_HOME is not set\. In a terminal:  export FM_HOME=/path/to/firstmate   \(the directory holding bin/fm-fleet-snapshot\.sh\), then run this again\.$' "line 1 carries the export command"
+assert_row "$out" '^firstmate-tui: for a herdr plugin action, which carries no FM_HOME:  mkdir -p "\$\(herdr plugin config-dir firstmate\.board\)" && echo /path/to/firstmate > "\$\(herdr plugin config-dir firstmate\.board\)/fm-home"$' "line 2 carries the fm-home command in its herdr-less form"
 assert_not_contains "$out" "Found a firstmate home" "no firstmate home above the scratch directory: nothing is suggested"
 # With herdr answering, the plugin line prints the resolved directory instead (falsify: drop the
 # plugin_config_dir call from die_no_home).
@@ -1139,11 +1139,30 @@ if "$BOARD" --help 2>/dev/null | grep -Fq -- "--keys"; then pass; else fail "wra
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--viewer-cmd"; then pass; else fail "wrapper --help lists --viewer-cmd"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--view-state"; then pass; else fail "wrapper --help lists --view-state"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "-firstmate"; then fail "wrapper --help still lists a firstmate pane subcommand"; else pass; fi
-# open runs in place: with the same flags it prints the frame run prints (falsify: drop the
-# open -> run mapping after the argument loop, or route plain open to open_detached).
+# Bare, `open` and `run` are one command: with the same flags all three print the same
+# frame, and it is the frame the suite checked above (falsify: drop the open -> run mapping
+# after the argument loop, route plain open to open_detached, or drop `run` from the
+# subcommand case so it falls into the unknown-subcommand branch).
+frame_bare=$("$BOARD" --render-once --fixture "$FIX/populated.json" --no-herdr) || fail "wrapper bare: render exited non-zero"
 frame_run=$("$BOARD" run --render-once --fixture "$FIX/populated.json" --no-herdr) || fail "wrapper run: render exited non-zero"
 frame_open=$("$BOARD" open --render-once --fixture "$FIX/populated.json" --no-herdr) || fail "wrapper open: render exited non-zero"
 if [ -n "$frame_open" ] && [ "$frame_open" = "$frame_run" ]; then pass; else fail "open printed a different frame from run: $(diff <(printf '%s\n' "$frame_run") <(printf '%s\n' "$frame_open") | head -n 5)"; fi
+if [ -n "$frame_bare" ] && [ "$frame_bare" = "$frame_open" ]; then pass; else fail "bare printed a different frame from open: $(diff <(printf '%s\n' "$frame_open") <(printf '%s\n' "$frame_bare") | head -n 5)"; fi
+if [ "$frame_bare" = "$frame" ]; then pass; else fail "the bare frame differs from the populated frame rendered through render() at the top of the suite"; fi
+# `help` is the usage page with exit 0, the same page as --help and -h; an unknown
+# subcommand prints it to stderr and exits 2 with nothing on stdout (falsify: drop the help
+# case or the catch-all from the subcommand case, or print the page to stdout there).
+if help_page=$("$BOARD" help 2>/dev/null); then pass; else fail "help should exit 0"; fi
+if [ "$help_page" = "$("$BOARD" --help 2>/dev/null)" ] && [ "$help_page" = "$("$BOARD" -h 2>/dev/null)" ]; then pass; else fail "help, --help and -h should print the same page"; fi
+bogus_stdout=$("$BOARD" bogus 2>"$SCRATCH/bogus.err")
+bogus_status=$?
+if [ "$bogus_status" -eq 2 ]; then pass; else fail "an unknown subcommand should exit 2, got $bogus_status"; fi
+if [ -z "$bogus_stdout" ]; then pass; else fail "an unknown subcommand printed to stdout: $bogus_stdout"; fi
+assert_file_contains "$SCRATCH/bogus.err" "unknown subcommand bogus" "the unknown subcommand is named on stderr"
+assert_file_contains "$SCRATCH/bogus.err" "usage: firstmate-tui [open] [flags]" "the usage page follows on stderr"
+# --help after open works like --help alone (falsify: handle -h/--help only before the
+# subcommand case).
+if "$BOARD" open --help >/dev/null 2>&1; then pass; else fail "open --help should exit 0"; fi
 # open --detached is the only route that places a pane, and it needs herdr; with --no-herdr the
 # wrapper refuses before any herdr call, which the fake's empty log proves (falsify: drop the
 # want_herdr guard from open_detached, or the --detached case from the argument loop).
@@ -1165,12 +1184,25 @@ if printf '%s\n' "$out" | grep -Fq -- "--detached applies to 'open' only"; then 
 # line in the header comment of bin/fm-board.sh).
 help=$("$BOARD" --help 2>/dev/null)
 if printf '%s\n' "$help" | grep -Fq -- "open --detached"; then pass; else fail "wrapper --help lists open --detached"; fi
-if printf '%s\n' "$help" | grep -Eq -- 'open \[flags\] +same as run'; then pass; else fail "wrapper --help says plain open is run"; fi
-if printf '%s\n' "$help" | grep -Fq -- "its own herdr pane"; then fail "wrapper --help still describes open as opening its own pane"; else pass; fi
+# The usage page leads with the bare command and `open` as one thing, running in this
+# terminal, and does not list `run`, which stays a hidden synonym (falsify: put [run] back
+# in the usage line, or dump the header comment again).
+if printf '%s\n' "$help" | grep -Eq -- '^usage: firstmate-tui \[open\] \[flags\] +run the board in this terminal'; then pass; else fail "wrapper --help leads with firstmate-tui [open] [flags] running in this terminal"; fi
+if printf '%s\n' "$help" | grep -Fq -- "[run]"; then fail "wrapper --help still lists run as the primary command"; else pass; fi
+if printf '%s\n' "$help" | grep -Eq -- '^ *firstmate-tui open \[flags\] .*herdr pane'; then fail "wrapper --help still describes plain open as opening its own pane"; else pass; fi
+if printf '%s\n' "$help" | grep -Fq -- "launcher for firstmate-tui"; then fail "wrapper --help dumps the header comment instead of a usage page"; else pass; fi
+for sub in "firstmate-tui focus" "firstmate-tui upgrade" "firstmate-tui version" "firstmate-tui help"; do
+  if printf '%s\n' "$help" | grep -Fq -- "$sub"; then pass; else fail "wrapper --help lists $sub"; fi
+done
+for flag in --refresh --no-prs --home --no-herdr; do
+  if printf '%s\n' "$help" | grep -Fq -- "$flag"; then pass; else fail "wrapper --help lists the common flag $flag"; fi
+done
+if printf '%s\n' "$help" | grep -Fq -- "Press ? inside the"; then pass; else fail "wrapper --help points at ? for the keys"; fi
+if printf '%s\n' "$help" | grep -Fq -- "running from a checkout at $ROOT"; then pass; else fail "wrapper --help from a checkout names the checkout (falsify: read the install record without testing for it)"; fi
 # The manifest's palette action has no terminal to run in, so it carries --detached; the pane
 # entry keeps running the board in place (falsify: edit either command in herdr-plugin.toml).
 if grep -Fq -- '"open", "--detached"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml open action carries --detached"; fi
-if grep -Fq -- '"../fm-board.sh", "run"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml pane entry runs the board in place"; fi
+if grep -Fq -- '"../fm-board.sh", "open"]' "$ROOT/bin/fm-board/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml pane entry runs the board in place with the public subcommand"; fi
 if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --view-state 2>&1); then
   fail "--view-state without a value should exit non-zero"
 else
