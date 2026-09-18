@@ -83,9 +83,11 @@ milestones.
   recorded task PRs the author searches missed; `gh search prs --json` cannot
   replace it, it carries no review decision, checks or base branch, and
   `user-review-requested:` must not replace `review-requested:`, it drops the
-  team requests. The candidate and checks rules copy
-  `fm-bearings-snapshot.sh`, which stays the My PRs fallback when gh is not on
-  PATH), and upgrading itself from the Settings page (`.`): only after a
+  team requests. The candidate rule copies `fm-bearings-snapshot.sh`, which
+  stays the My PRs fallback when gh is not on PATH; the checks rule
+  (`checksState`) judges only the newest run of each check on the head
+  commit, which that script does not, so a cancelled run a re-run superseded
+  never reads failing here), and upgrading itself from the Settings page (`.`): only after a
   `y` confirmation, only by running the installed launcher's own
   `firstmate-tui upgrade --version <v>` / `--stable` (`lib/upgrade.mjs`, argv
   spawn of `bash <prefix>/bin/firstmate-tui.sh upgrade ...`), so the record checks

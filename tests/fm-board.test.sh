@@ -1204,8 +1204,9 @@ assert_widths "$frame_st_70" 70 "70-column pr-status frame lines are 70 columns"
 
 # ------------------------------------------------------------ review rows
 # tests/fixtures/review-rows.json: parked tasks with a PR in the main home and in a secondmate
-# ledger, a task repairing its PR, one on its first pass, a closed and a merged PR inside the
-# 12-hour tail, and all four Needs you tags.
+# ledger (PR 21's merge state is BLOCKED with a review required, the merge box of a PR that only
+# waits for its review; the others are CLEAN), a task repairing its PR, one on its first pass, a
+# closed and a merged PR inside the 12-hour tail, and all four Needs you tags.
 frame_rv=$(render review-rows.json) || fail "review-rows: render exited non-zero"
 frame_rv_x=$(render review-rows.json --expand all) || fail "review-rows --expand all: render exited non-zero"
 frame_rv_np=$(render review-rows.json --no-prs) || fail "review-rows --no-prs: render exited non-zero"
@@ -1214,7 +1215,7 @@ frame_rv_np=$(render review-rows.json --no-prs) || fail "review-rows --no-prs: r
 # with no ~ (falsify: drop the done branch of parkedWithPr, the checks suffix in reviewRow, or
 # set ageFallback true for a ready PR).
 assert_contains "$frame_rv" "Needs you (6)" "review-rows: blocked, decide, hold and three review rows"
-assert_row "$frame_rv" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter · checks passing +acme/api +main +10m │$' "a done task with a clean open PR is a review row with the checks state and a plain age"
+assert_row "$frame_rv" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter · checks passing +acme/api +main +10m │$' "a done task's open PR that GitHub marks BLOCKED with a review required is a review row reading ready, with checks passing and a plain age (falsify: treat BLOCKED as not ready in prReadiness)"
 assert_row "$frame_rv" '^│ review +#22 +ship-paused +acme/api#22 · Rate-limit headers on every list endpoint · checks pending +acme/api +main +25m │$' "a task firstmate paused on the captain counts as parked (falsify: drop paused from PARKED_STATES)"
 assert_row "$frame_rv" '^│ review +#61 +child-ready +acme/etl#61 · ETL: nightly loader · checks passing +acme/etl +hyperion +40m │$' "a secondmate child parked with the PR its ledger's contributions.captain names is a review row labelled with its home, without --all-homes-needs (falsify: gate the ledger loop behind opts.allHomesNeeds, or read active_children alone)"
 assert_no_row "$frame_rv" '^│ review +#23 ' "a task working again on a conflicting PR has no review row (falsify: drop the conflicting return in reviewRow)"
@@ -1231,7 +1232,7 @@ assert_before "$frame_rv" '^│ hold +- +hold-vendor' '^│ review +#21' "review
 # My PRs: READY for a parked task's clean open PR, REPAIRING for a working-again task or a
 # conflicting PR, today's words for the rest (falsify: drop fleetStatus from mineRows, or its
 # parked / repairing branches).
-assert_row "$frame_rv" '^│ passing +READY +ship-ready +Retry on 429 with jitter +main +3h │$' "My PRs reads READY for the done task's clean PR, so both panes agree"
+assert_row "$frame_rv" '^│ passing +READY +ship-ready +Retry on 429 with jitter +main +3h │$' "My PRs reads READY with checks passing for the done task's BLOCKED PR, so both panes agree"
 assert_row "$frame_rv" '^│ pending +READY +ship-paused +Rate-limit headers on every list endpoint +main +5h │$' "READY for the paused task's PR"
 assert_row "$frame_rv" '^│ passing +READY +etl#61 +ETL: nightly loader +main +1h │$' "READY for the secondmate child's PR the ledger names (falsify: skip the ledgers in fleetPrTasks)"
 assert_row "$frame_rv" '^│ passing +REPAIRING +ship-dirty +Bulk lookup endpoint +main +4h │$' "REPAIRING for a task working again on a conflicting PR"
@@ -1484,6 +1485,28 @@ unit_out=$(node --input-type=module -e "
   out.push(['pending', checksState([{ status: 'IN_PROGRESS' }, { status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
   out.push(['failing', checksState([{ status: 'COMPLETED', conclusion: 'FAILURE' }, { status: 'IN_PROGRESS' }])]);
   out.push(['failing-state', checksState([{ state: 'ERROR' }])]);
+  // Runs of one check: only the newest counts. MatthewsREIS/gemini#6148's real rollup (six runs of
+  // one check, the cancelled one listed first and superseded 23 seconds later), a check whose only
+  // run was cancelled, a cancelled re-run after a success, a re-run still in progress, a check in
+  // progress beside a completed check of another name, the same job name in two workflows, a
+  // StatusContext updated from PENDING to SUCCESS, gh's --json list shape (name, times and
+  // workflowName, no app), nameless contexts judged one by one as before, and two runs without
+  // times, where the later position wins (falsify: rank by completedAt alone or drop the position
+  // from runRank, group by name alone, or judge every run).
+  const run = (name, conclusion, startedAt, completedAt, workflow = 'CI', status = 'COMPLETED') => ({ __typename: 'CheckRun', name, status, conclusion, startedAt, completedAt, checkSuite: { app: { name: 'GitHub Actions' }, workflowRun: { workflow: { name: workflow } } } });
+  const hive = 'check graphql schema (hive)';
+  const schema = 'GraphQL Schema Check';
+  out.push(['superseded', checksState([run(hive, 'CANCELLED', '2026-09-18T19:38:34Z', '2026-09-18T19:38:39Z', schema), run('merge check', 'SUCCESS', '2026-09-18T19:32:55Z', '2026-09-18T19:33:00Z'), run(hive, 'SUCCESS', '2026-09-18T19:33:17Z', '2026-09-18T19:33:31Z', schema), run(hive, 'SUCCESS', '2026-09-18T19:36:52Z', '2026-09-18T19:36:58Z', schema), run(hive, 'SUCCESS', '2026-09-18T19:38:57Z', '2026-09-18T19:39:05Z', schema), run(hive, 'SUCCESS', '2026-09-18T19:41:33Z', '2026-09-18T19:41:39Z', schema), run(hive, 'SUCCESS', '2026-09-18T19:42:10Z', '2026-09-18T19:42:16Z', schema)])]);
+  out.push(['cancelled-only', checksState([run('build', 'CANCELLED', '2026-09-18T10:00:00Z', '2026-09-18T10:01:00Z')])]);
+  out.push(['cancelled-newest', checksState([run('build', 'SUCCESS', '2026-09-18T10:00:00Z', '2026-09-18T10:05:00Z'), run('build', 'CANCELLED', '2026-09-18T10:10:00Z', '2026-09-18T10:11:00Z')])]);
+  out.push(['rerun-running', checksState([run('build', 'SUCCESS', '2026-09-18T10:00:00Z', '2026-09-18T10:05:00Z'), run('build', null, '2026-09-18T10:10:00Z', null, 'CI', 'IN_PROGRESS')])]);
+  out.push(['other-running', checksState([run('lint', 'SUCCESS', '2026-09-18T10:00:00Z', '2026-09-18T10:05:00Z'), run('build', null, '2026-09-18T10:00:00Z', null, 'CI', 'IN_PROGRESS')])]);
+  out.push(['two-workflows', checksState([run('build', 'FAILURE', '2026-09-18T10:00:00Z', '2026-09-18T10:05:00Z', 'CI'), run('build', 'SUCCESS', '2026-09-18T10:10:00Z', '2026-09-18T10:15:00Z', 'Release')])]);
+  out.push(['status-context-updated', checksState([{ __typename: 'StatusContext', context: 'ci/circle', state: 'PENDING', createdAt: '2026-09-18T10:00:00Z' }, { __typename: 'StatusContext', context: 'ci/circle', state: 'SUCCESS', createdAt: '2026-09-18T10:05:00Z' }])]);
+  out.push(['gh-json-superseded', checksState([{ __typename: 'CheckRun', name: hive, status: 'COMPLETED', conclusion: 'CANCELLED', startedAt: '2026-09-18T19:38:34Z', completedAt: '2026-09-18T19:38:39Z', workflowName: schema }, { __typename: 'CheckRun', name: hive, status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-18T19:38:57Z', completedAt: '2026-09-18T19:39:05Z', workflowName: schema }])]);
+  out.push(['gh-json-two-workflows', checksState([{ name: 'build', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: '2026-09-18T10:00:00Z', completedAt: '2026-09-18T10:05:00Z', workflowName: 'CI' }, { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-18T10:10:00Z', completedAt: '2026-09-18T10:15:00Z', workflowName: 'Release' }])]);
+  out.push(['nameless-mixed', checksState([{ status: 'COMPLETED', conclusion: 'CANCELLED' }, { status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
+  out.push(['position-only', checksState([run('build', 'SUCCESS', null, null), run('build', 'CANCELLED', null, null)])]);
   out.push(['slug-pull', repoSlug('https://github.com/acme/widgets/pull/41')]);
   out.push(['slug-ssh', repoSlug('git@github.com:acme/widgets.git')]);
   out.push(['slug-other', String(repoSlug('https://gitlab.com/acme/widgets'))]);
@@ -1514,7 +1537,7 @@ unit_out=$(node --input-type=module -e "
   out.push(['keep-closed-inside', keepFetchedPr({ state: 'CLOSED', closed_at: '2026-09-16T11:00:00Z' }, now)]);
   out.push(['keep-closed-nostamp', keepFetchedPr({ state: 'CLOSED' }, now)]);
   out.push(['keep-merged-future', keepFetchedPr({ state: 'MERGED', merged_at: '2026-09-16T13:00:00Z' }, now)]);
-  const need = ['number', 'title', 'url', 'headRefName', 'baseRefName', 'reviewDecision', 'mergeable', 'isDraft', 'state', 'createdAt', 'mergedAt', 'closedAt', 'author { login }', 'repository { nameWithOwner }', 'labels(first: 30)', 'latestReviews(first: 30)', 'commits(last: 1)', 'statusCheckRollup', '... on CheckRun { status conclusion }', '... on StatusContext { state }'];
+  const need = ['number', 'title', 'url', 'headRefName', 'baseRefName', 'reviewDecision', 'mergeable', 'isDraft', 'state', 'createdAt', 'mergedAt', 'closedAt', 'author { login }', 'repository { nameWithOwner }', 'labels(first: 30)', 'latestReviews(first: 30)', 'commits(last: 1)', 'statusCheckRollup', '... on CheckRun { name status conclusion startedAt completedAt checkSuite { app { name } workflowRun { workflow { name } } } }', '... on StatusContext { context state createdAt }'];
   out.push(['fields', need.filter((f) => !GH_PR_FIELDS.includes(f)).join(',') || 'complete']);
   const tasks = [
     { kind: 'ship', pr: { url: 'https://github.com/acme/widgets/pull/41' }, paths: { worktree: { path: '$WT_DIR' } } },
@@ -1543,6 +1566,9 @@ unit_out=$(node --input-type=module -e "
   process.stdout.write(out.map(([k, v]) => k + '=' + v).join('\n'));
 ") || fail "sources unit checks: node exited non-zero: $unit_out"
 for expected in "none=none" "none-null=none" "passing=passing" "passing-state=passing" "pending=pending" "failing=failing" "failing-state=failing" \
+  "superseded=passing" "cancelled-only=failing" "cancelled-newest=failing" "rerun-running=pending" "other-running=pending" \
+  "two-workflows=failing" "status-context-updated=passing" "gh-json-superseded=passing" "gh-json-two-workflows=failing" \
+  "nameless-mixed=failing" "position-only=failing" \
   "slug-pull=acme/widgets" "slug-ssh=acme/widgets" "slug-other=null" \
   "project=41 acme/widgets ship-alpha REVIEW_REQUIRED MERGEABLE passing 2026-09-16T09:00:00Z Add the widget cache main true OPEN null null" \
   "project-extra=null 0 false null mine" \
@@ -1684,15 +1710,20 @@ if [ -f "$SCRATCH/xdg/fm-board/config.json" ]; then pass; else fail "the first l
 # open PR in a repository no task touches, its own PR that asked its team for a review, the
 # bot-authored PR recorded on ship-alpha (through the lookup), ship-gamma's recorded PR the lookup
 # answered null (unlisted, and with no status file on this host no age to fall back to), the PR
-# merged at run time inside the window; the PR closed in 2020 is dropped by the fetch. Teammates' PRs:
-# the labelled gemini PR and not the unlabelled one, the acme/api PR with no label rule (checks
-# failing), the request through the identity's team, the PR the identity approved (STATUS
+# merged at run time inside the window; the PR closed in 2020 is dropped by the fetch; and the
+# stand-in for MatthewsREIS/gemini#6148, whose head commit carries six runs of one check with one
+# cancelled and re-run, a BLOCKED merge state and a review required: CHECKS passing and STATUS IN
+# REVIEW, the case Zach saw read failing. Teammates' PRs: the labelled gemini PR and not the
+# unlabelled one, the acme/api PR with no label rule (checks failing), the request through the
+# identity's team (the same six-run rollup and BLOCKED state), the PR the identity approved (STATUS
 # APPROVED), the PR merged at run time after that approval, and never the identity's own PR (falsify:
-# drop the lookup from runGhPrs, the label rule or the author check from the Teammates' PRs filter, or
-# myReview from ghSearch).
-assert_contains "$frame_r" "My PRs (5)" "live: My PRs counts its five rows"
+# drop the lookup from runGhPrs, the label rule or the author check from the Teammates' PRs filter,
+# myReview from ghSearch, or judge every run in checksState).
+assert_contains "$frame_r" "My PRs (6)" "live: My PRs counts its six rows"
 assert_row "$frame_r" '^│ passing +IN REVIEW +dotfiles#5 +Tidy the zsh prompt +main +[0-9]+d │$' "live: the identity's own PR outside the candidate repositories is in My PRs (the author search, not the repositories, is the scope)"
 assert_row "$frame_r" '^│ pending +IN REVIEW +api#12 +Retry budget: ask the API team +main +[0-9]+d │$' "live: the identity's own PR that asked its team is in My PRs"
+assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#6148 +Hide the Primary Sub Type row behind a feature flag +main +[0-9]+d │$' "live: PR 6148's shape reads CHECKS passing and STATUS IN REVIEW: the cancelled run a re-run superseded does not count, and BLOCKED with a review required is a review to give, not a failure (falsify: judge every run in checksState, or read BLOCKED into prStatus)"
+assert_not_contains "$frame_r" "failing   IN REVIEW  gemini#6148" "live: the 6148 stand-in never reads failing"
 assert_row "$frame_r" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +[0-9]+d │$' "live: the bot-authored PR recorded on ship-alpha is in My PRs through the lookup, under the task id"
 assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "live: a recorded PR the lookup answered null stays unlisted"
 assert_row "$frame_r" '^│ passing +MERGED +api#9 +Bump the retry budget +main +[0-9]+d │$' "live: the identity's PR merged just now is listed as MERGED"
@@ -1703,11 +1734,11 @@ assert_contains "$frame_r" "Teammates' PRs (5)" "live: Teammates' PRs counts its
 assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#120 +teammate +Gemini: index the parcel table +main +[0-9]+d │$' "live: the gemini PR with the ready-to-merge label is in Teammates' PRs (a configured repository searched with no fleet work in it), its author from the GraphQL node under AUTHOR"
 assert_no_row "$frame_r" 'gemini#121|still cooking' "live: the gemini PR without the label is dropped by the label rule"
 assert_row "$frame_r" '^│ failing +IN REVIEW +api#8 +teammate +Retry on 429 +main +[0-9]+d │$' "live: a PR in a candidate repository with no label rule is in Teammates' PRs, its FAILURE conclusion mapped to failing"
-assert_row "$frame_r" '^│ passing +IN REVIEW +etl#15 +teammate +ETL: nightly loader for the team +main +[0-9]+d │$' "live: a request to the identity's team is in Teammates' PRs"
+assert_row "$frame_r" '^│ passing +IN REVIEW +etl#15 +teammate +ETL: nightly loader for the team +main +[0-9]+d │$' "live: a request to the identity's team is in Teammates' PRs, and with PR 6148's rollup and a BLOCKED merge state it reads passing and IN REVIEW there too"
 assert_row "$frame_r" '^│ passing +APPROVED +widgets#45 +teammate +Widget: approved by captain +main +[0-9]+d │$' "live: a PR the identity already approved reads APPROVED"
 assert_row "$frame_r" '^│ passing +MERGED +etl#14 +teammate +ETL: merged after review +main +[0-9]+d │$' "live: a reviewed PR merged just now is in Teammates' PRs as MERGED"
 assert_count "$frame_r" "Retry budget: ask the API team" 1 "live: the identity's own PR that asked its team is in My PRs only, never in Teammates' PRs"
-assert_before "$frame_r" "My PRs \(5\)" "Teammates' PRs \(5\)" "live: Teammates' PRs is drawn right below My PRs"
+assert_before "$frame_r" "My PRs \(6\)" "Teammates' PRs \(5\)" "live: Teammates' PRs is drawn right below My PRs"
 assert_before "$frame_r" "Teammates' PRs \(5\)" "In flight \(" "live: In flight follows the two PR panes"
 frame_r=$(render_live --keys "r" --prs --rows 60) || fail "refresh --prs: render exited non-zero"
 assert_fetch_log "$expected_live" "--prs is a no-op: the same calls (falsify: make --prs disable or double the fetch)"
@@ -1952,6 +1983,7 @@ assert_row "$frame_s" '^   Betas +3 prereleases +$' "settings: the Betas entry c
 assert_row "$frame_s" '^   Refresh release data +GitHub releases of acme/fm-board-test +$' "settings: the refetch entry"
 assert_row "$frame_s" '^ refresh cadence +30 s \(--refresh\) +$' "settings: refresh cadence, read-only"
 assert_row "$frame_s" '^ PR data +on: live GitHub checks on every tick +$' "settings: PR data, read-only"
+assert_row "$frame_s" '^ CHECKS +passing, pending or failing, from the newest run of each check on the PR head commit +$' "settings: the CHECKS line says what the PR panes' column means (falsify: drop the entry from settingsFlags)"
 assert_row "$frame_s" '^ herdr overlay +off \(--no-herdr\) +$' "settings: the herdr line reflects --no-herdr"
 assert_row "$frame_s" '^ mouse +on: click selects, double-click acts, wheel scrolls, a header boundary drags +$' "settings: the mouse line, on by default (falsify: drop the mouse entry from settingsFlags)"
 assert_row "$frame_s" '^ Identity +captain  \(from fixture\) +$' "settings: the identity block names the fixture's login and source (falsify: drop settingsInfo from renderSettings)"
