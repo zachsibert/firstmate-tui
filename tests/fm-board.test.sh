@@ -51,6 +51,12 @@
 # The terminal adapter's key mapping (lib/tui-blessed.mjs normalizeKey) is
 # checked directly for the one case a one-shot render cannot reach: the two
 # keypress events the library emits for one Enter press must become one key.
+# The last section then runs the interactive board itself on a
+# pseudo-terminal (tests/pty-keys.py, python3) and types raw bytes into it,
+# so the library's input path is covered end to end: one carriage return on
+# a PR row is one opener call, one on a Settings entry is one pending
+# prompt, under each TERM the host has terminfo for. It is skipped with a
+# note without python3 or bin/fm-board/node_modules.
 #
 # Fixtures (tests/fixtures/):
 #   populated.json  160x40, every pane has rows: a blocked worker, a keyed
@@ -1990,6 +1996,68 @@ PATH="$FAKE_NODE:$PATH" FM_BOARD_TEST_NODE_LOG="$NODE_LOG" FM_BOARD_TEST_NODE_FI
 status=$?
 if [ "$status" -eq 3 ]; then pass; else fail "relaunch: exit 3 should pass through, got $status"; fi
 assert_lines "$(cat "$NODE_LOG" 2>/dev/null)" 1 "exit 3 runs the board once and relaunches nothing"
+
+# ---------------------------------------------------- real terminal input
+# The one section that runs the interactive board itself, on a pseudo-terminal through tests/pty-keys.py,
+# typing raw bytes: the terminal library's own input path, which --render-once never loads. neo-blessed
+# 0.2.0 reports one carriage return (0x0d) as two keypress events, 'enter' and then 'return', and the
+# adapter must hand the controller one key, or every Enter acts twice: a PR row opened twice (two opener
+# calls from the same board pid) and on the Settings page the second enter cancelled the confirmation the
+# first had opened, so y did nothing (falsify: map 'return' to 'enter' again in normalizeKey; with the
+# adapter before the fix the opener log below has two lines and the upgrade log stays absent). Each
+# gesture runs under TERM=xterm-256color, screen and tmux-256color, whichever terminfo the host has,
+# because the board runs inside herdr. The driver waits for the PR row's URL, not the pane header, since
+# the header is drawn over the loading spinner before the snapshot lands. Needs python3 and the board's
+# node_modules (npm ci in bin/fm-board); without them the section is skipped with a note, not failed.
+PTY="$ROOT/tests/pty-keys.py"
+PTY_URL=https://github.com/acme/widgets/pull/41
+PTY_TRACE="$SCRATCH/pty-opener-trace.log"
+if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/fm-board/node_modules/neo-blessed" ]; then
+  run_pty() { # <term> <name> <actions...>: the interactive board on a pty against the stand-in home, with every fake wired
+    local term=$1 name=$2
+    shift 2
+    rm -f "${OPENER_LOG:?}" "${PTY_TRACE:?}" "${UPGRADE_LOG:?}" "${CURL_LOG:?}"
+    FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" PATH="$FAKE_BIN:$PATH" \
+      FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" FM_BOARD_TEST_OPENER_TRACE="$PTY_TRACE" FM_BOARD_TEST_UPGRADE_LOG="$UPGRADE_LOG" \
+      FAKE_CURL_ROOT="$REL" FAKE_CURL_LOG="$CURL_LOG" \
+      python3 "$PTY" --term "$term" --timeout 20 --capture "$SCRATCH/pty-$name.bin" "$@" -- \
+      "$BOARD" run --no-herdr --no-prs --opener-cmd "$FAKE_OPENER" --install-root "$INSTALL" --curl-cmd "bash $ROOT/tests/fake-curl.sh" \
+      > "$SCRATCH/pty-$name.out" 2>&1
+  }
+  pty_ok() { # <name> <label>: the driver saw every marker it waited for and the board exited on q
+    if grep -q "not seen\|killed\|still running" "$SCRATCH/pty-$1.out"; then fail "$2: $(tr '\n' ';' < "$SCRATCH/pty-$1.out")"; else pass; fi
+  }
+  pty_terms=""
+  for t in xterm-256color screen tmux-256color; do
+    if infocmp "$t" >/dev/null 2>&1; then pty_terms="$pty_terms $t"; fi
+  done
+  [ -n "$pty_terms" ] || pty_terms=xterm-256color
+  for t in $pty_terms; do
+    # One 0x0d on the first Ready for review row (tab moves there once the row is drawn): exactly one opener
+    # call, made by the board (the trace names one pid and the URL as the only argument).
+    run_pty "$t" "cr-$t" "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\r" "wait:opened$PTY_URL" "sleep:0.4" "send:q" exit
+    pty_ok "cr-$t" "pty $t: one Enter on a PR row reaches the opened notice and q quits"
+    assert_opened "$PTY_URL" "pty $t: one carriage return on a PR row calls the opener exactly once (falsify: map 'return' to 'enter' in normalizeKey)"
+    assert_lines "$(cat "$PTY_TRACE" 2>/dev/null)" 1 "pty $t: the opener trace holds one invocation (pid, ppid, argv)"
+    assert_contains "$(cat "$PTY_TRACE" 2>/dev/null)" "argv=$PTY_URL" "pty $t: that invocation carries the URL as its only argument"
+    # One 0x0d on the Settings Upgrade entry: the confirm line is drawn and still pending, so y runs the
+    # launcher once. The old double delivery cancelled it and y did nothing.
+    run_pty "$t" "settings-$t" "wait:$PTY_URL" "send:." "wait:Upgradeto0.2.0" "send:\r" "wait:ytoconfirm" "sleep:0.4" "send:y" "wait:0.2.0installed" "sleep:0.4" "send:q" "sleep:0.4" "send:q" exit
+    pty_ok "settings-$t" "pty $t: one Enter on Upgrade shows the confirm line and y runs the installer"
+    assert_upgrade_log "upgrade --version 0.2.0" "pty $t: one carriage return opens the prompt and y then runs the launcher exactly once"
+    assert_not_opened "pty $t: nothing on the Settings page opens a PR"
+  done
+  # 0x0d 0x0a (a terminal in newline mode) opens once: the linefeed is a separate key the board does not
+  # bind. 0x0a alone opens nothing (falsify: bind linefeed to enter, which would double a CR LF).
+  run_pty xterm-256color crlf "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\r\n" "wait:opened$PTY_URL" "sleep:0.4" "send:q" exit
+  pty_ok crlf "pty: CR LF reaches the opened notice"
+  assert_opened "$PTY_URL" "pty: CR LF on a PR row calls the opener exactly once"
+  run_pty xterm-256color lf "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\n" "sleep:1.2" "send:q" exit
+  pty_ok lf "pty: LF alone leaves the board running until q"
+  assert_not_opened "pty: LF alone (ctrl-j) opens nothing"
+else
+  echo "note: the pseudo-terminal section was skipped; it needs python3 on PATH and bin/fm-board/node_modules (npm ci in bin/fm-board)"
+fi
 
 printf '%s checks, %s failed\n' "$checks" "$fails"
 [ "$fails" -eq 0 ]

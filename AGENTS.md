@@ -102,15 +102,18 @@ the findings watermark belong to later milestones.
   tested through `--render-once --mouse <list>` (event tokens and key names
   in order) and never a real pointer. That harness never loads neo-blessed,
   so a change to the adapter is also checked by running the interactive
-  board on a pseudo-terminal (Python `pty.fork`; macOS `script` refuses
-  piped stdio) with `--opener-cmd bash tests/fake-opener.sh` and the raw
+  board on a pseudo-terminal (`tests/pty-keys.py`, Python `pty.fork`; macOS
+  `script` refuses piped stdio; the suite's last section drives it for the
+  Enter key) with `--opener-cmd bash tests/fake-opener.sh` and the raw
   reports a terminal sends (X10 `ESC [ M`, button+32, col+33, line+33:
   press 32, release 35, drag 64; SGR `ESC [ < b;col+1;line+1 M` or `m`),
   counting opener lines. neo-blessed 0.2.0 parses one report per chunk,
   labels a drag as `mousedown left` and emits two keypress events for one
   carriage return; the adapter's comments say how each is handled.
-- Run `tests/fm-board.test.sh` after any change; it needs Node and nothing
-  else. Add a fixture under `tests/fixtures/` when a new data shape appears,
+- Run `tests/fm-board.test.sh` after any change; it needs Node, plus
+  python3 and the board's `node_modules` for its last section, which runs
+  the interactive board on a pseudo-terminal (`tests/pty-keys.py`) and is
+  skipped with a note without them. Add a fixture under `tests/fixtures/` when a new data shape appears,
   and name in the test comment what would make the check fail. Key behavior
   is tested through `--render-once --keys <list>` (and `--expand`,
   `--view-state`, `--tags`); a PR open must go to `--opener-cmd bash
@@ -153,7 +156,11 @@ the findings watermark belong to later milestones.
   ci]`) before building at it; any other push publishes the prerelease
   `v<next>-<sha7>`, named against the coming release. Nobody tags by hand,
   nobody opens a PR only to bump the version (bump minor or major in the PR
-  that earns it), and no test creates a tag or a release. `scripts/package.sh`
+  that earns it), and no test creates a tag or a release. A commit message
+  you push must never contain the literal skip-ci marker (the bracketed
+  words the bot's bump commit uses): GitHub then skips the PR's own checks
+  and its beta; the workflow's bump commit is the only place it belongs, and
+  prose spells it out as "the skip-ci marker". `scripts/package.sh`
   is the one place that builds the tarball (the workflow and
   `tests/install.test.sh` both run it), so a new file that must ship, and the
   tag-equals-version check, are changes there. `.github/workflows/test.yml`
