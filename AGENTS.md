@@ -38,7 +38,7 @@ scout report at `docs/scout-report-2026-09-16.md` is the design record: its
 section 1 table is the pane-to-data mapping that `bin/firstmate-tui/lib/model.mjs`
 implements row for row (since 0.4.0 its Ready for review row is two panes, My
 PRs and Teammates' PRs, both over the identity in the board's config file; the
-README's Panes section is the current mapping), and its section 7 table is
+README's Using the board section is the current mapping), and its section 7 table is
 the milestone plan. Check the plan before widening scope: answering
 decisions, opening PRs, toasts and the findings watermark belong to later
 milestones.
@@ -223,7 +223,7 @@ milestones.
   is followed at once and never doubled; a tick that lands mid-refresh
   skipped) is tested by running the app with `--headless` against a stand-in
   whose snapshot sleeps and stopping it with a signal, so `--headless` must
-  never load `neo-blessed`. The title line's countdown, `refreshing…` and
+  never load `neo-blessed`. The title line's countdown, `refreshing...` and
   failure label render from a fixture `refresh` block (`index.mjs` documents
   it) because a one-shot render has no schedule; the panes' loading spinner
   comes from the same block (`refreshing: true` with no snapshot or `prs`
