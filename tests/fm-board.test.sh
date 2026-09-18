@@ -1125,7 +1125,7 @@ WT_SM_DIR="$SCRATCH/wt-secondmate"
 git init -q "$WT_DIR" && git -C "$WT_DIR" remote add origin git@github.com:acme/wt.git
 git init -q "$WT_SM_DIR" && git -C "$WT_SM_DIR" remote add origin https://github.com/acme/mate-only.git
 unit_out=$(node --input-type=module -e "
-  import { checksState, projectPr, repoSlug, candidateRepos, keepFetchedPr, GH_PR_FIELDS, myReview, searchQueries, reviewScope, lookupGraphql, closedSince, SEARCH_QUERY_MAX } from '$ROOT/bin/firstmate-tui/lib/sources.mjs';
+  import { checksState, projectPr, repoSlug, candidateRepos, keepFetchedPr, GH_PR_FIELDS, myReview, searchQueries, reviewScope, inScope, lookupGraphql, closedSince, SEARCH_QUERY_MAX } from '$ROOT/bin/firstmate-tui/lib/sources.mjs';
   const out = [];
   out.push(['none', checksState([])], ['none-null', checksState(null)]);
   out.push(['passing', checksState([{ status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
@@ -1176,6 +1176,8 @@ unit_out=$(node --input-type=module -e "
   out.push(['cap', (await candidateRepos(many, { timeoutMs: 10000 })).join(' ')]);
   const config = { review: { default_labels: [], repos: { 'MatthewsREIS/gemini': { labels: ['ready-to-merge'] }, 'acme/etl': { labels: [] } } } };
   out.push(['scope', reviewScope(repos, config).join(' ')]);
+  out.push(['scope-case', reviewScope(['Acme/Widgets', 'acme/widgets'], { review: { repos: { 'ACME/widgets': {} } } }).join(' ')]);
+  out.push(['in-scope', [inScope(['MatthewsREIS/gemini'], 'matthewsreis/gemini'), inScope(['acme/api'], 'acme/etl')].join(' ')]);
   out.push(['since', closedSince(now)]);
   const s = searchQueries('captain', { now, scope: ['acme/widgets', 'MatthewsREIS/gemini'] });
   out.push(['q-mine-open', s.mine.open]);
@@ -1203,7 +1205,7 @@ for expected in "none=none" "none-null=none" "passing=passing" "passing-state=pa
   "fields=complete" \
   "repos=acme/widgets acme/etl acme/wt" \
   "cap=acme/r0 acme/r1 acme/r2 acme/r3 acme/r4 acme/r5 acme/r6 acme/r7 acme/r8 acme/r9" \
-  "scope=acme/widgets acme/etl acme/wt MatthewsREIS/gemini" \
+  "scope=acme/widgets acme/etl acme/wt MatthewsREIS/gemini" "scope-case=Acme/Widgets" "in-scope=true false" \
   "since=2026-09-16T00:00:00+00:00" \
   "q-mine-open=is:pr is:open author:captain sort:updated-desc" \
   "q-mine-tail=is:pr author:captain closed:>=2026-09-16T00:00:00+00:00 sort:updated-desc" \
@@ -1216,9 +1218,10 @@ done
 
 # The config file's pure pieces (lib/config.mjs): the example is byte for byte docs/config.example.json,
 # a malformed or mistyped file gives the defaults with a reason, unknown keys are ignored, and the
-# label rule reads a repository's own entry before the default (an empty own list is unfiltered)
-# (falsify: change EXAMPLE_CONFIG, accept a non-list default_labels, or apply default_labels to a
-# repository with its own entry).
+# label rule reads a repository's own entry before the default (an empty own list is unfiltered),
+# matching the repository name without case as GitHub does (falsify: change EXAMPLE_CONFIG, accept a
+# non-list default_labels, apply default_labels to a repository with its own entry, or compare the
+# names with case).
 config_out=$(node --input-type=module -e "
   import { exampleConfigText, parseConfig, labelsFor, passesLabelRule, configuredRepos, resolveConfigPath, defaultConfigPath } from '$ROOT/bin/firstmate-tui/lib/config.mjs';
   import { readFileSync } from 'node:fs';
@@ -1237,6 +1240,7 @@ config_out=$(node --input-type=module -e "
   out.push(['labels-own', labelsFor(c, 'a/b').join(',')]);
   out.push(['labels-own-empty', String(labelsFor(c, 'c/d').length) + ' ' + String(labelsFor(c, 'e/f').length)]);
   out.push(['labels-default', labelsFor(c, 'other/repo').join(',')]);
+  out.push(['labels-case', labelsFor(c, 'A/B').join(',')]);
   out.push(['rule', [passesLabelRule(c, 'a/b', ['x', 'y']), passesLabelRule(c, 'a/b', ['y']), passesLabelRule(c, 'c/d', []), passesLabelRule(c, 'other/repo', ['ready']), passesLabelRule(c, 'other/repo', [])].join(' ')]);
   const env = { HOME: '/home/cap', XDG_CONFIG_HOME: '/xdg' };
   out.push(['path-xdg', defaultConfigPath(env)]);
@@ -1252,7 +1256,7 @@ for expected in "example=true" \
   "bad-json=bad JSON (Expected property name or '}' in JSON at position 1 (line 1 column 2))" \
   "not-object=not an object" "schema=unexpected schema other.v9" "login-type=identity.github_login is not a string" \
   "labels-type=review.default_labels is not a list" 'repo-name=review.repos: "gemini" is not owner/name' \
-  "parsed=zachsibert ready a/b,c/d,e/f" "labels-own=x" "labels-own-empty=0 0" "labels-default=ready" \
+  "parsed=zachsibert ready a/b,c/d,e/f" "labels-own=x" "labels-own-empty=0 0" "labels-default=ready" "labels-case=x" \
   "rule=true false true true false" \
   "path-xdg=/xdg/fm-board/config.json" "path-home=/home/cap/.config/fm-board/config.json" "path-none=null" \
   "path-explicit=/x/config.json" "path-refused=/xdg/fm-board/config.json refusing --config inside FM_HOME (/fm/state/config.json)"; do

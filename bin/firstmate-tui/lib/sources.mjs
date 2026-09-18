@@ -318,11 +318,23 @@ export async function candidateRepos(snapshot, { timeoutMs, env = process.env } 
 }
 
 // The To review scope: the candidate repositories, then the repositories the
-// config file names, deduped, in that order.
+// config file names, deduped without case (GitHub's own rule for repository
+// names; the first spelling is kept), in that order.
 export function reviewScope(candidates, config) {
   const out = [];
-  for (const r of [...(candidates || []), ...configuredRepos(config)]) if (r && !out.includes(r)) out.push(r);
+  const seen = new Set();
+  for (const r of [...(candidates || []), ...configuredRepos(config)]) {
+    if (!r || seen.has(r.toLowerCase())) continue;
+    seen.add(r.toLowerCase());
+    out.push(r);
+  }
   return out;
+}
+
+// Whether a fetched repository name is in the scope, compared without case.
+export function inScope(scope, repo) {
+  const want = String(repo || '').toLowerCase();
+  return scope.some((r) => r.toLowerCase() === want);
 }
 
 // The ISO time TERMINAL_WINDOW_SECONDS before `now`, in the +00:00 form
@@ -439,7 +451,7 @@ export async function runGhPrs(snapshot, { identity, config, timeoutMs, env = pr
     return { rows, error: null, note: notes.length ? notes.join('; ') : null, seen };
   };
   const mine = collect('My PRs', [mineOpen, mineTail], () => true);
-  const toreview = scope.length ? collect('To review', [reviewOpen, reviewTail], (row) => row.author !== login && scope.includes(row.repo) && passesLabelRule(config, row.repo, row.labels)) : { rows: [], error: null, note: null };
+  const toreview = scope.length ? collect('To review', [reviewOpen, reviewTail], (row) => row.author !== login && inScope(scope, row.repo) && passesLabelRule(config, row.repo, row.labels)) : { rows: [], error: null, note: null };
   toreview.scope = scope;
   delete toreview.seen;
 

@@ -121,10 +121,14 @@ export function parseConfig(text) {
 // The labels a PR in `repo` must carry one of to be listed in To review, or
 // an empty list when it is unfiltered: the repository's own entry when the
 // file has one (its empty list means unfiltered even with default labels
-// set), else review.default_labels.
+// set), else review.default_labels. Repository names compare without case,
+// as GitHub treats them, so `matthewsreis/gemini` in the file still rules
+// the PRs GitHub reports under `MatthewsREIS/gemini`.
 export function labelsFor(config, repo) {
-  const entry = config && config.review && config.review.repos ? config.review.repos[repo] : null;
-  if (entry) return Array.isArray(entry.labels) ? entry.labels : [];
+  const repos = config && config.review && config.review.repos ? config.review.repos : {};
+  const want = String(repo || '').toLowerCase();
+  const key = Object.keys(repos).find((k) => k.toLowerCase() === want);
+  if (key) return Array.isArray(repos[key].labels) ? repos[key].labels : [];
   return config && config.review && Array.isArray(config.review.default_labels) ? config.review.default_labels : [];
 }
 
