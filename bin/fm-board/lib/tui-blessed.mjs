@@ -10,7 +10,9 @@
 //   screen.resume()      -> take the terminal back and repaint everything
 //   screen.destroy()     -> restore the terminal
 // Keys are normalized to short names: j k h l o x X H f 0-9 up down left right
-// tab S-tab enter r ? q escape ctrl-c.
+// tab S-tab enter r ? q escape ctrl-c. One key press must reach onKey once:
+// the library reports the Enter key (\r) as two keypress events, and
+// normalizeKey() keeps one of them (see there).
 //
 // Mouse: with `mouse` true the screen listens for the library's mouse events,
 // which is what turns the terminal's mouse reporting on (and off again on
@@ -75,11 +77,21 @@ export function toTags(lines) {
     .join('\n');
 }
 
+// One keypress event to one key name, or null for an event the board ignores.
+// The Enter key arrives twice: neo-blessed 0.2.0 names a \r keypress 'return'
+// and, before delivering it, re-emits a copy named 'enter' (lib/program.js,
+// the input keypress listener), so one press is the two events
+// { name: 'enter', sequence: '\r' } and { name: 'return', sequence: '\r' }.
+// Only the 'enter' event counts here; 'return' is dropped, or every Enter
+// would act twice (on the Settings page the second one cancelled the
+// confirmation the first had just opened). A \n keypress (ctrl-j) is named
+// 'linefeed' by the library and stays unbound.
 export function normalizeKey(ch, key) {
   const name = key && key.name;
   if (key && key.ctrl && name === 'c') return 'ctrl-c';
   if (name === 'tab') return key.shift ? 'S-tab' : 'tab';
-  if (name === 'enter' || name === 'return') return 'enter';
+  if (name === 'enter') return 'enter';
+  if (name === 'return') return null;
   if (name === 'up' || name === 'down' || name === 'left' || name === 'right' || name === 'escape' || name === 'pageup' || name === 'pagedown') return name;
   if (name === 'backtab') return 'S-tab';
   if (ch && ch.length === 1 && ch >= ' ') return ch;
@@ -108,7 +120,7 @@ export function normalizeMouse(data) {
   }
 }
 
-export async function createScreen({ onKey, onMouse, onResize, mouse = false, title = 'fm-board' }) {
+export async function createScreen({ onKey, onMouse, onResize, mouse = false, title = 'firstmate-tui' }) {
   const blessed = (await import('neo-blessed')).default;
   const screen = blessed.screen({
     smartCSR: true,
