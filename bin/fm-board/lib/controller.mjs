@@ -11,7 +11,10 @@
 // the same objects): a left click selects the row under the pointer and
 // focuses its pane, a click on a pane title or its empty space focuses the
 // pane; two left clicks on one row within DBLCLICK_MS are a double-click and
-// do what enter does there; the wheel moves the selection WHEEL_ROWS rows in
+// do what enter does there, and once a row has acted that way no further
+// press on it within DBLCLICK_MS acts again, whatever else the terminal
+// delivers for the gesture (a third press, or a release or drag report that
+// arrives shaped as a press); the wheel moves the selection WHEEL_ROWS rows in
 // the focused pane. Only the left button acts: herdr keeps the right button
 // for its own pane menu, so nothing here is bound to it.
 //
@@ -215,9 +218,14 @@ export function keyAction(model, view, key) {
 // one clock. view.frame is the last drawn frame's { cols, rows, zones }
 // (renderFrame) and view.lastClick the previous left click on a row
 // { pane, row, time }, which is how a double-click is recognized here rather
-// than by the terminal library. Actions: select (pane focus and cursor, also
-// for a title or empty space), activate (a double-click: the enter action for
-// that row), wheel, none. Only the left button acts.
+// than by the terminal library. view.lastActivate, { pane, row, time } set by
+// applyAction when a double-click acts (absent until the first one), is the
+// guard: a press on that row within DBLCLICK_MS of it only selects and starts
+// no new pair, so one gesture opens a PR exactly once however many presses
+// the terminal reports for it; a press after the window, or enter at any
+// time, acts as usual. Actions: select (pane focus and cursor, also for a
+// title or empty space), activate (a double-click: the enter action for that
+// row), wheel, none. Only the left button acts.
 export function mouseAction(model, view, ev) {
   if (!ev || ev.type === 'up' || allPanesHidden(model)) return { type: 'none' };
   if (ev.type === 'wheel') return { type: 'wheel', dir: ev.dir === 'up' ? -1 : 1 };
@@ -227,10 +235,13 @@ export function mouseAction(model, view, ev) {
   const pane = model.panes[hit.pane];
   if (!pane || pane.hidden) return { type: 'none' };
   if (hit.kind !== 'row') return { type: 'select', pane: hit.pane, row: hit.pane === view.pane ? view.row : 0 };
-  const last = view.lastClick;
-  const since = last && Number.isFinite(last.time) && Number.isFinite(ev.time) ? ev.time - last.time : NaN;
-  if (last && last.pane === hit.pane && last.row === hit.row && since >= 0 && since <= DBLCLICK_MS) {
-    return { type: 'activate', pane: hit.pane, row: hit.row, action: keyAction(model, { ...view, pane: hit.pane, row: hit.row }, 'enter') };
+  const sameRowWithin = (mark) => {
+    const since = mark && Number.isFinite(mark.time) && Number.isFinite(ev.time) ? ev.time - mark.time : NaN;
+    return Boolean(mark) && mark.pane === hit.pane && mark.row === hit.row && since >= 0 && since <= DBLCLICK_MS;
+  };
+  if (sameRowWithin(view.lastActivate)) return { type: 'select', pane: hit.pane, row: hit.row };
+  if (sameRowWithin(view.lastClick)) {
+    return { type: 'activate', pane: hit.pane, row: hit.row, time: ev.time, action: keyAction(model, { ...view, pane: hit.pane, row: hit.row }, 'enter') };
   }
   return { type: 'select', pane: hit.pane, row: hit.row, click: { pane: hit.pane, row: hit.row, time: ev.time } };
 }
@@ -356,6 +367,7 @@ function applyAction(ctx, action) {
       view.pane = action.pane;
       view.row = action.row;
       view.lastClick = null;
+      view.lastActivate = { pane: action.pane, row: action.row, time: action.time };
       clamp();
       applyAction(ctx, action.action);
       return;
