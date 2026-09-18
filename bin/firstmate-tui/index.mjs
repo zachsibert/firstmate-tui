@@ -21,9 +21,13 @@
 //                  ever launching a real viewer); --expand <all|ids>
 //                  expands In flight groups; --tags prints the color tags;
 //                  --view-state <file> loads hidden rows, hidden panes and
-//                  dragged column widths from that file and saves x/X/1-5/0
+//                  dragged column widths from that file and saves x/X/1-6/0
 //                  changes and drags back to it (without the flag a fixture
-//                  render loads nothing and saves nothing).
+//                  render loads nothing and saves nothing); --config <file>
+//                  reads the board's config (the GitHub login, the To review
+//                  label rules) and writes the example there when absent
+//                  (without the flag a fixture render reads none, and a live
+//                  render walks the default chain as the app does).
 //                  `.` opens the Settings page: its install identity comes
 //                  from --install-root (default: the directory above bin/),
 //                  its release data from --curl-cmd (without the flag a
@@ -41,7 +45,9 @@
 //                "agents": [ { pane_id, agent_status, terminal_title_stripped } ] } | null,
 //     "prs": { "candidate_prs": [ { num, repo, task, url, review, mergeable,
 //                                   checks, created_at?, title?, base?, draft?,
-//                                   state?, merged_at?, closed_at? } ], "error"? } | null,
+//                                   state?, merged_at?, closed_at?, author?,
+//                                   labels?, requested?, my_review?, pane? } ],
+//              "error"?, "identity"?, "mine"?, "toreview"? } | null,
 //     "snapshot_error": text (optional; marks the four snapshot panes stale),
 //     "refresh": { "next_in": seconds, "refreshing": bool, "failed_ago": seconds,
 //                  "failed": text, "loading_frame": N } (optional; every field optional),
@@ -53,11 +59,20 @@
 // 20s` in red; without the block the title line carries no refresh label.
 // With {"refreshing": true} a fixture that omits "snapshot" (or sets it null)
 // puts Needs you, In flight, Findings and Landed into the loading state, and
-// one that omits "prs" (or sets it null) puts Ready for review there: each
-// such pane draws the spinner line, `⠋ loading fleet snapshot…` or `⠋ loading
-// GitHub checks…`, in place of its rows. "loading_frame" (a whole number,
-// default 0) picks the spinner glyph, the app's frame counter standing still,
-// so the frame is the same on every render.
+// one that omits "prs" (or sets it null) puts My PRs and To review there: each
+// such pane draws the spinner line, `⠋ loading fleet snapshot…`, `⠋ loading
+// GitHub checks…` or `⠋ loading GitHub review requests…`, in place of its
+// rows. "loading_frame" (a whole number, default 0) picks the spinner glyph,
+// the app's frame counter standing still, so the frame is the same on every
+// render.
+// A candidate row's "pane" is 'mine' (the default) or 'toreview'. prs.identity
+// is the { login, source } the panes are built around: absent, a fixture
+// stands for a known login (`captain`, source `fixture`); null, or a login of
+// null, is the unknown identity, which puts its row in both PR panes. prs.mine
+// and prs.toreview carry a pane's own { error, fetched, scope, unavailable }
+// (fetched: false keeps that pane before its first fetch; scope: [] is an
+// empty To review scope), the top-level "error" standing for both when a pane
+// has no block.
 // With --no-herdr the fixture's herdr block is still applied as an offline
 // overlay (state "fixture", which the title line treats as connected: no
 // herdr text) so the join is testable without a live server; a "state" in
@@ -68,17 +83,19 @@
 
 import { readFileSync } from 'node:fs';
 import { parseArgs, USAGE } from './lib/args.mjs';
-import { buildModel } from './lib/model.mjs';
+import { buildModel, initialPrs, mergePrs, prsFailureText } from './lib/model.mjs';
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, runSnapshot } from './lib/sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot } from './lib/sources.mjs';
 import { focusProblem, handleKey, handleMouse, viewProblem } from './lib/controller.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
-import { resolveViewer, runViewer } from './lib/viewer.mjs';
+import { resolveViewer, runViewer, whichOnPath } from './lib/viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
-import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsFlags } from './lib/settings.mjs';
+import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsConfig, settingsFlags } from './lib/settings.mjs';
 import { defaultInstallRoot, readInstall, runUpgrade } from './lib/upgrade.mjs';
+import { defaultConfig, loadOrCreateConfig } from './lib/config.mjs';
+import { identityKnown } from './lib/identity.mjs';
 
 function fail(msg, code = 1) {
   process.stderr.write(`firstmate-tui: ${msg}\n`);
@@ -122,13 +139,32 @@ function factsFromFixture(path, opts) {
     herdr = { state: 'off', detail: opts.herdr ? '' : '--no-herdr', agents: {} };
   }
   const refresh = refreshFromFixture(fx.refresh, now);
-  const prs = opts.prs
-    ? { enabled: true, fetchedAt: fx.prs && Array.isArray(fx.prs.candidate_prs) ? now - 30 : null, error: fx.prs && fx.prs.error ? fx.prs.error : null, candidate_prs: fx.prs && Array.isArray(fx.prs.candidate_prs) ? fx.prs.candidate_prs : [] }
-    : { enabled: false };
   return {
-    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs, refresh, mtime: fixtureMtime },
+    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs: prsFromFixture(fx.prs, opts, now), refresh, mtime: fixtureMtime },
     size: { cols: opts.cols || fx.cols || 120, rows: opts.rows || fx.rows || 40 },
   };
+}
+
+// The fixture's prs block -> the facts the two PR panes read (lib/model.mjs).
+export function prsFromFixture(block, opts, now) {
+  if (!opts.prs) return { enabled: false };
+  const fetched = block && Array.isArray(block.candidate_prs) ? now - 30 : null;
+  const topError = block && block.error ? block.error : null;
+  const pane = (id) => {
+    const own = block && block[id] && typeof block[id] === 'object' ? block[id] : {};
+    return {
+      fetchedAt: own.fetched === false ? null : fetched,
+      error: own.error !== undefined ? own.error : topError,
+      scope: Array.isArray(own.scope) ? own.scope : null,
+      unavailable: typeof own.unavailable === 'string' ? own.unavailable : null,
+    };
+  };
+  let identity = { login: 'captain', source: 'fixture', reason: null };
+  if (block && Object.prototype.hasOwnProperty.call(block, 'identity')) {
+    const given = block.identity;
+    identity = given && typeof given === 'object' && given.login ? { login: String(given.login), source: given.source || 'fixture', reason: null } : { login: null, source: 'unknown', reason: (given && given.reason) || 'fixture: no login' };
+  }
+  return { enabled: true, fetchedAt: fetched, error: topError, candidate_prs: block && Array.isArray(block.candidate_prs) ? block.candidate_prs : [], identity, mine: pane('mine'), toreview: pane('toreview') };
 }
 
 // The fixture's refresh block -> the facts the title line reads (lib/model.mjs
@@ -155,7 +191,13 @@ function refreshFromFixture(block, now) {
   };
 }
 
-async function factsLive(opts) {
+// The identity for a live render: the config file, then gh (when the fetch is
+// on and gh is on PATH), then git, as the app resolves it on its first refresh.
+async function identityLive(config, opts, timeoutMs) {
+  return resolveIdentityLive({ config, askGh: opts.prs && whichOnPath('gh', process.env), timeoutMs });
+}
+
+async function factsLive(opts, cfg) {
   if (!opts.fmHome) fail('FM_HOME is not set and --fm-home was not given', 2);
   const fmHome = opts.fmHome.replace(/\/+$/, '');
   const now = () => Math.floor(Date.now() / 1000);
@@ -164,9 +206,10 @@ async function factsLive(opts) {
   // tick of the app does.
   const snap = await runSnapshot(fmHome, { timeoutMs });
   const snapshot = snap.error ? null : snap.value;
-  const r = opts.prs ? await fetchPrs(fmHome, snapshot, { timeoutMs }) : null;
+  const identity = await identityLive(cfg.config, opts, timeoutMs);
+  const r = opts.prs ? await fetchPrs(fmHome, snapshot, { identity, config: cfg.config, timeoutMs }) : null;
   const ledgers = collectLedgers(snapshot, discoverHomes(fmHome, opts.homes));
-  const prs = r ? { enabled: true, fetchedAt: r.error ? null : now(), error: r.error, candidate_prs: r.candidate_prs } : { enabled: false };
+  const prs = r ? mergePrs(initialPrs(true, identity), r, now(), identity) : { enabled: false };
   let herdr = { state: 'off', detail: '--no-herdr', agents: {} };
   if (opts.herdr) {
     const client = new HerdrClient({ cmd: opts.herdrCmd, socketPath: opts.herdrSocket });
@@ -175,7 +218,7 @@ async function factsLive(opts) {
   }
   return {
     // A one-shot render has no schedule, so the title line carries no refresh label.
-    facts: { now: now(), fmHome, snapshot, snapshotAt: snapshot ? now() : null, snapshotError: snap.error, ledgers, herdr, prs, refresh: null, mtime },
+    facts: { now: now(), fmHome, snapshot, snapshotAt: snapshot ? now() : null, snapshotError: snap.error, ledgers, herdr, prs, refresh: null, mtime, identity, config: cfg.config },
     size: { cols: opts.cols || process.stdout.columns || 120, rows: opts.rows || process.stdout.rows || 40 },
   };
 }
@@ -186,6 +229,14 @@ async function factsLive(opts) {
 function viewStateFor(opts, fmHome) {
   if (opts.fixture && !opts.viewState) return { path: null, problem: null };
   return resolveViewStatePath({ explicit: opts.viewState, fmHome, env: process.env });
+}
+
+// The config file for a one-shot render, the same way: a fixture render reads
+// (and creates) one only with --config, so a fixture frame depends on the
+// fixture alone; a live render walks the default chain as the app does.
+function configFor(opts, fmHome) {
+  if (opts.fixture && !opts.config) return { path: null, problem: null, config: defaultConfig(), status: 'none', error: 'not read (fixture render without --config)' };
+  return loadOrCreateConfig({ explicit: opts.config, fmHome, env: process.env });
 }
 
 // One-shot view: apply --expand, then --keys and --mouse in command-line order
@@ -205,13 +256,15 @@ function viewStateFor(opts, fmHome) {
 // On the Settings page the release fetch and the upgrade child are awaited
 // before the next input, so a list reads in order: `.` fetches, `enter`
 // asks, `y` runs the launcher to its end, `R` reports the relaunch.
-async function driveOnce(facts, opts, size) {
+async function driveOnce(facts, opts, size, cfg) {
   const vs = viewStateFor(opts, facts.fmHome);
   const loaded = loadViewState(vs.path);
   const settings = initialSettings({
     install: readInstall(opts.installRoot || defaultInstallRoot()),
     flags: settingsFlags(opts),
     idleReason: opts.curlCmd ? null : 'not fetched (no --curl-cmd in --render-once)',
+    identity: facts.prs && facts.prs.identity ? facts.prs.identity : facts.identity || null,
+    config: settingsConfig(cfg),
   });
   const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, page: 'board', settings };
   const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
@@ -279,7 +332,14 @@ async function driveOnce(facts, opts, size) {
         ctx.notice('refresh is not available with --fixture', true);
         return;
       }
-      pending.push(refreshLive(facts, opts).then((text) => ctx.notice(text)).then(() => ctx.rebuild()));
+      pending.push(
+        refreshLive(facts, opts, cfg)
+          .then((text) => ctx.notice(text))
+          .then(() => {
+            settings.identity = facts.identity || settings.identity;
+            ctx.rebuild();
+          }),
+      );
     },
     persist: () => {
       if (!vs.path) return;
@@ -318,6 +378,8 @@ async function driveOnce(facts, opts, size) {
   };
   if (loaded.error) ctx.notice(`view state: ${loaded.error}`, true);
   if (vs.problem) ctx.notice(vs.problem, true);
+  if (cfg.problem) ctx.notice(cfg.problem, true);
+  if (cfg.status === 'defaults' && cfg.error) ctx.notice(`config: ${cfg.error}; running with the defaults`, true);
   for (const [n, input] of opts.inputs.entries()) {
     if (view.page === 'settings' && pending.length) await Promise.all(pending.splice(0));
     if (input.kind === 'key') {
@@ -337,10 +399,11 @@ async function driveOnce(facts, opts, size) {
 }
 
 // The r key against a live home: the same refresh a tick of the app runs, the
-// snapshot and then, unless --no-prs, the PR fetch. Mutates facts in place and
-// resolves to the footer text (a fetch note, such as the script fallback, is
-// appended so a one-shot render shows it).
-async function refreshLive(facts, opts) {
+// snapshot and then, unless --no-prs, the PR fetch (the identity resolved
+// again first while it is unknown). Mutates facts in place and resolves to the
+// footer text (a fetch note, such as the script fallback, is appended so a
+// one-shot render shows it).
+async function refreshLive(facts, opts, cfg) {
   facts.now = Math.floor(Date.now() / 1000);
   const timeoutMs = opts.snapshotTimeout * 1000;
   const snap = await runSnapshot(facts.fmHome, { timeoutMs });
@@ -351,9 +414,14 @@ async function refreshLive(facts, opts) {
   } else facts.snapshotError = snap.error || 'snapshot failed';
   facts.ledgers = collectLedgers(facts.snapshot, discoverHomes(facts.fmHome, opts.homes));
   if (!opts.prs) return 'PR checks off: start without --no-prs';
-  const r = await fetchPrs(facts.fmHome, facts.snapshot, { timeoutMs });
-  facts.prs = { enabled: true, fetchedAt: r.error ? facts.prs.fetchedAt : Math.floor(Date.now() / 1000), error: r.error, candidate_prs: r.error ? facts.prs.candidate_prs : r.candidate_prs };
-  if (r.error) return `PR fetch: ${r.error}`;
+  if (!identityKnown(facts.identity)) {
+    facts.identity = await identityLive(cfg.config, opts, timeoutMs);
+    facts.prs = { ...facts.prs, identity: facts.identity };
+  }
+  const r = await fetchPrs(facts.fmHome, facts.snapshot, { identity: facts.identity, config: cfg.config, timeoutMs });
+  facts.prs = mergePrs(facts.prs, r, Math.floor(Date.now() / 1000), facts.identity);
+  const failure = prsFailureText(r);
+  if (failure) return `PR fetch: ${failure}`;
   return r.note ? `refreshed: snapshot and PR checks · ${r.note}` : 'refreshed: snapshot and PR checks';
 }
 
@@ -370,8 +438,13 @@ async function main() {
     return;
   }
   if (opts.renderOnce) {
-    const { facts, size } = opts.fixture ? factsFromFixture(opts.fixture, opts) : await factsLive(opts);
-    const { model, view } = await driveOnce(facts, opts, size);
+    // A live render reads the config first, since the fetch needs it; a
+    // fixture render reads it (with --config only) against the fixture's home,
+    // so a path inside that home is refused the way the view state is.
+    const live = opts.fixture ? null : configFor(opts, opts.fmHome ? opts.fmHome.replace(/\/+$/, '') : null);
+    const { facts, size } = opts.fixture ? factsFromFixture(opts.fixture, opts) : await factsLive(opts, live);
+    const cfg = live || configFor(opts, facts.fmHome);
+    const { model, view } = await driveOnce(facts, opts, size, cfg);
     const frame = renderFrame(model, size, view);
     process.stdout.write(opts.tags ? `${toTags(frame.lines)}\n` : `${toPlain(frame.lines).join('\n')}\n`);
     if (facts.snapshotError && !opts.fixture) {

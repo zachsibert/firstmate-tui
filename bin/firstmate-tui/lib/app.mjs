@@ -6,9 +6,10 @@
 // the report viewer, snapshots and the view-state file. The terminal is reached only through the adapter's screen contract.
 //
 // Cadence: one refresh runs the fleet snapshot and then, unless --no-prs, the
-// live GitHub PR fetch (one gh pr list per candidate repository named by that
-// snapshot, all at once; the firstmate script when gh is not on PATH), applied
-// in one frame update. The next refresh is due --refresh seconds (default 30)
+// live GitHub PR fetch (at most four searches through gh api graphql for the
+// two PR panes, all at once, then one lookup of the recorded PRs the author
+// search missed; the firstmate script when gh is not on PATH), applied in one
+// frame update. The next refresh is due --refresh seconds (default 30)
 // after the last one started: a single timer, armed when a refresh completes
 // (armRefreshTimer), and the title line counts down to it once a second. A
 // herdr event touching a known task pane brings a refresh forward, debounced
@@ -17,12 +18,20 @@
 // still running is skipped, not queued, and the panes keep the data they
 // have; r during a refresh queues exactly one follow-up so the key press is
 // honored. A failed snapshot or PR fetch keeps the previous data, marks that
-// pane's title (stale), turns the title line's label into `refresh failed Ns
-// ago, retrying in Ns` until a later refresh is clean, and is named in the
-// footer once, as is a fetch note (the script fallback, a repository that did
-// not answer). Herdr pushes redraw the frame immediately because the agents
-// map is already updated. With --no-prs, r says why the PR pane did not
-// change.
+// pane's title (stale) (each PR pane on its own: My PRs keeps its rows when
+// only the To review searches failed), turns the title line's label into
+// `refresh failed Ns ago, retrying in Ns` until a later refresh is clean, and
+// is named in the footer once, as is a fetch note (the script fallback, a
+// search that was capped). Herdr pushes redraw the frame immediately because
+// the agents map is already updated. With --no-prs, r says why the PR panes
+// did not change.
+//
+// Identity and config: the config file (lib/config.mjs) is read once at
+// startup, written from the example when absent, and the GitHub login the two
+// PR panes are built around is resolved on the first refresh (the file, then
+// `gh api user`, then git; lib/identity.mjs) and cached for the session; a
+// manual r resolves it again only while it is unknown. The Settings page shows
+// both.
 //
 // Cold start: until the first snapshot and the first PR fetch land, the panes
 // have nothing to show, so each draws a spinner line naming what it waits on
@@ -47,16 +56,18 @@
 // process with RELAUNCH_EXIT, which bin/firstmate-tui.sh run answers by starting
 // the copy at the same path again (Node cannot exec in place).
 
-import { buildModel, parseTarget } from './model.mjs';
+import { buildModel, initialPrs, mergePrs, parseTarget, prsFailureText } from './model.mjs';
 import { renderFrame } from './render.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, runSnapshot } from './sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
 import { focusProblem, handleKey, handleMouse, moveSelection, viewProblem } from './controller.mjs';
-import { resolveViewer, runViewer } from './viewer.mjs';
+import { resolveViewer, runViewer, whichOnPath } from './viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.mjs';
-import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsFlags } from './settings.mjs';
+import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsConfig, settingsFlags } from './settings.mjs';
 import { defaultInstallRoot, readInstall, runUpgrade } from './upgrade.mjs';
+import { loadOrCreateConfig } from './config.mjs';
+import { identityKnown } from './identity.mjs';
 
 export { moveSelection } from './controller.mjs';
 
@@ -88,6 +99,8 @@ export function knownPaneIds(snapshot, ledgers) {
 export async function runApp(opts) {
   const viewStatePath = resolveViewStatePath({ explicit: opts.viewState, fmHome: opts.fmHome, env: process.env });
   const loaded = loadViewState(viewStatePath.path);
+  // The config file, read once (and written from the example when absent).
+  const cfg = loadOrCreateConfig({ explicit: opts.config, fmHome: opts.fmHome, env: process.env });
   const state = {
     fmHome: opts.fmHome,
     homes: discoverHomes(opts.fmHome, opts.homes),
@@ -95,9 +108,12 @@ export async function runApp(opts) {
     snapshotAt: null,
     snapshotError: null,
     ledgers: [],
-    prs: { enabled: opts.prs, fetchedAt: null, error: null, candidate_prs: [] },
+    config: cfg.config,
+    identity: null, // resolved on the first refresh, then cached for the session
+    prs: initialPrs(opts.prs),
     prsErrorShown: null,
     prsNoteShown: null,
+    identityShown: false, // the unknown-identity notice is shown once per session
     herdr: null,
     model: null,
     view: {
@@ -116,7 +132,7 @@ export async function runApp(opts) {
       notice: '',
       noticeBad: false,
       page: 'board',
-      settings: initialSettings({ install: readInstall(opts.installRoot || defaultInstallRoot()), flags: settingsFlags(opts) }),
+      settings: initialSettings({ install: readInstall(opts.installRoot || defaultInstallRoot()), flags: settingsFlags(opts), config: settingsConfig(cfg) }),
     },
     refreshing: false,
     refreshPending: false,
@@ -270,16 +286,22 @@ export async function runApp(opts) {
       state.snapshotError = snap.error || 'snapshot failed';
     }
     state.ledgers = collectLedgers(state.snapshot, state.homes);
-    const prs = state.prs.enabled ? await fetchPrs(state.fmHome, state.snapshot, { timeoutMs }) : null;
+    // The identity: once per session, again on r only while it is unknown.
+    if (!state.identity || (manual && !identityKnown(state.identity))) {
+      state.identity = await resolveIdentityLive({ config: state.config, askGh: state.prs.enabled && whichOnPath('gh', process.env), timeoutMs });
+      state.view.settings.identity = state.identity;
+      state.prs = { ...state.prs, identity: state.identity };
+    }
+    const prs = state.prs.enabled ? await fetchPrs(state.fmHome, state.snapshot, { identity: state.identity, config: state.config, timeoutMs }) : null;
     let prsFailure = null;
     let prsNote = null;
-    if (prs && prs.error) {
-      // Keep the previous PR data and its age; the pane title marks them stale.
-      state.prs = { ...state.prs, error: prs.error };
-      if (prs.error !== state.prsErrorShown) prsFailure = prs.error;
-    } else if (prs) {
-      state.prs = { enabled: true, fetchedAt: Math.floor(Date.now() / 1000), error: null, candidate_prs: prs.candidate_prs };
-      state.prsErrorShown = null;
+    if (prs) {
+      // A failing pane keeps its previous rows and its title marks them stale.
+      state.prs = mergePrs(state.prs, prs, Math.floor(Date.now() / 1000), state.identity);
+      const failure = prsFailureText(prs);
+      if (failure) {
+        if (failure !== state.prsErrorShown) prsFailure = failure;
+      } else state.prsErrorShown = null;
       if (prs.note && prs.note !== state.prsNoteShown) prsNote = prs.note;
     }
     if (herdr) herdr.setPanes(knownPaneIds(state.snapshot, state.ledgers));
@@ -298,7 +320,10 @@ export async function runApp(opts) {
         state.prsNoteShown = prsNote;
         notice(prsNote, false, 15000);
       } else if (manual && !state.prs.enabled) notice('PR checks off: start without --no-prs', false, 8000);
-      else notice('', false, 1);
+      else if (state.prs.enabled && !identityKnown(state.identity) && !state.identityShown) {
+        state.identityShown = true;
+        notice(`GitHub identity unknown (${state.identity.reason}); set identity.github_login in ${cfg.path || 'the config file'} or run gh auth login`, true, 30000);
+      } else notice('', false, 1);
     }
     if (state.refreshPending) {
       state.refreshPending = false;
@@ -474,6 +499,8 @@ export async function runApp(opts) {
   draw();
   if (loaded.error) notice(`view state: ${loaded.error}`, true, 15000);
   if (viewStatePath.problem) notice(viewStatePath.problem, true, 15000);
+  if (cfg.problem) notice(cfg.problem, true, 15000);
+  if (cfg.status === 'defaults' && cfg.error) notice(`config: ${cfg.error}; running with the defaults`, true, 15000);
   if (herdr) {
     herdr.on('state', () => draw());
     herdr.on('event', (ev) => {

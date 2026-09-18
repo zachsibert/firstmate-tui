@@ -11,14 +11,21 @@ options:
   --home <path>          add a secondmate home (repeatable). Default: FM_HOME plus
                          every home listed in FM_HOME/data/secondmates.md
   --refresh <seconds>    refresh cadence (default 30): every tick runs the fleet snapshot
-                         and then, unless --no-prs, the live GitHub PR fetch (one gh pr
-                         list per candidate repository, all at once), so nothing on
-                         screen is older than this plus the two steps; a tick that
-                         lands while a refresh is still running is skipped
-  --no-prs               skip the live GitHub PR fetch (gh pr list; fm-bearings-snapshot.sh
-                         --include-prs when gh is not on PATH) so Ready for review shows
-                         recorded PR URLs only, with the file-time age marked ~; --prs
-                         is accepted and does nothing (it is the default)
+                         and then, unless --no-prs, the live GitHub PR fetch (at most
+                         four searches through gh api graphql, all at once, plus one
+                         lookup of recorded PRs), so nothing on screen is older than
+                         this plus the two steps; a tick that lands while a refresh is
+                         still running is skipped
+  --no-prs               skip the live GitHub PR fetch (gh api graphql; fm-bearings-snapshot.sh
+                         --include-prs when gh is not on PATH) so My PRs shows recorded
+                         PR URLs only, with the file-time age marked ~, and To review
+                         reads off; --prs is accepted and does nothing (it is the default)
+  --config <path>        the board's config file: the GitHub login the two PR panes are
+                         built around and the To review label rules (default:
+                         $(herdr plugin config-dir firstmate.board)/config.json via the
+                         wrapper, else $XDG_CONFIG_HOME/fm-board/config.json, else
+                         ~/.config/fm-board/config.json; never inside FM_HOME). Written
+                         once from docs/config.example.json when absent
   --no-herdr             skip the herdr overlay and the socket subscription
   --all-homes-needs      Needs you also lists every secondmate home's open decisions
                          (default: main home only; secondmate decisions flag their
@@ -142,6 +149,7 @@ export function parseArgs(argv, env = {}) {
     openerCmd: null,
     viewerCmd: null,
     viewState: null,
+    config: null,
     curlCmd: null,
     installRoot: null,
     tags: false,
@@ -222,6 +230,9 @@ export function parseArgs(argv, env = {}) {
         break;
       case '--view-state':
         opts.viewState = need(a);
+        break;
+      case '--config':
+        opts.config = need(a);
         break;
       case '--curl-cmd':
         opts.curlCmd = need(a).split(/\s+/).filter(Boolean);

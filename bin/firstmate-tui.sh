@@ -72,7 +72,9 @@
 # pane `open --detached` created, and the view-state file (hidden rows and panes) at
 # $(herdr plugin config-dir firstmate.board)/view-state.json when herdr is
 # present, else $XDG_CONFIG_HOME/fm-board/view-state.json, else
-# ~/.config/fm-board/view-state.json (--view-state overrides). Its actions are
+# ~/.config/fm-board/view-state.json (--view-state overrides), with the
+# config file (the GitHub login and the To review label rules) beside it as
+# config.json, passed the same way as --config. Its actions are
 # `herdr agent focus`, opening a PR URL in the browser (`open` / `xdg-open`, or
 # --opener-cmd) and showing a report in a terminal viewer (glow, $EDITOR, vim,
 # less, or --viewer-cmd). It never moves or closes a pane.
@@ -151,7 +153,8 @@ common flags, after `open` or with no subcommand:
                          terminal's own text selection alone
 
 more flags, same places: --all-homes-needs, --opener-cmd <argv>, --viewer-cmd <argv>,
-  --view-state <path>, --herdr-cmd <argv>, --herdr-socket <path>, --snapshot-timeout <s>;
+  --view-state <path>, --config <path> (the GitHub login and the To review label
+  rules), --herdr-cmd <argv>, --herdr-socket <path>, --snapshot-timeout <s>;
   test mode: --render-once, --fixture <json>, --cols N, --rows N, --keys <list>,
   --mouse <list>, --expand <all|ids>, --tags, --headless, --curl-cmd <argv>,
   --install-root <dir>. The README's Launch section explains each one.
@@ -295,6 +298,7 @@ headless=0
 detached=0
 fixture=
 view_state=
+config_path=
 herdr_cmd=${HERDR_BIN_PATH:-herdr}
 pass=()
 while [ "$#" -gt 0 ]; do
@@ -307,6 +311,7 @@ while [ "$#" -gt 0 ]; do
     --fixture) [ "$#" -ge 2 ] || die "--fixture needs a value"; fixture=$2; pass+=("$1" "$2"); shift ;;
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
+    --config) [ "$#" -ge 2 ] || die "--config needs a value"; config_path=$2; pass+=("$1" "$2"); shift ;;
     --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
@@ -440,13 +445,17 @@ plugin_linked() {
   herdr_run plugin list 2>/dev/null | grep -Fq "$PLUGIN_ID"
 }
 
-# Where hidden rows and hidden panes are remembered: herdr's per-plugin config
-# directory when herdr is present, else index.mjs falls back to
+# Where hidden rows and hidden panes are remembered, and where the config file
+# (the GitHub login, the To review label rules) lives: herdr's per-plugin
+# config directory when herdr is present, else index.mjs falls back to
 # $XDG_CONFIG_HOME/fm-board or ~/.config/fm-board. A fixture render gets no
 # default so the frame depends on the fixture alone. Never FM_HOME.
-if [ -z "$view_state" ] && [ -z "$fixture" ] && [ "$command" = run ]; then
+if [ -z "$fixture" ] && [ "$command" = run ]; then
   vs=$(plugin_config_dir) || vs=
-  [ -n "$vs" ] && pass+=(--view-state "$vs/view-state.json")
+  if [ -n "$vs" ]; then
+    [ -z "$view_state" ] && pass+=(--view-state "$vs/view-state.json")
+    [ -z "$config_path" ] && pass+=(--config "$vs/config.json")
+  fi
 fi
 
 # `open --detached`: open the board in its own pane without splitting the

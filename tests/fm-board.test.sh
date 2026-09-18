@@ -24,20 +24,23 @@
 # against the frame the app would have drawn, so no terminal library and no
 # pointer is involved; what the adapter itself makes of the library's mouse
 # events is checked by calling its pure functions. Hidden rows and panes go to
-# `--view-state <temp file>`. The r key is checked against a stand-in firstmate
+# `--view-state <temp file>`, the config file to `--config <temp file>` or a
+# temporary XDG_CONFIG_HOME. The r key is checked against a stand-in firstmate
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
 # that they ran and print canned JSON, with tests/fake-gh.sh first on PATH as
-# `gh` (it logs its argv and answers canned PR lists in every state, with the
-# fields the board asks for), so a
-# live --render-once with --keys r shows exactly which fetches a refresh
-# triggers without GitHub or a real home; a run under a PATH holding no gh
-# proves the fallback to the firstmate script. Every live render must put the
-# fake gh first on PATH, or the board's own fetch reaches the real GitHub CLI.
-# The refresh schedule itself (one tick runs the snapshot and then the gh
-# calls; a tick during a running refresh is skipped) is checked by running the
-# app with --headless against a second stand-in whose snapshot sleeps, then
-# stopping it with a signal; --headless draws nothing, reads no key and never
-# loads neo-blessed.
+# `gh` (it logs each call and answers `api user` with a login and `api
+# graphql` with canned PRs, dispatched on the search string or the lookup's
+# aliases; it fails on `pr list`), so a live --render-once with --keys r shows
+# exactly which fetches a refresh triggers without GitHub or a real home; a run
+# under a PATH holding no gh proves the fallback to the firstmate script. Every
+# live render must put the fake gh first on PATH, or the board's own fetch
+# reaches the real GitHub CLI. The identity chain (the config file, then gh,
+# then git) runs against a temporary config directory, the fake gh and a fake
+# git that answers `config --get github.user` alone. The refresh schedule
+# itself (one tick runs the snapshot and then the gh calls; a tick during a
+# running refresh is skipped) is checked by running the app with --headless
+# against a second stand-in whose snapshot sleeps, then stopping it with a
+# signal; --headless draws nothing, reads no key and never loads neo-blessed.
 # The wrapper checks that touch the detached routes run with a fake `herdr` on
 # HERDR_BIN_PATH and PATH (herdr sets HERDR_BIN_PATH inside its panes, so PATH
 # alone would still reach the captain's live server); the fake logs its argv
@@ -61,20 +64,32 @@
 # note without python3 or bin/firstmate-tui/node_modules.
 #
 # Fixtures (tests/fixtures/):
-#   populated.json  160x40, every pane has rows: a blocked worker, a keyed
+#   populated.json  160x44, every pane has rows: a blocked worker, a keyed
 #                   decision, a live captain hold, a secondmate hold and a
 #                   secondmate-relayed decision, a green-unmerged PR, a done
 #                   task with a merged PR, recorded PRs (one live candidate
 #                   with a creation time), herdr statuses, a tmux task, a
-#                   remote cached home, reports and landed rows, and a refresh
-#                   block ({"next_in": 18}) standing in for the app's schedule;
-#                   the refreshing, failed and herdr-state variants are derived
-#                   from it at run time (variant)
-#   pr-ages.json    160x40, Ready for review AGE sources: candidates with a
+#                   remote cached home, reports and landed rows, an empty To
+#                   review pane, and a refresh block ({"next_in": 18}) standing
+#                   in for the app's schedule; the refreshing, failed and
+#                   herdr-state variants are derived from it at run time
+#                   (variant). 44 rows: the sixth pane's three lines go below
+#                   Landed, so the first five panes keep the lines they had
+#   my-prs.json     160x44, My PRs as the union: the identity's own open PR in
+#                   a repository no task touches, a bot-authored PR recorded on
+#                   a task, the identity's PRs merged and closed inside the
+#                   window, a recorded PR the fetch did not return, and a To
+#                   review row that must stay out of My PRs
+#   to-review.json  160x44, To review: one PR per STATUS word (DRAFT, IN
+#                   REVIEW, CHANGES REQUESTED, APPROVED, MERGED), a request
+#                   through a team, a labelled gemini PR, a PR merged outside
+#                   the window and the identity's own PR, both dropped, with
+#                   the scope the fetch searched
+#   pr-ages.json    160x40, My PRs AGE sources: candidates with a
 #                   creation time, without one, with a future and a malformed
 #                   one, the camel-case alias, no-task candidates and a
 #                   recorded PR missing from the live list
-#   pr-status.json  160x40, Ready for review STATUS: one PR per status (DRAFT,
+#   pr-status.json  160x44, My PRs STATUS: one PR per status (DRAFT,
 #                   IN REVIEW, APPROVED, CLOSED, MERGED), a merged PR 11h59m and
 #                   one 12h01m before now, an open PR of a done task, a closed PR
 #                   with no time stamp, a closed draft and an unlisted recorded PR
@@ -91,14 +106,15 @@
 #                   are absent from the herdr block (pane lost), a live one, a
 #                   main scout report and a secondmate landed report
 #   lost-disconnected.json  160x30, the same lost pane with herdr disconnected
-#   landed-targets.json  160x40, one Landed row per target shape for the enter
+#   landed-targets.json  160x44, one Landed row per target shape for the enter
 #                   fallback: main-home done rows with a PR (and a lost pane),
 #                   a report only, a live pane only and nothing; a local
 #                   secondmate's landed entries with a PR, a live pane, a report
 #                   and nothing; a remote home's report-only entry
 #   cold-start.json 120x40, the first refresh in flight with nothing landed:
 #                   no snapshot, no prs block, no herdr block, so every pane
-#                   shows its loading spinner; the landed, failed, frame and
+#                   shows its loading spinner (the two PR panes each naming
+#                   their own GitHub source); the landed, failed, frame and
 #                   narrow variants are derived from it at run time
 set -u
 
@@ -118,9 +134,10 @@ FAKE_BIN="$SCRATCH/bin"
 mkdir -p "$FAKE_BIN"
 cp "$ROOT/tests/fake-viewer.sh" "$FAKE_BIN/glow"
 chmod +x "$FAKE_BIN/glow"
-# Fake on PATH: `gh` (the board's own PR fetch), logging its argv to FM_BOARD_TEST_FETCH_LOG and
-# answering canned open-PR lists. Every live render below puts FAKE_BIN first on PATH so that no
-# fetch reaches GitHub.
+# Fake on PATH: `gh` (the board's own PR fetch and its identity rung), logging each call to
+# FM_BOARD_TEST_FETCH_LOG and answering `api user` and the `api graphql` searches and lookup with
+# canned PRs (tests/fake-gh.sh names them). Every live render below puts FAKE_BIN first on PATH so
+# that no fetch reaches GitHub.
 cp "$ROOT/tests/fake-gh.sh" "$FAKE_BIN/gh"
 chmod +x "$FAKE_BIN/gh"
 # Fake on HERDR_BIN_PATH and PATH: `herdr`, for the wrapper checks and the Landed focus checks: it logs every call to
@@ -272,10 +289,10 @@ render_live() {
   rm -f "${FETCH_LOG:?}"
   FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr "$@"
 }
-# assert_fetch_log <expected lines, sorted> <label>: the gh calls of one refresh start together, so
-# their log lines land in any order; the log is compared sorted.
+# assert_fetch_log <expected lines> <label>: the gh calls of one refresh start together, so their log
+# lines land in any order; both sides are compared sorted.
 assert_fetch_log() {
-  if [ -f "$FETCH_LOG" ] && [ "$(sort "$FETCH_LOG")" = "$1" ]; then pass; else fail "$2: fetch log is '$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')', expected (sorted) '$1'"; fi
+  if [ -f "$FETCH_LOG" ] && [ "$(sort "$FETCH_LOG")" = "$(printf '%s\n' "$1" | sort)" ]; then pass; else fail "$2: fetch log is '$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')', expected (in any order) '$1'"; fi
 }
 
 # ------------------------------------------------------------- populated
@@ -283,33 +300,33 @@ frame=$(render populated.json) || fail "populated: render exited non-zero"
 
 # Pane order and counts (falsify: reorder PANES in lib/layout.mjs, or delete a row source in the fixture).
 assert_contains "$frame" "Needs you (4)" "populated needs-you count (main home only)"
-assert_contains "$frame" "Ready for review (3)" "populated review count (two recorded PRs plus the live candidate; live PR data is the default)"
+assert_contains "$frame" "My PRs (3)" "populated review count (two recorded PRs plus the live candidate; live PR data is the default)"
 assert_contains "$frame" "In flight (7)" "populated in-flight count (five main rows, two home groups)"
 assert_contains "$frame" "Findings (3)" "populated findings count"
 assert_contains "$frame" "Landed (4)" "populated landed count"
-assert_before "$frame" "Needs you \(4\)" "Ready for review \(3\)" "pane order 1"
-assert_before "$frame" "Ready for review \(3\)" "In flight \(7\)" "pane order 2"
+assert_before "$frame" "Needs you \(4\)" "My PRs \(3\)" "pane order 1"
+assert_before "$frame" "My PRs \(3\)" "In flight \(7\)" "pane order 2"
 assert_before "$frame" "In flight \(7\)" "Findings \(3\)" "pane order 3"
 assert_before "$frame" "Findings \(3\)" "Landed \(4\)" "pane order 4"
 
 # Every pane title leads with its toggle key, btop-style (falsify: drop the badge segment from the
 # top border in renderPanes, or change paneBadge).
 assert_contains "$frame" "┌─ [1] Needs you (4) ─" "badge on Needs you"
-assert_contains "$frame" "┌─ [2] Ready for review (3) ─" "badge on Ready for review"
+assert_contains "$frame" "┌─ [2] My PRs (3) ─" "badge on My PRs"
 assert_contains "$frame" "┌─ [3] In flight (7) ─" "badge on In flight"
 assert_contains "$frame" "┌─ [4] Findings (3) ─" "badge on Findings"
 assert_contains "$frame" "┌─ [5] Landed (4) ─" "badge on Landed"
-assert_count "$frame" "┌─ [" 5 "exactly five badges, one per pane"
+assert_count "$frame" "┌─ [" 6 "exactly six badges, one per pane"
 # With --tags the badge is its own grey segment between the border segments (falsify: give the badge the
 # border style, or drop `badge` from STYLE_TAGS).
 tags=$(render populated.json --tags) || fail "populated --tags: render exited non-zero"
-assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[2\]\{/grey-fg\}\{blue-fg\} Ready for review \(3\)' "--tags: the badge is grey and the title keeps the border color"
-assert_count "$tags" "{grey-fg}[" 5 "--tags: five grey badges"
+assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[2\]\{/grey-fg\}\{blue-fg\} My PRs \(3\)' "--tags: the badge is grey and the title keeps the border color"
+assert_count "$tags" "{grey-fg}[" 6 "--tags: six grey badges"
 
 # Pane headers are `[n] Name (count)` and nothing else: the snapshot and checks ages, and the herdr
 # state, are gone from them (falsify: put snapshotLabel or herdrLabel back into paneHeader in
 # lib/model.mjs). The countdown and the herdr warning have their own section below.
-assert_no_row "$frame" '^┌─ \[[1-5]\] [^─]*(ago|snapshot|herdr|checks)' "no pane header carries an age, a snapshot, herdr or checks word"
+assert_no_row "$frame" '^┌─ \[[1-6]\] [^─]*(ago|snapshot|herdr|checks)' "no pane header carries an age, a snapshot, herdr or checks word"
 assert_count "$frame" " ago" 0 "nothing on the populated frame says N ago: no header age, and the title counts down instead"
 assert_row "$frame" '^ firstmate-tui · /fixture/firstmate · 3 homes ' "the title line leads with firstmate-tui and counts the main home plus two secondmate homes (falsify: put fm-board back in titleLine)"
 
@@ -334,11 +351,11 @@ assert_row "$frame_all" '^│ hold +- +etl-cutover +Cut over the nightly ETL on 
 assert_row "$frame_all" '^│ decide +etl-window +hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record (the KEY column grows to fit the key; falsify: cap extra below 10 in columnSpec)"
 assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ merge\?' "--all-homes-needs: hold sorts before merge?"
 
-# Ready for review with --no-prs: the recorded PRs only, tagged PR and marked off (falsify: drop the
+# My PRs with --no-prs: the recorded PRs only, tagged PR and marked off (falsify: drop the
 # --no-prs case in parseArgs, or the !prs.enabled branch in unlistedChecks).
 frame_noprs=$(render populated.json --no-prs) || fail "populated --no-prs: render exited non-zero"
-assert_contains "$frame_noprs" "Ready for review (2)" "--no-prs lists the two recorded PRs only"
-assert_contains "$frame_noprs" "┌─ [2] Ready for review (2) ─" "--no-prs: the review header is bare; the rows say checks: off (falsify: put checksLabel back into paneHeader)"
+assert_contains "$frame_noprs" "My PRs (2)" "--no-prs lists the two recorded PRs only"
+assert_contains "$frame_noprs" "┌─ [2] My PRs (2) ─" "--no-prs: the review header is bare; the rows say checks: off (falsify: put checksLabel back into paneHeader)"
 assert_row "$frame_noprs" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: off[^│]* - +5m~ │$' "recorded PR 41 row: with the fetch off STATUS and BASE are unknown (-) and the AGE is the status-log age marked ~ (falsify: keep the PR age without the fetch)"
 assert_row "$frame_noprs" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +- +1m~ │$' "recorded PR 7 row names the flag"
 assert_not_contains "$frame_noprs" "passing" "no live check state with --no-prs"
@@ -357,7 +374,7 @@ assert_row "$frame" '^│ done +pane lost +ship-old +PR https://github.com/acme/
 assert_row "$frame" '^│ working +tmux +tmux-task +running the migration +acme/legacy +main +- │$' "tmux-backed task shows tmux in HERDR"
 assert_row "$frame" '^│ STATE {11}HERDR ' "In flight's STATE column widens to fit awaiting merge, then the two-cell gutter (falsify: cap tag below 14 in columnSpec, or change GUTTER)"
 assert_row "$frame" '^│ STATE {4}KEY ' "Needs you's STATE column is only as wide as its own widest word, blocked: fixed columns size per pane (falsify: size tag over the whole board again)"
-assert_row "$frame" '^│ CHECKS +STATUS +ID +TITLE +BASE  AGE │$' "Ready for review: BASE hugs its widest value, main, and AGE its ages, so TITLE gets the rest (falsify: give base or age a fixed width)"
+assert_row "$frame" '^│ CHECKS +STATUS +ID +TITLE +BASE  AGE │$' "My PRs: BASE hugs its widest value, main, and AGE its ages, so TITLE gets the rest (falsify: give base or age a fixed width)"
 assert_before "$frame" '^│ working +working +ship-alpha' '^│ blocked +blocked +scout-beta' "in flight: working sorts before blocked"
 assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ awaiting merge +done +ship-gamma' "in flight: blocked sorts before awaiting merge"
 assert_before "$frame" '^│ awaiting merge +done +ship-gamma' '^│ done +pane lost +ship-old' "in flight: awaiting merge keeps the done slot, before plain done"
@@ -406,10 +423,15 @@ assert_row "$frame" '^│ reported +09-06 +old-scout +Scout: legacy import path 
 assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship-old' "landed newest first"
 
 # Frame geometry (falsify: change the fixture cols/rows, or break padding in render.mjs).
-assert_lines "$frame" 40 "populated frame is 40 lines"
+assert_lines "$frame" 44 "populated frame is 44 lines"
 assert_widths "$frame" 160 "populated frame lines are 160 columns"
+# The sixth pane sits below Landed with the empty text of a pane whose scope has PRs but no request
+# (falsify: reorder PANES in lib/layout.mjs, or change the toreview empty text).
+assert_before "$frame" "Landed \(4\)" "To review \(0\)" "pane order 5: To review is the sixth pane, below Landed"
+assert_contains "$frame" "┌─ [6] To review (0) ─" "badge on To review"
+assert_row "$frame" '^│ no pull requests waiting for your review +│$' "populated: To review is empty (no toreview rows in the fixture)"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
-assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  \. settings  \? help  q quit +$' "footer keys (falsify: drop . settings from FOOTER_KEYS)"
+assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys (falsify: drop . settings from FOOTER_KEYS)"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs).
 frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l") || fail "keys l: render exited non-zero"
@@ -425,23 +447,23 @@ assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "enter on a group ro
 frame_k=$(render populated.json --keys "tab,tab,enter") || fail "keys enter worker: render exited non-zero"
 assert_contains "$frame_k" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus"
 frame_k=$(render populated.json --keys "?") || fail "keys ?: render exited non-zero"
-assert_contains "$frame_k" "enter        Ready for review, Landed or a Needs-you PR row: open the PR in the browser" "help overlay documents enter on Landed"
+assert_contains "$frame_k" "enter        My PRs, To review, Landed or a Needs-you PR row: open the PR in the browser" "help overlay documents enter on Landed"
 assert_not_contains "$frame_k" "open the PR of the selected row" "help overlay no longer documents o"
 assert_contains "$frame_k" "l / right    expand the selected In flight group" "help overlay documents l/right"
 # The help lists the pane keys the way the badges show them (falsify: change the 1 - 5 lines in HELP_LINES).
 assert_contains "$frame_k" "each pane title carries its key: [1] Needs you" "help overlay ties the 1-5 keys to the title badges"
-assert_contains "$frame_k" "[2] Ready for review  [3] In flight  [4] Findings  [5] Landed" "help overlay lists every badge"
-assert_contains "$frame_k" "0            show every pane (with all five hidden the board lists these keys)" "help overlay documents 0 and the landing page"
+assert_contains "$frame_k" "[2] My PRs  [3] In flight  [4] Findings  [5] Landed  [6] To review" "help overlay lists every badge"
+assert_contains "$frame_k" "0            show every pane (with all six hidden the board lists these keys)" "help overlay documents 0 and the landing page"
 
-# Opening a PR: enter in Ready for review, on a Needs-you PR row and on a Landed row with a PR,
+# Opening a PR: enter in My PRs, on a Needs-you PR row and on a Landed row with a PR,
 # through the injected opener only (falsify: drop the url field from reviewRows, the merge? row or
 # landedRows, drop the PR rung from landedTarget, or drop the 'open' case in keyAction). The opener
 # receives the exact URL as its only argument.
 frame_o=$(render_open populated.json "tab,enter") || fail "open review: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "enter on the first Ready for review row (the newest IN REVIEW PR, joined to its task) opens its PR"
+assert_opened "https://github.com/acme/widgets/pull/41" "enter on the first My PRs row (the newest IN REVIEW PR, joined to its task) opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "footer notice names the task, not the candidate"
 frame_o=$(render_open populated.json "tab,j,enter") || fail "open review second row: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/8" "enter on the second Ready for review row (the failing live candidate nobody recorded) opens its PR"
+assert_opened "https://github.com/acme/api/pull/8" "enter on the second My PRs row (the failing live candidate nobody recorded) opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/api/pull/8 (api#8)" "footer notice names the opened URL"
 frame_o=$(render_open populated.json "j,j,j,enter") || fail "open needs enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on the Needs-you merge? row opens its PR"
@@ -463,27 +485,28 @@ assert_not_opened "without --opener-cmd nothing is launched"
 # parseArgs, or flip the default).
 frame_prs=$(render populated.json --prs) || fail "populated --prs: render exited non-zero"
 if [ "$frame_prs" = "$frame" ]; then pass; else fail "--prs renders a different frame from the default: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_prs") | head -n 5)"; fi
-assert_contains "$frame_prs" "Ready for review (3)" "live PR data adds the unrecorded candidate"
-assert_row "$frame_prs" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "Ready for review draws its own six columns (falsify: drop the review branch from columns in lib/layout.mjs)"
+assert_contains "$frame_prs" "My PRs (3)" "live PR data adds the unrecorded candidate"
+assert_row "$frame_prs" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "My PRs draws its own six columns (falsify: drop the review branch from columns in lib/layout.mjs)"
 assert_no_row "$frame_prs" '^│ CHECKS [^│]*(REPO|HOME|WHAT|REVIEW)' "the review pane draws no REPO, HOME, WHAT or REVIEW column"
 assert_row "$frame_prs" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +- │$' "failing candidate nobody recorded: changes requested reads IN REVIEW, the title and base branch come from the fetch, no age without a creation time (falsify: map CHANGES_REQUESTED to its own word in prStatus)"
 assert_row "$frame_prs" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "passing candidate joined to its task, AGE from its created_at (falsify: drop prCreatedAt from reviewRows)"
 assert_row "$frame_prs" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +1m~ │$' "recorded PR missing from the live list: STATUS -, the URL and note in TITLE, BASE -, AGE from the status log marked ~"
 assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]* ship-old ' "a candidate GitHub reports MERGED with no merge time cannot be placed in the 12-hour window and is dropped (falsify: return true from insideWindow when the stamp is missing)"
-assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]*Rename the widget table' "the merged PR's title appears nowhere in Ready for review"
+assert_no_row "$frame_prs" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]*Rename the widget table' "the merged PR's title appears nowhere in My PRs"
 assert_before "$frame_prs" '^│ passing +IN REVIEW +ship-alpha' '^│ failing +IN REVIEW +api#8' "inside IN REVIEW the PR with a creation time sorts before the one without (newest first, no age last; falsify: sort by the CHECKS word)"
 
 # Medium width: REPO and AGE drop below 100 columns (falsify: change WIDE_BREAKPOINT in lib/layout.mjs).
 frame_med=$(render populated.json --cols 90 --rows 30) || fail "medium: render exited non-zero"
-assert_contains "$frame_med" "Needs you (4)" "medium keeps five panes"
+assert_contains "$frame_med" "Needs you (4)" "medium keeps the six panes"
+assert_contains "$frame_med" "To review (0)" "medium: To review is drawn too"
 assert_row "$frame_med" '^│ STATE +HERDR +ID +WHAT +HOME +│$' "medium keeps the HERDR column and drops REPO and AGE"
 assert_no_row "$frame_med" ' REPO +HOME' "medium drops REPO"
 assert_no_row "$frame_med" ' HOME +AGE' "medium drops AGE"
-assert_row "$frame_med" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "medium: Ready for review drops BASE and keeps AGE (falsify: drop AGE with BASE in the review branch of columns)"
+assert_row "$frame_med" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "medium: My PRs drops BASE and keeps AGE (falsify: drop AGE with BASE in the review branch of columns)"
 assert_no_row "$frame_med" ' TITLE +BASE' "medium: no BASE column"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$frame_med" '^ j/k  tab  enter  l/h  x hide  H  1-5 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer"
+assert_row "$frame_med" '^ j/k  tab  enter  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -494,10 +517,11 @@ assert_row "$frame_tiny" '\+[0-9]+ more ──┘$' "tiny frame marks hidden row
 frame_empty=$(render empty.json) || fail "empty: render exited non-zero"
 assert_contains "$frame_empty" "Needs you (0)" "empty needs-you count"
 assert_row "$frame_empty" '^│ no captain decisions, holds or blocked workers +│$' "empty needs-you message"
-assert_row "$frame_empty" '^│ no recorded pull requests +│$' "empty review message"
+assert_row "$frame_empty" '^│ no pull requests of yours +│$' "empty My PRs message"
 assert_row "$frame_empty" '^│ no workers in flight +│$' "empty in-flight message"
 assert_row "$frame_empty" '^│ no scout reports +│$' "empty findings message"
 assert_row "$frame_empty" '^│ nothing landed yet +│$' "empty landed message"
+assert_row "$frame_empty" '^│ no pull requests waiting for your review +│$' "empty To review message (falsify: change the toreview empty text in PANES)"
 # No herdr block under --no-herdr is the state "off" with the reason --no-herdr: the title line warns
 # once and no pane header says anything about herdr (falsify: drop the detail from factsFromFixture's
 # no-block branch, or the 'off' case from herdrWarning).
@@ -513,11 +537,12 @@ frame_narrow=$(render narrow.json) || fail "narrow: render exited non-zero"
 # Section headers carry the same key badge as the pane titles (falsify: drop `badge` from the section
 # entry in flattenRows, or the badge segment in renderList).
 assert_row "$frame_narrow" '^── \[1\] Needs you \(1\) ─+$' "narrow: section header with its badge and count only, padded with dashes"
-assert_contains "$frame_narrow" "── [2] Ready for review (0)" "narrow: review section badge"
+assert_contains "$frame_narrow" "── [2] My PRs (0)" "narrow: review section badge"
 assert_contains "$frame_narrow" "── [3] In flight (2)" "narrow: in-flight section badge"
 assert_contains "$frame_narrow" "── [4] Findings (0)" "narrow: findings section badge"
 assert_contains "$frame_narrow" "── [5] Landed (1)" "narrow: landed section badge"
-assert_count "$frame_narrow" "── [" 5 "narrow: five badges, one per section"
+assert_contains "$frame_narrow" "── [6] To review (0)" "narrow: To review section badge"
+assert_count "$frame_narrow" "── [" 6 "narrow: six badges, one per section"
 assert_not_contains "$frame_narrow" "┌" "narrow: no pane borders"
 assert_row "$frame_narrow" '^ STATE +ID +WHAT +HOME +$' "narrow: single shared column header without REPO, AGE or HERDR"
 assert_row "$frame_narrow" '^ hold +decide-vendor +Pick the vendor for the addr… +main +$' "narrow: hold row in list mode, text truncated to the flex column (which is what the fixed columns leave after sizing to their values)"
@@ -535,7 +560,7 @@ frame_g=$(render grouped.json) || fail "grouped: render exited non-zero"
 # No prs block in the fixture is the state before the first fetch of a session lands: the recorded
 # PR row says fetching, never "not fetched", and the header stays bare (falsify: drop the fetching
 # branch in unlistedChecks).
-assert_contains "$frame_g" "┌─ [2] Ready for review (1) ─" "grouped: the review header is bare before the first fetch"
+assert_contains "$frame_g" "┌─ [2] My PRs (1) ─" "grouped: the review header is bare before the first fetch"
 assert_row "$frame_g" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "grouped: recorded PR row says checks fetching before the first fetch, STATUS unknown, AGE marked as the fallback"
 assert_not_contains "$frame_g" "not fetched" "grouped: nothing reads not fetched before the first fetch"
 
@@ -634,7 +659,7 @@ assert_not_viewed "enter outside Findings never runs the viewer"
 frame_v=$(render lost.json --keys "?") || fail "help: render exited non-zero"
 assert_contains "$frame_v" "Findings row: open the report in the viewer (glow, \$EDITOR, vim, less)" "help overlay documents the viewer"
 assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
-assert_contains "$frame_v" "1 - 5        show or hide a pane" "help overlay documents 1-5"
+assert_contains "$frame_v" "1 - 6        show or hide a pane" "help overlay documents 1-5"
 assert_contains "$frame_v" "r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)" "help overlay documents r"
 # The board never moves the firstmate pane; the captain splits panes himself (falsify: add an f line to HELP_LINES).
 assert_not_contains "$frame_v" "firstmate pane" "help overlay does not mention the firstmate pane"
@@ -671,7 +696,8 @@ assert_widths "$frame_l" 160 "lost frame lines are 160 columns"
 # ---------------------------------------------------------- landed targets
 # Enter on a Landed row takes the first target the row has that this board can reach: its PR, else
 # its report on this host, else its worker pane while herdr lists it, else an ordinary footer notice
-# (landedTarget in lib/controller.mjs). landed-targets.json at 160x40: Landed's rows are lines 29-37
+# (landedTarget in lib/controller.mjs). landed-targets.json at 160x44 (the sixth pane's three lines go
+# below Landed, so the Landed lines are those of the five-pane board at 40): Landed's rows are lines 29-37
 # (etl-index, ship-done, etl-pane, ship-old, etl-report, plain-done, mobile-fix, etl-none, old-scout)
 # and tab reaches the pane in four presses. The WHAT text names the first target that exists
 # (falsify: drop a rung from landedWhat in lib/model.mjs, the task or endpoint lookup that gives a
@@ -861,20 +887,30 @@ rm -f "$vs"
 frame_p=$(render populated.json --view-state "$vs" --keys "5") || fail "panes 5: render exited non-zero"
 assert_contains "$frame_p" "· panes hidden: 5" "title lists the hidden pane number"
 assert_not_contains "$frame_p" "Landed (" "the hidden pane draws nothing"
-assert_count "$frame_p" "┌─" 4 "four pane frames remain"
-assert_lines "$frame_p" 40 "one pane hidden: the frame is still 40 lines"
+assert_count "$frame_p" "┌─" 5 "five pane frames remain"
+assert_lines "$frame_p" 44 "one pane hidden: the frame is still 44 lines"
 assert_widths "$frame_p" 160 "one pane hidden: lines are 160 columns"
 assert_contains "$frame_p" "pane hidden: Landed · 5 or 0 shows it again" "5 leaves a notice"
 assert_file_contains "$vs" '"landed"' "the hidden pane is persisted"
 frame_p=$(render populated.json --view-state "$vs") || fail "panes reload: render exited non-zero"
-assert_count "$frame_p" "┌─" 4 "after a restart the pane stays hidden (falsify: drop hidden_panes from loadViewState)"
-frame_p=$(render populated.json --view-state "$vs" --keys "1,2,4") || fail "panes 1,2,4: render exited non-zero"
-assert_contains "$frame_p" "· panes hidden: 1,2,4,5" "four panes hidden: the title lists all four"
-assert_count "$frame_p" "┌─" 1 "four panes hidden: one frame"
-assert_contains "$frame_p" "In flight (7)" "four panes hidden: In flight remains"
-assert_lines "$frame_p" 40 "four panes hidden: still 40 lines"
-assert_widths "$frame_p" 160 "four panes hidden: lines are 160 columns"
-assert_row "$frame_p" '^│ decide +1 live +!▸ hyperion ' "four panes hidden: In flight rows render in the freed space"
+assert_count "$frame_p" "┌─" 5 "after a restart the pane stays hidden (falsify: drop hidden_panes from loadViewState)"
+# 6 hides To review, the sixth pane (falsify: drop the '6' case from keyAction, or paneForKey's bound).
+frame_p=$(render populated.json --view-state "$vs" --keys "6") || fail "panes 6: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 5,6" "6 hides To review and the title lists it"
+assert_not_contains "$frame_p" "To review (" "the hidden To review pane draws nothing"
+assert_contains "$frame_p" "pane hidden: To review · 6 or 0 shows it again" "6 leaves a notice naming its key"
+assert_file_contains "$vs" '"toreview"' "the hidden To review pane is persisted under its id"
+frame_p=$(render populated.json --view-state "$vs" --keys "6") || fail "panes 6 again: render exited non-zero"
+assert_contains "$frame_p" "┌─ [6] To review (0)" "6 again brings To review back"
+assert_contains "$frame_p" "pane shown: To review" "6 again leaves the shown notice"
+assert_file_not_contains "$vs" '"toreview"' "the shown pane leaves the persisted list"
+frame_p=$(render populated.json --view-state "$vs" --keys "1,2,4,6") || fail "panes 1,2,4,6: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 1,2,4,5,6" "five panes hidden: the title lists all five"
+assert_count "$frame_p" "┌─" 1 "five panes hidden: one frame"
+assert_contains "$frame_p" "In flight (7)" "five panes hidden: In flight remains"
+assert_lines "$frame_p" 44 "five panes hidden: still 44 lines"
+assert_widths "$frame_p" 160 "five panes hidden: lines are 160 columns"
+assert_row "$frame_p" '^│ decide +1 live +!▸ hyperion ' "five panes hidden: In flight rows render in the freed space"
 # The last pane goes too: with every pane hidden the grid gives way to the landing page, a centered key
 # list between the title line and the footer (falsify: bring back a shown <= 1 guard in toggle-pane, or
 # drop the landing branch from renderFrame).
@@ -885,25 +921,27 @@ assert_not_contains "$frame_p" "In flight (" "all panes hidden: no pane header f
 assert_row "$frame_p" '^ +all panes hidden +$' "landing page heading"
 assert_row "$frame_p" '^ firstmate-tui · /fixture/firstmate · 3 homes · all panes hidden ' "landing page: the title line leads with firstmate-tui (falsify: put fm-board back in titleLine)"
 assert_row "$frame_p" '^ +1  Needs you +$' "landing page: 1 brings Needs you back"
-assert_row "$frame_p" '^ +2  Ready for review +$' "landing page: 2 brings Ready for review back"
+assert_row "$frame_p" '^ +2  My PRs +$' "landing page: 2 brings My PRs back"
 assert_row "$frame_p" '^ +3  In flight +$' "landing page: 3 brings In flight back"
 assert_row "$frame_p" '^ +4  Findings +$' "landing page: 4 brings Findings back"
 assert_row "$frame_p" '^ +5  Landed +$' "landing page: 5 brings Landed back"
+assert_row "$frame_p" '^ +6  To review +$' "landing page: 6 brings To review back (falsify: drop the sixth pane from landingEntries)"
 assert_row "$frame_p" '^ +0  show all +$' "landing page: 0 shows all"
 assert_row "$frame_p" '^ +r  refresh +$' "landing page: r"
 assert_row "$frame_p" '^ +\?  help +$' "landing page: ?"
 assert_row "$frame_p" '^ +q  quit +$' "landing page: q"
 assert_before "$frame_p" '^ +all panes hidden +$' '^ +1  Needs you +$' "landing page: heading first"
-assert_before "$frame_p" '^ +5  Landed +$' '^ +0  show all +$' "landing page: 0 after the five panes"
+assert_before "$frame_p" '^ +5  Landed +$' '^ +6  To review +$' "landing page: To review after Landed"
+assert_before "$frame_p" '^ +6  To review +$' '^ +0  show all +$' "landing page: 0 after the six panes"
 assert_before "$frame_p" '^ +0  show all +$' '^ +r  refresh +$' "landing page: r after 0"
-assert_contains "$frame_p" "3 homes · all panes hidden " "all panes hidden: the title says so instead of listing five numbers (falsify: drop allHidden from titleLine)"
-assert_not_contains "$frame_p" "panes hidden: 1,2,3,4,5" "all panes hidden: the title does not list the five numbers"
-assert_contains "$frame_p" "pane hidden: In flight · every pane hidden; 1-5 or 0 shows them" "hiding the last pane leaves a notice naming the way back"
+assert_contains "$frame_p" "3 homes · all panes hidden " "all panes hidden: the title says so instead of listing six numbers (falsify: drop allHidden from titleLine)"
+assert_not_contains "$frame_p" "panes hidden: 1,2,3,4,5,6" "all panes hidden: the title does not list the six numbers"
+assert_contains "$frame_p" "pane hidden: In flight · every pane hidden; 1-6 or 0 shows them" "hiding the last pane leaves a notice naming the way back"
 assert_row "$frame_p" '^ j/k .* q quit +pane hidden' "the footer stays on the landing page"
-assert_lines "$frame_p" 40 "landing page: the frame is still 40 lines"
+assert_lines "$frame_p" 44 "landing page: the frame is still 44 lines"
 assert_widths "$frame_p" 160 "landing page: lines are 160 columns"
-for id in needs review inflight findings landed; do
-  assert_file_contains "$vs" "\"$id\"" "all five pane ids are persisted ($id)"
+for id in needs mine inflight findings landed toreview; do
+  assert_file_contains "$vs" "\"$id\"" "all six pane ids are persisted ($id)"
 done
 # A restart with an all-hidden file lands on the page again (falsify: drop hidden_panes from loadViewState,
 # or make the landing depend on view.notice).
@@ -911,19 +949,19 @@ frame_p=$(render populated.json --view-state "$vs") || fail "panes landing reloa
 assert_row "$frame_p" '^ +all panes hidden +$' "after a restart the landing page is shown"
 assert_count "$frame_p" "┌─" 0 "after a restart no pane is drawn"
 assert_not_contains "$frame_p" "pane hidden:" "after a restart there is no toggle notice"
-# Keys on the landing page: 1-5 and 0 act as always; a key that would move or act on a row nobody can see
+# Keys on the landing page: 1-6 and 0 act as always; a key that would move or act on a row nobody can see
 # only repeats the reminder and runs nothing; an unbound key such as o stays silent (falsify: drop
 # LANDING_KEYS or ROW_KEYS from keyAction, or the !pane.hidden term on the row lookup).
-frame_o=$(render_open populated.json "1,2,3,4,5,enter") || fail "landing enter: render exited non-zero"
+frame_o=$(render_open populated.json "1,2,3,4,5,6,enter") || fail "landing enter: render exited non-zero"
 assert_not_opened "enter on the landing page opens nothing"
-assert_contains "$frame_o" "all panes hidden · 1-5 shows a pane, 0 shows all" "enter on the landing page only reminds"
-frame_o=$(render_open populated.json "1,2,3,4,5,j,tab,enter") || fail "landing move+enter: render exited non-zero"
+assert_contains "$frame_o" "all panes hidden · 1-6 shows a pane, 0 shows all" "enter on the landing page only reminds"
+frame_o=$(render_open populated.json "1,2,3,4,5,6,j,tab,enter") || fail "landing move+enter: render exited non-zero"
 assert_not_opened "moving on the landing page then enter opens nothing"
-frame_p=$(render populated.json --keys "1,2,3,4,5,o") || fail "landing o: render exited non-zero"
-assert_not_contains "$frame_p" "all panes hidden · 1-5 shows a pane" "o on the landing page is the same silent no-op as elsewhere"
+frame_p=$(render populated.json --keys "1,2,3,4,5,6,o") || fail "landing o: render exited non-zero"
+assert_not_contains "$frame_p" "all panes hidden · 1-6 shows a pane" "o on the landing page is the same silent no-op as elsewhere"
 assert_row "$frame_p" '^ +all panes hidden +$' "o on the landing page leaves the page in place"
 frame_p=$(render populated.json --view-state "$vs" --keys "x") || fail "landing x: render exited non-zero"
-assert_contains "$frame_p" "all panes hidden · 1-5 shows a pane, 0 shows all" "x on the landing page only reminds"
+assert_contains "$frame_p" "all panes hidden · 1-6 shows a pane, 0 shows all" "x on the landing page only reminds"
 assert_file_contains "$vs" '"hidden": []' "x on the landing page hides no row"
 frame_p=$(render populated.json --view-state "$vs" --keys "?") || fail "landing ?: render exited non-zero"
 assert_contains "$frame_p" "firstmate-tui keys" "? opens the help over the landing page"
@@ -931,37 +969,55 @@ frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "landing 
 assert_count "$frame_p" "┌─" 1 "3 on the landing page brings In flight back alone"
 assert_contains "$frame_p" "┌─ [3] In flight (7)" "the returned pane carries its badge"
 assert_contains "$frame_p" "pane shown: In flight" "3 on the landing page leaves the usual notice"
-assert_contains "$frame_p" "· panes hidden: 1,2,4,5" "one pane back: the title lists the four still hidden"
+assert_contains "$frame_p" "· panes hidden: 1,2,4,5,6" "one pane back: the title lists the five still hidden"
 assert_file_contains "$vs" '"hidden_panes": [' "the returned pane is persisted"
+frame_p=$(render populated.json --view-state "$vs" --keys "6") || fail "landing then 6: render exited non-zero"
+assert_count "$frame_p" "┌─" 2 "6 after the landing page brings To review back beside In flight"
+assert_contains "$frame_p" "┌─ [6] To review (0)" "To review carries its badge when it returns"
 frame_p=$(render populated.json --view-state "$vs" --keys "0") || fail "panes 0: render exited non-zero"
-assert_count "$frame_p" "┌─" 5 "0 shows every pane again"
+assert_count "$frame_p" "┌─" 6 "0 shows every pane again"
 assert_contains "$frame_p" "all panes shown" "0 leaves a notice"
 assert_not_contains "$frame_p" "panes hidden" "0 clears the title note"
 assert_file_contains "$vs" '"hidden_panes": []' "0 empties the persisted list"
-# The same in one sitting and without a file: 1,2,3,4,5 lands, 0 restores (falsify: make the landing
+# The same in one sitting and without a file: 1,2,3,4,5,6 lands, 0 restores (falsify: make the landing
 # depend on the view-state file).
+frame_p=$(render populated.json --keys "1,2,3,4,5,6") || fail "panes 1-6: render exited non-zero"
+assert_row "$frame_p" '^ +all panes hidden +$' "1,2,3,4,5,6 in one sitting lands on the page"
+assert_count "$frame_p" "┌─" 0 "1,2,3,4,5,6: nothing else is drawn"
 frame_p=$(render populated.json --keys "1,2,3,4,5") || fail "panes 1-5: render exited non-zero"
-assert_row "$frame_p" '^ +all panes hidden +$' "1,2,3,4,5 in one sitting lands on the page"
-assert_count "$frame_p" "┌─" 0 "1,2,3,4,5: nothing else is drawn"
-frame_p=$(render populated.json --keys "1,2,3,4,5,0") || fail "panes 1-5,0: render exited non-zero"
-assert_count "$frame_p" "┌─" 5 "0 after 1,2,3,4,5 restores all five"
-assert_not_contains "$frame_p" "all panes hidden" "0 after 1,2,3,4,5 leaves the landing page"
+assert_count "$frame_p" "┌─" 1 "1,2,3,4,5 alone leaves To review on screen: six panes must go before the landing page (falsify: land with five hidden)"
+assert_contains "$frame_p" "┌─ [6] To review (0)" "1,2,3,4,5: the one pane left is To review"
+frame_p=$(render populated.json --keys "1,2,3,4,5,6,0") || fail "panes 1-6,0: render exited non-zero"
+assert_count "$frame_p" "┌─" 6 "0 after 1,2,3,4,5,6 restores all six"
+assert_not_contains "$frame_p" "all panes hidden" "0 after 1,2,3,4,5,6 leaves the landing page"
 # A hand-written all-hidden file is enough to land (falsify: require the ids in a particular order, or
 # only honor a file the board wrote itself).
 vs_all="$SCRATCH/view-state-all.json"
-printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":["landed","findings","inflight","review","needs"]}\n' > "$vs_all"
+printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":["toreview","landed","findings","inflight","mine","needs"]}\n' > "$vs_all"
 frame_p=$(render populated.json --view-state "$vs_all") || fail "panes hand-written all-hidden: render exited non-zero"
 assert_row "$frame_p" '^ +all panes hidden +$' "a hand-written all-hidden view-state file renders the landing page"
 assert_count "$frame_p" "┌─" 0 "hand-written all-hidden file: no pane drawn"
+# A file written by a board before 0.4.0 names the second pane review: it is read as mine, in the
+# hidden panes, the hidden row keys and the dragged widths (falsify: drop RENAMED_PANES from
+# loadViewState or sanitizeColumns).
+vs_old="$SCRATCH/view-state-old.json"
+printf '{"schema":"fm-board-view-state.v1","hidden":["review:main:api#8"],"hidden_panes":["review"],"columns":{"review":{"id":20}}}\n' > "$vs_old"
+frame_p=$(render populated.json --view-state "$vs_old") || fail "panes old id: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 2" "an old file's hidden pane review hides My PRs"
+frame_p=$(render populated.json --view-state "$vs_old" --keys "2") || fail "panes old id shown: render exited non-zero"
+assert_contains "$frame_p" "My PRs (2, 1 hidden)" "an old file's review:... hidden row key hides the same My PRs row"
+assert_row "$frame_p" '^│ CHECKS    STATUS     ID {20}TITLE ' "an old file's review column width applies to My PRs"
+assert_file_contains "$vs_old" '"mine:main:api#8"' "the next save writes the row key under the new pane id"
+assert_file_not_contains "$vs_old" 'review' "the next save drops the old pane id"
 # The landing page replaces the narrow list too (falsify: pick the layout mode before the all-hidden check).
-frame_p=$(render narrow.json --keys "1,2,3,4,5") || fail "panes narrow landing: render exited non-zero"
+frame_p=$(render narrow.json --keys "1,2,3,4,5,6") || fail "panes narrow landing: render exited non-zero"
 assert_row "$frame_p" '^ +all panes hidden +$' "narrow: the landing page replaces the list"
 assert_not_contains "$frame_p" "── [" "narrow: no section header on the landing page"
 assert_not_contains "$frame_p" " STATE " "narrow: no column header on the landing page"
 assert_widths "$frame_p" 70 "narrow landing page: lines are 70 columns"
 assert_lines "$frame_p" 24 "narrow landing page: 24 lines"
 # Hiding the selected pane moves the selection to the next shown pane (falsify: drop the shown() clamp in
-# moveSelection): 1 hides Needs you, then enter opens the first Ready for review PR.
+# moveSelection): 1 hides Needs you, then enter opens the first My PRs PR.
 frame_o=$(render_open populated.json "1,enter") || fail "panes selection: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "after hiding the selected pane, enter acts on the next shown pane"
 frame_p=$(render narrow.json --keys "5") || fail "panes narrow: render exited non-zero"
@@ -973,7 +1029,7 @@ assert_widths "$frame_p" 70 "list mode with a hidden pane: lines are 70 columns"
 # o used to open the selected row's PR in any pane; enter does that now, so
 # the key does nothing, not even a notice (falsify: give 'o' a case in keyAction).
 frame_o=$(render_open populated.json "tab,o") || fail "keys o: render exited non-zero"
-assert_not_opened "o on a Ready for review row calls no opener"
+assert_not_opened "o on a My PRs row calls no opener"
 frame_o=$(render populated.json --keys "o") || fail "keys o plain: render exited non-zero"
 if [ "$frame_o" = "$frame" ]; then pass; else fail "o changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_o") | head -n 5)"; fi
 assert_not_contains "$frame_o" "no PR URL" "o leaves no PR notice"
@@ -987,14 +1043,14 @@ assert_not_contains "$frame" " f " "footer offers no f key"
 if grep -Fq -- "-firstmate" "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
 
 # ------------------------------------------------------------------ PR ages
-# Ready for review's AGE is the time since the PR was opened when the live fetch carries created_at,
+# My PRs' AGE is the time since the PR was opened when the live fetch carries created_at,
 # else the task's status-log age with a trailing ~ (falsify: drop prCreatedAt or the ageFallback
 # marker in lib/model.mjs; the rows below then read 2d for 2d~, or 3h~ for 3h). These candidates
 # carry no title or base branch, as the script fallback's do not: TITLE falls back to the recorded
 # task's backlog title (the URL for a PR no task recorded) and BASE reads - (falsify: drop the
 # rec.title fallback from reviewRows).
 frame_age=$(render pr-ages.json) || fail "pr-ages: render exited non-zero"
-assert_contains "$frame_age" "Ready for review (8)" "pr-ages: seven live candidates plus one unlisted recorded PR"
+assert_contains "$frame_age" "My PRs (8)" "pr-ages: seven live candidates plus one unlisted recorded PR"
 assert_row "$frame_age" '^│ passing +IN REVIEW +pr-fresh +Paginate the address API +- +3h │$' "created_at 3h before now: AGE 3h with no marker, the backlog title in TITLE (falsify: read the status-log age first)"
 assert_row "$frame_age" '^│ passing +IN REVIEW +pr-nodate +Cache the geocoder +- +2d~ │$' "no creation time: the status-log age with ~ (falsify: drop ageFallback from reviewAge)"
 assert_row "$frame_age" '^│ passing +IN REVIEW +pr-future +Rate-limit headers +- +4h~ │$' "a future created_at counts as absent (falsify: drop the created > now check in prCreatedAt)"
@@ -1009,12 +1065,12 @@ assert_count "$frame_age" "~ │" 4 "exactly the four fallback rows carry the ma
 assert_row "$frame_age" '^│ working +- +pr-nodate +fixing the flaky test +acme/api +main +2d │$' "In flight shows the same status-log age unmarked"
 # --no-prs: every recorded row falls back (falsify: skip the marker when prs.enabled is false).
 frame_age_np=$(render pr-ages.json --no-prs) || fail "pr-ages --no-prs: render exited non-zero"
-assert_contains "$frame_age_np" "Ready for review (6)" "--no-prs: the six recorded PRs"
+assert_contains "$frame_age_np" "My PRs (6)" "--no-prs: the six recorded PRs"
 assert_row "$frame_age_np" '^│ PR +- +pr-fresh +https://github.com/acme/api/pull/101 · checks: off \(--no-prs\) +- +10m~ │$' "--no-prs: the PR that had a live creation time shows its status-log age with ~ instead"
-assert_count "$frame_age_np" "~ │" 6 "--no-prs: every Ready for review row carries the marker"
+assert_count "$frame_age_np" "~ │" 6 "--no-prs: every My PRs row carries the marker"
 assert_no_row "$frame_age_np" '^│ PR .* (3h|5d|2h) │$' "--no-prs: no PR age survives without the fetch"
 # The marker fits the AGE column at every breakpoint: at the wide breakpoint (100 columns) the column
-# still holds 30m~ whole with BASE beside it; below it Ready for review drops BASE and keeps AGE, so
+# still holds 30m~ whole with BASE beside it; below it My PRs drops BASE and keeps AGE, so
 # the marker still shows there while the other panes lose their AGE; in the narrow list AGE is gone
 # everywhere (falsify: narrow the AGE column in lib/layout.mjs, render the age into another column,
 # or drop AGE with BASE in the review branch of columns).
@@ -1023,16 +1079,16 @@ assert_row "$frame_age_100" '^│ passing +IN REVIEW +pr-bad +[^│]* - +30m~ �
 assert_row "$frame_age_100" '^│ passing +IN REVIEW +pr-fresh +[^│]* - +3h │$' "100 columns: the PR age fits"
 assert_widths "$frame_age_100" 100 "100-column frame lines are 100 columns"
 frame_age_90=$(render pr-ages.json --cols 90 --rows 30) || fail "pr-ages 90: render exited non-zero"
-assert_row "$frame_age_90" '^│ passing +IN REVIEW +pr-bad +[^│]* 30m~ │$' "medium width: Ready for review keeps AGE, so the marker still shows"
+assert_row "$frame_age_90" '^│ passing +IN REVIEW +pr-bad +[^│]* 30m~ │$' "medium width: My PRs keeps AGE, so the marker still shows"
 assert_no_row "$frame_age_90" ' BASE ' "medium width: BASE is dropped"
-assert_no_row "$frame_age_90" '^│ working [^│]*~ │$' "medium width: the other panes have no AGE column, so no marker outside Ready for review"
+assert_no_row "$frame_age_90" '^│ working [^│]*~ │$' "medium width: the other panes have no AGE column, so no marker outside My PRs"
 assert_widths "$frame_age_90" 90 "medium PR-ages frame lines are 90 columns"
 frame_age_70=$(render pr-ages.json --cols 70 --rows 30) || fail "pr-ages 70: render exited non-zero"
 assert_not_contains "$frame_age_70" "~" "narrow width: no marker in list mode"
 assert_widths "$frame_age_70" 70 "narrow PR-ages frame lines are 70 columns"
 
 # ------------------------------------------------------------------ PR status
-# Ready for review's STATUS column, its 12-hour window on finished PRs and its sort, from
+# My PRs' STATUS column, its 12-hour window on finished PRs and its sort, from
 # tests/fixtures/pr-status.json: one PR per status, a PR merged 11h59m and one 12h01m before now, an
 # open PR of a done task, a closed PR with no time stamp, a closed draft and an unlisted recorded PR.
 frame_st=$(render pr-status.json) || fail "pr-status: render exited non-zero"
@@ -1056,7 +1112,7 @@ assert_not_contains "$frame_st" "Split the address migration" "a PR merged 12h01
 assert_no_row "$frame_st" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]* st-old ' "the done task of the PR outside the window has no review row (its In flight row stays)"
 assert_not_contains "$frame_st" "Rename the widget table" "an open PR of a done task is not listed: a done task's PR shows only once terminal (falsify: drop the rec.done check in reviewRows)"
 assert_not_contains "$frame_st" "Abandoned spike" "a closed PR with no close time cannot be placed in the window and is dropped"
-assert_contains "$frame_st" "Ready for review (9)" "the pane count is the rows shown after the window filter (falsify: count candidate_prs instead of rows)"
+assert_contains "$frame_st" "My PRs (9)" "the pane count is the rows shown after the window filter (falsify: count candidate_prs instead of rows)"
 assert_count "$frame_st" " MERGED " 2 "exactly two MERGED rows"
 assert_count "$frame_st" " CLOSED " 2 "exactly two CLOSED rows"
 # The sort: DRAFT, IN REVIEW, APPROVED, unknown, CLOSED, MERGED, newest first inside a status (falsify:
@@ -1080,7 +1136,7 @@ assert_contains "$frame_o" "opened https://github.com/acme/api/pull/206 (st-merg
 # --no-prs: the recorded PRs of unfinished tasks only, STATUS unknown, as before (falsify: list a done
 # task's PR without a fetched record).
 frame_st_np=$(render pr-status.json --no-prs) || fail "pr-status --no-prs: render exited non-zero"
-assert_contains "$frame_st_np" "Ready for review (5)" "--no-prs: the five recorded PRs of unfinished tasks"
+assert_contains "$frame_st_np" "My PRs (5)" "--no-prs: the five recorded PRs of unfinished tasks"
 assert_row "$frame_st_np" '^│ PR +- +st-approved +https://github.com/acme/api/pull/204 · checks: off \(--no-prs\) +- +1h~ │$' "--no-prs: STATUS is unknown without the fetch"
 assert_no_row "$frame_st_np" '^│ PR +- +st-merged ' "--no-prs: a done task's PR is not listed without a fetched record"
 # Breakpoints: at 100 columns all six columns; below 100 BASE goes and AGE stays; below 80 the list
@@ -1100,21 +1156,132 @@ assert_row "$frame_st_70" '^ pending +st-draft +Rework the geocoder cache with a
 assert_not_contains "$frame_st_70" "DRAFT" "70 columns: the list has no STATUS column"
 assert_widths "$frame_st_70" 70 "70-column pr-status frame lines are 70 columns"
 
+# ------------------------------------------------------------------- My PRs
+# The pane as the union (tests/fixtures/my-prs.json): the identity's own PRs whatever their
+# repository, the recorded PRs of fleet tasks whatever their author, the finished ones inside the
+# window, and the recorded PR the fetch did not return; a row of the toreview pane never appears here
+# (falsify: filter My PRs on the candidate repositories, drop paneCandidates' pane test, or list a
+# toreview row in mineRows).
+frame_mp=$(render my-prs.json) || fail "my-prs: render exited non-zero"
+assert_contains "$frame_mp" "┌─ [2] My PRs (5) ─" "my-prs: five rows"
+assert_row "$frame_mp" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "my-prs: the six columns"
+assert_row "$frame_mp" '^│ passing +IN REVIEW +dotfiles#5 +Tidy the zsh prompt +main +3h │$' "my-prs: the identity's own PR in a repository no task touches, named repo#number"
+assert_row "$frame_mp" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +5h │$' "my-prs: the bot-authored PR recorded on ship-alpha, named by its task"
+assert_row "$frame_mp" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +1m~ │$' "my-prs: a recorded PR the fetch did not return keeps the - row with the file-time age"
+assert_row "$frame_mp" '^│ none +CLOSED +api#10 +Old spike +main +8h │$' "my-prs: the identity's PR closed 2h ago is listed as CLOSED"
+assert_row "$frame_mp" '^│ passing +MERGED +api#9 +Bump the retry budget +main +6h │$' "my-prs: the identity's PR merged 30m ago is listed as MERGED"
+assert_count "$frame_mp" "Retry on 429" 1 "my-prs: a toreview row draws once on the board"
+assert_before "$frame_mp" "To review \(1\)" '^│ failing +IN REVIEW +api#8 .*Retry on 429' "my-prs: that one row is under the To review header, not in My PRs"
+assert_before "$frame_mp" '^│ passing +IN REVIEW +dotfiles#5' '^│ passing +IN REVIEW +ship-alpha' "my-prs: inside IN REVIEW the 3h-old PR sorts before the 5h-old one"
+assert_before "$frame_mp" '^│ passing +IN REVIEW +ship-alpha' '^│ unlisted +- +ship-gamma' "my-prs: the unlisted recorded PR sorts after the open rows"
+assert_before "$frame_mp" '^│ unlisted +- +ship-gamma' '^│ none +CLOSED ' "my-prs: CLOSED sorts after the unlisted row"
+assert_before "$frame_mp" '^│ none +CLOSED ' '^│ passing +MERGED ' "my-prs: MERGED sorts last"
+assert_contains "$frame_mp" "┌─ [6] To review (1) ─" "my-prs: the one toreview row is in To review"
+assert_row "$frame_mp" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +2h │$' "my-prs: the toreview row draws in To review with the same six columns"
+assert_widths "$frame_mp" 160 "my-prs frame lines are 160 columns"
+assert_lines "$frame_mp" 44 "my-prs frame is 44 lines"
+# The identity from the fixture reaches the Settings page (falsify: drop identity from prsFromFixture).
+frame_mp=$(render my-prs.json --install-root "$SCRATCH/nowhere" --keys ".") || fail "my-prs settings: render exited non-zero"
+assert_row "$frame_mp" '^ Identity +captain  \(from config\) +$' "my-prs: the fixture's identity and source show on the Settings page"
+
+# ---------------------------------------------------------------- To review
+# The pane over tests/fixtures/to-review.json: one row per STATUS word, the identity's own review
+# winning over the PR's decision, the request through a team, the labelled gemini PR, a PR merged
+# outside the window and the identity's own PR both dropped, the six columns and the sort (falsify:
+# drop toReviewStatus, the author check or the window from toReviewRows, or reorder STATUS_ORDER).
+frame_tr=$(render to-review.json) || fail "to-review: render exited non-zero"
+assert_contains "$frame_tr" "┌─ [6] To review (7) ─" "to-review: seven rows"
+assert_contains "$frame_tr" "┌─ [2] My PRs (1) ─" "to-review: the one mine row stays in My PRs"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "to-review: the six columns"
+assert_row "$frame_tr" '^│ pending +DRAFT +api#16 +Draft: split the geocoder +main +30m │$' "to-review: a draft reads DRAFT"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +Gemini: index the parcel table +main +1h │$' "to-review: the labelled gemini PR reads IN REVIEW"
+assert_row "$frame_tr" '^│ failing +IN REVIEW +api#8 +Retry on 429 +develop +2h │$' "to-review: changes requested by someone else still reads IN REVIEW, with the base branch and failing checks"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +etl#15 +ETL: nightly loader for the team +main +3h │$' "to-review: a request through the identity's team is a row like any other"
+assert_row "$frame_tr" '^│ passing +CHANGES REQUESTED +widgets#46 +Widget: captain asked for changes +main +4h │$' "to-review: the identity's own CHANGES_REQUESTED review reads CHANGES REQUESTED (falsify: read reviewDecision instead of my_review)"
+assert_row "$frame_tr" '^│ passing +APPROVED +widgets#45 +Widget: approved by captain +main +5h │$' "to-review: the identity's own approval reads APPROVED"
+assert_row "$frame_tr" '^│ passing +MERGED +etl#14 +ETL: merged after review +main +6h │$' "to-review: a reviewed PR merged 30m ago is listed as MERGED"
+assert_not_contains "$frame_tr" "ETL: merged yesterday" "to-review: a PR merged 13h ago is outside the window"
+assert_not_contains "$frame_tr" "Retry budget: ask the API team" "to-review: the identity's own PR never lists, even when its team was asked"
+assert_row "$frame_tr" '^│ CHECKS +STATUS {13}ID ' "to-review: STATUS widens to CHANGES REQUESTED, its widest value, plus the gutter (falsify: cap extra below 17 in columnSpec)"
+assert_before "$frame_tr" '^│ pending +DRAFT ' '^│ passing +IN REVIEW +gemini#120' "to-review: DRAFT sorts first"
+assert_before "$frame_tr" '^│ passing +IN REVIEW +gemini#120' '^│ failing +IN REVIEW +api#8' "to-review: inside IN REVIEW the 1h-old PR sorts before the 2h-old one"
+assert_before "$frame_tr" '^│ failing +IN REVIEW +api#8' '^│ passing +IN REVIEW +etl#15' "to-review: inside IN REVIEW the 2h-old PR sorts before the 3h-old one"
+assert_before "$frame_tr" '^│ passing +IN REVIEW +etl#15' '^│ passing +CHANGES REQUESTED ' "to-review: IN REVIEW sorts before CHANGES REQUESTED (the rows still waiting first)"
+assert_before "$frame_tr" '^│ passing +CHANGES REQUESTED ' '^│ passing +APPROVED ' "to-review: CHANGES REQUESTED sorts before APPROVED"
+assert_before "$frame_tr" '^│ passing +APPROVED ' '^│ passing +MERGED ' "to-review: MERGED sorts last"
+assert_widths "$frame_tr" 160 "to-review frame lines are 160 columns"
+assert_lines "$frame_tr" 44 "to-review frame is 44 lines"
+# Keys on To review: 6 hides and shows it, tab reaches it after the shown panes, enter and a
+# double-click open its PR through the fake opener, x hides a row under the toreview id (falsify: drop
+# 'toreview' from OPEN_PANES, or the sixth pane from PANES).
+frame_tr=$(render to-review.json --keys "6") || fail "to-review 6: render exited non-zero"
+assert_not_contains "$frame_tr" "To review (" "6 hides To review"
+assert_contains "$frame_tr" "· panes hidden: 6" "6: the title lists the sixth pane"
+frame_o=$(render_open to-review.json "S-tab,enter") || fail "to-review enter: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/16" "shift-tab from Needs you lands on To review, the last pane with rows, and enter opens its first row, the DRAFT PR"
+assert_contains "$frame_o" "opened https://github.com/acme/api/pull/16 (api#16)" "to-review: the footer names the opened PR"
+frame_o=$(render_open to-review.json "S-tab,j,j,j,j,j,j,enter") || fail "to-review enter merged: render exited non-zero"
+assert_opened "https://github.com/acme/etl/pull/14" "enter on the MERGED To review row still opens its PR"
+vs_tr="$SCRATCH/view-state-toreview.json"
+rm -f "${vs_tr:?}"
+frame_tr=$(render to-review.json --view-state "$vs_tr" --keys "S-tab,x") || fail "to-review x: render exited non-zero"
+assert_contains "$frame_tr" "To review (6, 1 hidden)" "x hides a To review row and the header counts it"
+assert_contains "$frame_tr" "hidden api#16" "x names the hidden To review row"
+assert_file_contains "$vs_tr" '"toreview:main:api#16"' "the hidden To review row is keyed under the toreview pane id"
+# Mouse: at 160x44 the five panes above are minimal (Needs you title 1, My PRs 5, In flight 9 with the
+# spare rows, Findings 25, Landed 29), so To review's title is line 33, its column header 34 and its
+# rows 35-41; a double-click on its second row opens the PR as enter does (falsify: drop the row zones
+# for the sixth pane).
+frame_m=$(render_mouse to-review.json "dblclick:30,36") || fail "to-review dblclick: render exited non-zero"
+assert_opened "https://github.com/MatthewsREIS/gemini/pull/120" "a double-click on To review's second row opens its PR"
+# The scope text: with no rows and an empty scope the pane says where to add one; with a scope and no
+# rows it reads its empty text (falsify: drop SCOPE_EMPTY_TEXT from prPaneEmpty).
+frame_tr=$(render "$(variant to-review.json empty-scope '{"prs": {"candidate_prs": [], "toreview": {"scope": []}}}')") || fail "to-review empty scope: render exited non-zero"
+assert_row "$frame_tr" '^│ no repositories in scope: see Settings \(\.\) +│$' "an empty To review scope names the Settings page"
+frame_tr=$(render "$(variant to-review.json empty-rows '{"prs": {"candidate_prs": []}}')") || fail "to-review empty rows: render exited non-zero"
+assert_row "$frame_tr" '^│ no pull requests waiting for your review +│$' "a scope with no requests reads the empty text"
+# The identity unknown, on a fixture: one row in each PR pane, whatever candidates the fixture carries
+# (falsify: drop identityMissing from mineRows or toReviewRows).
+frame_tr=$(render "$(variant to-review.json no-identity '{"prs": {"identity": null}}')") || fail "to-review no identity: render exited non-zero"
+assert_count "$frame_tr" "identity unknown: see Settings (.)" 2 "identity null in the fixture: one row in each PR pane"
+assert_contains "$frame_tr" "┌─ [6] To review (1) ─" "identity null: To review counts the one row"
+assert_contains "$frame_tr" "┌─ [2] My PRs (1) ─" "identity null: My PRs counts the one row"
+assert_not_contains "$frame_tr" "gemini#120" "identity null: the fixture's rows are not drawn"
+frame_tr=$(render "$(variant to-review.json no-identity '{"prs": {"identity": null}}')" --install-root "$SCRATCH/nowhere" --keys "." --cols 200) || fail "to-review no identity settings: render exited non-zero"
+assert_contains "$frame_tr" " Identity       identity unknown: set identity.github_login in the config file, or run gh auth login" "identity null: the Settings page warns, naming the config file in general when a fixture render read none"
+# --no-prs: To review reads the off text with no identity row (falsify: test the identity before prs.enabled).
+frame_tr=$(render to-review.json --no-prs) || fail "to-review --no-prs: render exited non-zero"
+assert_row "$frame_tr" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs: To review reads the off text"
+assert_not_contains "$frame_tr" "identity unknown" "--no-prs: no identity row"
+# Without gh (the fixture's unavailable note): To review says what it needs (falsify: drop the
+# unavailable branch from prPaneEmpty).
+frame_tr=$(render "$(variant to-review.json no-gh '{"prs": {"candidate_prs": [], "toreview": {"unavailable": "gh not on PATH"}}}')") || fail "to-review no gh: render exited non-zero"
+assert_row "$frame_tr" '^│ gh not on PATH: To review needs the GitHub CLI +│$' "without gh To review names the CLI it needs"
+# The help names the sixth pane and its key (falsify: change the 1 - 6 lines in HELP_LINES).
+frame_tr=$(render to-review.json --keys "?") || fail "to-review help: render exited non-zero"
+assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] Needs you" "help overlay documents 1-6"
+assert_contains "$frame_tr" "[6] To review" "help overlay lists the To review badge"
+assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes ' "the footer reads 1-6 panes"
+
 # The fetch's pure pieces, straight from lib/sources.mjs, copy fm-bearings-snapshot.sh's rules: the
-# repository slug, the statusCheckRollup mapping, the fm/<task> branch rule with the script's
-# defaults, the projection of the title, base branch, draft flag, state and merge and close times, the
-# field list, the 12-hour keep rule on fetched PRs (open always; merged or closed only while the
-# finish time is less than twelve hours before now, a missing stamp dropped, a future one kept) and
-# the candidate rule (PR URLs of every task including a secondmate's, then the origin remote of live
-# non-secondmate worktrees only, capped at ten). Two scratch git repositories stand in for worktrees
-# (falsify: change any branch of checksState, drop the .git strip in repoSlug, the kind check in
-# candidateRepos, a field from GH_PR_FIELDS, or compare with <= in keepFetchedPr).
+# repository slug, the check mapping (gh's statusCheckRollup list and the GraphQL contexts alike),
+# the fm/<task> branch rule with the script's defaults, the projection of the title, base branch,
+# draft flag, state, merge and close times and, from a GraphQL node, the author, the labels and the
+# identity's own review, the 12-hour keep rule on fetched PRs (open always; merged or closed only
+# while the finish time is less than twelve hours before now, a missing stamp dropped, a future one
+# kept), the candidate rule (PR URLs of every task including a secondmate's, then the origin remote
+# of live non-secondmate worktrees only, capped at ten), the To review scope (candidates first, the
+# config file's repositories after, deduped), the four search strings (repo: qualifiers only while
+# the whole scope fits GitHub's 256 characters) and the aliased lookup. Two scratch git repositories
+# stand in for worktrees (falsify: change any branch of checksState, drop the .git strip in
+# repoSlug, the kind check in candidateRepos, a field from GH_PR_FIELDS, the length guard in
+# searchQueries, or compare with <= in keepFetchedPr).
 WT_DIR="$SCRATCH/wt"
 WT_SM_DIR="$SCRATCH/wt-secondmate"
 git init -q "$WT_DIR" && git -C "$WT_DIR" remote add origin git@github.com:acme/wt.git
 git init -q "$WT_SM_DIR" && git -C "$WT_SM_DIR" remote add origin https://github.com/acme/mate-only.git
 unit_out=$(node --input-type=module -e "
-  import { checksState, projectPr, repoSlug, candidateRepos, keepFetchedPr, GH_PR_FIELDS } from '$ROOT/bin/firstmate-tui/lib/sources.mjs';
+  import { checksState, projectPr, repoSlug, candidateRepos, keepFetchedPr, GH_PR_FIELDS, myReview, searchQueries, reviewScope, inScope, lookupGraphql, closedSince, SEARCH_QUERY_MAX } from '$ROOT/bin/firstmate-tui/lib/sources.mjs';
   const out = [];
   out.push(['none', checksState([])], ['none-null', checksState(null)]);
   out.push(['passing', checksState([{ status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
@@ -1127,10 +1294,21 @@ unit_out=$(node --input-type=module -e "
   out.push(['slug-other', String(repoSlug('https://gitlab.com/acme/widgets'))]);
   const p = projectPr({ number: 41, title: 'Add the widget cache', url: 'https://github.com/acme/widgets/pull/41', headRefName: 'fm/ship-alpha', baseRefName: 'main', reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }], createdAt: '2026-09-16T09:00:00Z', isDraft: true, state: 'OPEN', mergedAt: null, closedAt: null }, 'acme/widgets');
   out.push(['project', [p.num, p.repo, p.task, p.review, p.mergeable, p.checks, p.created_at, p.title, p.base, p.draft, p.state, String(p.merged_at), String(p.closed_at)].join(' ')]);
+  out.push(['project-extra', [String(p.author), p.labels.length, p.requested, String(p.my_review), p.pane].join(' ')]);
   const q = projectPr({ number: 8, url: 'u', headRefName: 'retry-429' }, 'acme/api');
   out.push(['project-defaults', [q.task, q.review, q.mergeable, q.checks, String(q.created_at), String(q.title), String(q.base), q.draft, String(q.state), String(q.merged_at)].join(' ')]);
   const m = projectPr({ number: 9, url: 'u', headRefName: 'x', state: 'merged', mergedAt: '2026-09-16T11:30:00Z', closedAt: '2026-09-16T11:30:00Z' }, 'acme/api');
   out.push(['project-merged', [m.state, m.merged_at, m.closed_at].join(' ')]);
+  // A GraphQL node: the repository from nameWithOwner, the checks from the head commit's contexts,
+  // the author, the labels and the identity's review.
+  const node = { number: 120, title: 'Gemini: index', url: 'https://github.com/MatthewsREIS/gemini/pull/120', headRefName: 'parcel-index', baseRefName: 'main', reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', isDraft: false, state: 'OPEN', createdAt: '2026-09-16T09:00:00Z', mergedAt: null, closedAt: null, author: { login: 'teammate' }, repository: { nameWithOwner: 'MatthewsREIS/gemini' }, labels: { nodes: [{ name: 'ready-to-merge' }, { name: 'backend' }] }, latestReviews: { nodes: [{ state: 'COMMENTED', author: { login: 'someone' } }, { state: 'APPROVED', author: { login: 'captain' } }] }, commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }, { __typename: 'StatusContext', state: 'SUCCESS' }] } } } }] } };
+  const n = projectPr(node, null);
+  out.push(['project-node', [n.repo, n.num, n.task, n.author, n.labels.join('+'), n.checks, n.title].join(' ')]);
+  out.push(['project-node-nochecks', projectPr({ ...node, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }, null).checks]);
+  out.push(['my-review', String(myReview(node, 'captain'))]);
+  out.push(['my-review-comment', String(myReview(node, 'someone'))]);
+  out.push(['my-review-none', String(myReview(node, 'nobody'))]);
+  out.push(['my-review-changes', String(myReview({ latestReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'captain' } }] } }, 'captain'))]);
   const now = 1789560000; // 2026-09-16T12:00:00Z
   out.push(['keep-open', keepFetchedPr({ state: 'OPEN' }, now)]);
   out.push(['keep-no-state', keepFetchedPr({}, now)]);
@@ -1141,87 +1319,232 @@ unit_out=$(node --input-type=module -e "
   out.push(['keep-closed-inside', keepFetchedPr({ state: 'CLOSED', closed_at: '2026-09-16T11:00:00Z' }, now)]);
   out.push(['keep-closed-nostamp', keepFetchedPr({ state: 'CLOSED' }, now)]);
   out.push(['keep-merged-future', keepFetchedPr({ state: 'MERGED', merged_at: '2026-09-16T13:00:00Z' }, now)]);
-  out.push(['fields', GH_PR_FIELDS.join(',')]);
+  const need = ['number', 'title', 'url', 'headRefName', 'baseRefName', 'reviewDecision', 'mergeable', 'isDraft', 'state', 'createdAt', 'mergedAt', 'closedAt', 'author { login }', 'repository { nameWithOwner }', 'labels(first: 30)', 'latestReviews(first: 30)', 'commits(last: 1)', 'statusCheckRollup', '... on CheckRun { status conclusion }', '... on StatusContext { state }'];
+  out.push(['fields', need.filter((f) => !GH_PR_FIELDS.includes(f)).join(',') || 'complete']);
   const tasks = [
     { kind: 'ship', pr: { url: 'https://github.com/acme/widgets/pull/41' }, paths: { worktree: { path: '$WT_DIR' } } },
     { kind: 'secondmate', pr: { url: 'https://github.com/acme/etl/pull/12' }, paths: { worktree: { path: '$WT_SM_DIR' } } },
     { kind: 'ship', pr: { url: 'https://github.com/acme/widgets/pull/30' }, paths: { worktree: { path: '/nonexistent/worktree' } } },
   ];
-  out.push(['repos', (await candidateRepos({ tasks }, { timeoutMs: 10000 })).join(' ')]);
+  const repos = await candidateRepos({ tasks }, { timeoutMs: 10000 });
+  out.push(['repos', repos.join(' ')]);
   const many = { tasks: Array.from({ length: 12 }, (_, i) => ({ kind: 'ship', pr: { url: 'https://github.com/acme/r' + i + '/pull/1' } })) };
   out.push(['cap', (await candidateRepos(many, { timeoutMs: 10000 })).join(' ')]);
+  const config = { review: { default_labels: [], repos: { 'MatthewsREIS/gemini': { labels: ['ready-to-merge'] }, 'acme/etl': { labels: [] } } } };
+  out.push(['scope', reviewScope(repos, config).join(' ')]);
+  out.push(['scope-case', reviewScope(['Acme/Widgets', 'acme/widgets'], { review: { repos: { 'ACME/widgets': {} } } }).join(' ')]);
+  out.push(['in-scope', [inScope(['MatthewsREIS/gemini'], 'matthewsreis/gemini'), inScope(['acme/api'], 'acme/etl')].join(' ')]);
+  out.push(['since', closedSince(now)]);
+  const s = searchQueries('captain', { now, scope: ['acme/widgets', 'MatthewsREIS/gemini'] });
+  out.push(['q-mine-open', s.mine.open]);
+  out.push(['q-mine-tail', s.mine.tail]);
+  out.push(['q-review-open', s.toreview.open]);
+  out.push(['q-review-tail', s.toreview.tail]);
+  const wide = searchQueries('captain', { now, scope: Array.from({ length: 12 }, (_, i) => 'organisation-name/repository-' + i) });
+  out.push(['q-review-wide', wide.toreview.open.includes('repo:') ? 'repo terms' : 'no repo terms']);
+  out.push(['q-review-wide-len', String(wide.toreview.open.length <= SEARCH_QUERY_MAX)]);
+  const lookup = lookupGraphql([{ owner: 'acme', name: 'api', number: 7 }, { owner: 'acme', name: 'widgets', number: 30 }]);
+  out.push(['lookup', [lookup.includes('r0: repository(owner: \"acme\", name: \"api\") { pullRequest(number: 7)'), lookup.includes('r1: repository(owner: \"acme\", name: \"widgets\") { pullRequest(number: 30)'), lookup.includes('latestReviews')].join(' ')]);
   process.stdout.write(out.map(([k, v]) => k + '=' + v).join('\n'));
 ") || fail "sources unit checks: node exited non-zero: $unit_out"
 for expected in "none=none" "none-null=none" "passing=passing" "passing-state=passing" "pending=pending" "failing=failing" "failing-state=failing" \
   "slug-pull=acme/widgets" "slug-ssh=acme/widgets" "slug-other=null" \
   "project=41 acme/widgets ship-alpha REVIEW_REQUIRED MERGEABLE passing 2026-09-16T09:00:00Z Add the widget cache main true OPEN null null" \
+  "project-extra=null 0 false null mine" \
   "project-defaults=- none UNKNOWN none null null null false null null" \
   "project-merged=MERGED 2026-09-16T11:30:00Z 2026-09-16T11:30:00Z" \
+  "project-node=MatthewsREIS/gemini 120 - teammate ready-to-merge+backend failing Gemini: index" \
+  "project-node-nochecks=none" \
+  "my-review=APPROVED" "my-review-comment=null" "my-review-none=null" "my-review-changes=CHANGES_REQUESTED" \
   "keep-open=true" "keep-no-state=true" "keep-merged-inside=true" "keep-merged-outside=false" "keep-merged-exact=false" \
   "keep-merged-closed-only=true" "keep-closed-inside=true" "keep-closed-nostamp=false" "keep-merged-future=true" \
-  "fields=number,title,url,headRefName,baseRefName,reviewDecision,mergeable,statusCheckRollup,createdAt,isDraft,state,mergedAt,closedAt" \
+  "fields=complete" \
   "repos=acme/widgets acme/etl acme/wt" \
-  "cap=acme/r0 acme/r1 acme/r2 acme/r3 acme/r4 acme/r5 acme/r6 acme/r7 acme/r8 acme/r9"; do
+  "cap=acme/r0 acme/r1 acme/r2 acme/r3 acme/r4 acme/r5 acme/r6 acme/r7 acme/r8 acme/r9" \
+  "scope=acme/widgets acme/etl acme/wt MatthewsREIS/gemini" "scope-case=Acme/Widgets" "in-scope=true false" \
+  "since=2026-09-16T00:00:00+00:00" \
+  "q-mine-open=is:pr is:open author:captain sort:updated-desc" \
+  "q-mine-tail=is:pr author:captain closed:>=2026-09-16T00:00:00+00:00 sort:updated-desc" \
+  "q-review-open=is:pr is:open review-requested:captain -author:captain repo:acme/widgets repo:MatthewsREIS/gemini sort:updated-desc" \
+  "q-review-tail=is:pr review-requested:captain -author:captain closed:>=2026-09-16T00:00:00+00:00 repo:acme/widgets repo:MatthewsREIS/gemini sort:updated-desc" \
+  "q-review-wide=no repo terms" "q-review-wide-len=true" \
+  "lookup=true true true"; do
   if printf '%s\n' "$unit_out" | grep -Fxq -- "$expected"; then pass; else fail "sources: expected line '$expected' in: $unit_out"; fi
 done
 
+# The config file's pure pieces (lib/config.mjs): the example is byte for byte docs/config.example.json,
+# a malformed or mistyped file gives the defaults with a reason, unknown keys are ignored, and the
+# label rule reads a repository's own entry before the default (an empty own list is unfiltered),
+# matching the repository name without case as GitHub does (falsify: change EXAMPLE_CONFIG, accept a
+# non-list default_labels, apply default_labels to a repository with its own entry, or compare the
+# names with case).
+config_out=$(node --input-type=module -e "
+  import { exampleConfigText, parseConfig, labelsFor, passesLabelRule, configuredRepos, resolveConfigPath, defaultConfigPath } from '$ROOT/bin/firstmate-tui/lib/config.mjs';
+  import { readFileSync } from 'node:fs';
+  const out = [];
+  out.push(['example', exampleConfigText() === readFileSync('$ROOT/docs/config.example.json', 'utf8')]);
+  const ex = parseConfig(exampleConfigText());
+  out.push(['example-parse', [String(ex.error), String(ex.config.identity.github_login), ex.config.review.default_labels.length, configuredRepos(ex.config).join(','), labelsFor(ex.config, 'MatthewsREIS/gemini').join(',')].join(' ')]);
+  // Node's JSON.parse message differs between versions (20 stops at the position, 26 adds the line
+  // and column), so only the board's own prefix is pinned.
+  out.push(['bad-json', String(parseConfig('{').error).startsWith('bad JSON (') ? 'bad JSON (...)' : String(parseConfig('{').error)]);
+  out.push(['not-object', parseConfig('[1]').error]);
+  out.push(['schema', parseConfig('{\"schema\":\"other.v9\"}').error]);
+  out.push(['login-type', parseConfig('{\"identity\":{\"github_login\":7}}').error]);
+  out.push(['labels-type', parseConfig('{\"review\":{\"default_labels\":\"ready\"}}').error]);
+  out.push(['repo-name', parseConfig('{\"review\":{\"repos\":{\"gemini\":{}}}}').error]);
+  const c = parseConfig('{\"schema\":\"firstmate-tui-config.v1\",\"identity\":{\"github_login\":\" zachsibert \"},\"review\":{\"default_labels\":[\"ready\",\"\"],\"repos\":{\"a/b\":{\"labels\":[\"x\"]},\"c/d\":{},\"e/f\":{\"labels\":[]}}},\"extra\":1}').config;
+  out.push(['parsed', [c.identity.github_login, c.review.default_labels.join(','), configuredRepos(c).join(',')].join(' ')]);
+  out.push(['labels-own', labelsFor(c, 'a/b').join(',')]);
+  out.push(['labels-own-empty', String(labelsFor(c, 'c/d').length) + ' ' + String(labelsFor(c, 'e/f').length)]);
+  out.push(['labels-default', labelsFor(c, 'other/repo').join(',')]);
+  out.push(['labels-case', labelsFor(c, 'A/B').join(',')]);
+  out.push(['rule', [passesLabelRule(c, 'a/b', ['x', 'y']), passesLabelRule(c, 'a/b', ['y']), passesLabelRule(c, 'c/d', []), passesLabelRule(c, 'other/repo', ['ready']), passesLabelRule(c, 'other/repo', [])].join(' ')]);
+  const env = { HOME: '/home/cap', XDG_CONFIG_HOME: '/xdg' };
+  out.push(['path-xdg', defaultConfigPath(env)]);
+  out.push(['path-home', defaultConfigPath({ HOME: '/home/cap' })]);
+  out.push(['path-none', String(defaultConfigPath({}))]);
+  out.push(['path-explicit', resolveConfigPath({ explicit: '/x/config.json', fmHome: '/fm', env }).path]);
+  const refused = resolveConfigPath({ explicit: '/fm/state/config.json', fmHome: '/fm', env });
+  out.push(['path-refused', refused.path + ' ' + refused.problem]);
+  process.stdout.write(out.map(([k, v]) => k + '=' + v).join('\n'));
+") || fail "config unit checks: node exited non-zero: $config_out"
+for expected in "example=true" \
+  "example-parse=null null 0 MatthewsREIS/gemini ready-to-merge" \
+  "bad-json=bad JSON (...)" \
+  "not-object=not an object" "schema=unexpected schema other.v9" "login-type=identity.github_login is not a string" \
+  "labels-type=review.default_labels is not a list" 'repo-name=review.repos: "gemini" is not owner/name' \
+  "parsed=zachsibert ready a/b,c/d,e/f" "labels-own=x" "labels-own-empty=0 0" "labels-default=ready" "labels-case=x" \
+  "rule=true false true true false" \
+  "path-xdg=/xdg/fm-board/config.json" "path-home=/home/cap/.config/fm-board/config.json" "path-none=null" \
+  "path-explicit=/x/config.json" "path-refused=/xdg/fm-board/config.json refusing --config inside FM_HOME (/fm/state/config.json)"; do
+  if printf '%s\n' "$config_out" | grep -Fxq -- "$expected"; then pass; else fail "config: expected line '$expected' in: $config_out"; fi
+done
+
+# The identity's pure pieces (lib/identity.mjs): the config login first, then gh, then git, never a
+# name or an email; an unknown identity names each rung's failure (falsify: reorder the rungs in
+# resolveIdentity, accept an email in validLogin, or drop a rung from the reason).
+identity_out=$(node --input-type=module -e "
+  import { resolveIdentity, validLogin, describeIdentity } from '$ROOT/bin/firstmate-tui/lib/identity.mjs';
+  const out = [];
+  const show = (k, r) => out.push([k, [String(r.login), r.source, String(r.reason)].join(' | ')]);
+  show('config-first', resolveIdentity({ config: 'zachsibert', gh: { value: 'other', error: null }, git: { value: 'third', error: null } }));
+  show('gh-second', resolveIdentity({ config: null, gh: { value: 'ghuser', error: null }, git: { value: 'third', error: null } }));
+  show('git-third', resolveIdentity({ config: null, gh: { value: null, error: 'exit 1: not logged in' }, git: { value: 'gituser', error: null } }));
+  show('gh-not-asked', resolveIdentity({ config: null, gh: null, git: { value: 'gituser', error: null } }));
+  show('none', resolveIdentity({ config: null, gh: { value: null, error: 'exit 1: not logged in' }, git: { value: null, error: 'github.user not set' } }));
+  show('junk', resolveIdentity({ config: 'Zach Sibert', gh: { value: 'zach@example.com', error: null }, git: { value: '', error: null } }));
+  out.push(['valid', [validLogin('zachsibert'), validLogin('a-b-c'), String(validLogin('-a')), String(validLogin('a--b')), String(validLogin('zach@example.com')), String(validLogin('x'.repeat(40)))].join(' ')]);
+  out.push(['describe-known', describeIdentity({ login: 'captain', source: 'gh' }, '/cfg/config.json')]);
+  out.push(['describe-unknown', describeIdentity({ login: null, source: 'unknown', reason: 'x' }, '/cfg/config.json')]);
+  out.push(['describe-nopath', describeIdentity({ login: null, source: 'unknown', reason: 'x' }, null)]);
+  process.stdout.write(out.map(([k, v]) => k + '=' + v).join('\n'));
+") || fail "identity unit checks: node exited non-zero: $identity_out"
+for expected in "config-first=zachsibert | config | null" "gh-second=ghuser | gh | null" "git-third=gituser | git | null" "gh-not-asked=gituser | git | null" \
+  "none=null | unknown | config: identity.github_login not set; gh: exit 1: not logged in; git: github.user not set" \
+  'junk=null | unknown | config: "Zach Sibert" is not a GitHub login; gh: "zach@example.com" is not a GitHub login; git: github.user not set' \
+  "valid=zachsibert a-b-c null null null null" \
+  "describe-known=captain  (from gh api user)" \
+  "describe-unknown=identity unknown: set identity.github_login in /cfg/config.json, or run gh auth login" \
+  "describe-nopath=identity unknown: set identity.github_login in the config file, or run gh auth login"; do
+  if printf '%s\n' "$identity_out" | grep -Fxq -- "$expected"; then pass; else fail "identity: expected line '$expected' in: $identity_out"; fi
+done
+
 # --------------------------------------------------------------- r refresh
-# r is the same refresh a timer tick runs: the fleet snapshot, then the PR fetch against the
-# repositories that snapshot names. The board asks GitHub itself, so the fake gh on PATH logs one
-# call per candidate repository (acme/widgets, acme/api and acme/etl carry PR URLs in the stand-in
-# snapshot), every state, newest-updated first, one over the 50 cap, the full field list; the start-up
-# read is one set and r adds the second. The stand-in's fm-bearings-snapshot.sh must not run at all
-# (falsify: keep runBearingsPrs as the default source, keep --state open or drop a field in ghPrList,
-# or drop fetchPrs from refreshLive).
-gh_line() { printf 'gh pr list --repo %s --state all --search sort:updated-desc --limit 51 --json number,title,url,headRefName,baseRefName,reviewDecision,mergeable,statusCheckRollup,createdAt,isDraft,state,mergedAt,closedAt' "$1"; }
-expected_live="$(gh_line acme/api)
-$(gh_line acme/api)
-$(gh_line acme/etl)
-$(gh_line acme/etl)
-$(gh_line acme/widgets)
-$(gh_line acme/widgets)
+# r is the same refresh a timer tick runs: the fleet snapshot, then the PR fetch for the resolved
+# identity. The board asks GitHub itself through gh api graphql: the start-up render resolves the
+# identity once (`gh api user`, since the example config written to XDG_CONFIG_HOME names no login)
+# and then runs the four searches, all together, plus one lookup of the recorded PRs the author
+# searches did not return (ship-alpha's #41, ship-gamma's #7, then done ship-old's #30); r adds a
+# second set of searches and lookups and no second identity call. The To review searches carry
+# the scope as repo: qualifiers: the three candidate repositories of the stand-in snapshot and
+# MatthewsREIS/gemini from the config file, which no fleet task touches. The stand-in's
+# fm-bearings-snapshot.sh must not run at all, and no `pr list` may be issued, since the fake fails
+# on it (falsify: keep runBearingsPrs as the default source, drop a search from runGhPrs, drop the
+# configured repositories from reviewScope, resolve the identity on every tick, or drop fetchPrs
+# from refreshLive).
+q_mine_open='gh api graphql q=is:pr is:open author:captain sort:updated-desc'
+q_mine_tail='gh api graphql q=is:pr author:captain closed:>=<since> sort:updated-desc'
+q_review_open='gh api graphql q=is:pr is:open review-requested:captain -author:captain repo:acme/widgets repo:acme/api repo:acme/etl repo:MatthewsREIS/gemini sort:updated-desc'
+q_review_tail='gh api graphql q=is:pr review-requested:captain -author:captain closed:>=<since> repo:acme/widgets repo:acme/api repo:acme/etl repo:MatthewsREIS/gemini sort:updated-desc'
+q_lookup='gh api graphql lookup=acme/widgets#41,acme/api#7,acme/widgets#30'
+expected_live="snapshot
+gh api user --jq .login
+$q_mine_open
+$q_mine_tail
+$q_review_open
+$q_review_tail
+$q_lookup
 snapshot
-snapshot"
-frame_r=$(render_live --keys "r" --cols 160 --rows 40) || fail "refresh default: render exited non-zero"
-assert_fetch_log "$expected_live" "r by default runs the snapshot and then one gh pr list per candidate repository, never the firstmate PR script (falsify: flip the prs default in parseArgs, or call runBearingsPrs with gh on PATH)"
+$q_mine_open
+$q_mine_tail
+$q_review_open
+$q_review_tail
+$q_lookup"
+frame_r=$(render_live --keys "r" --cols 160 --rows 60) || fail "refresh default: render exited non-zero"
+assert_fetch_log "$expected_live" "r by default runs the snapshot, then the four searches and the lookup for the identity gh named, never the firstmate PR script and never pr list (falsify: flip the prs default in parseArgs, or call runBearingsPrs with gh on PATH)"
 assert_contains "$frame_r" "refreshed: snapshot and PR checks" "r reports the refresh"
-# The rows come from the fake gh's answers: ship-alpha's PR, opened in 2020, shows a day count with no
-# marker and its title and base branch; the failing PR nobody recorded shows the mapped checks state;
-# ship-gamma's recorded PR 7 is not in the fake's list and, with no status file on this host, has no
-# age to fall back to; api#9, merged at run time, is listed as MERGED inside the window, and api#10,
-# closed in 2020, is dropped by the fetch before the model sees it (falsify: drop created_at, title or
-# base from projectPr, the FAILURE branch of checksState, the MERGED branch of prStatus, or
-# keepFetchedPr from ghPrList).
-assert_row "$frame_r" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +[0-9]+d │$' "live: STATUS, title and base branch come from gh, the PR age from its createdAt"
-assert_row "$frame_r" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +[0-9]+d │$' "live: a FAILURE conclusion maps to failing"
-assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "live: a recorded PR the fetch did not list stays unlisted"
-assert_row "$frame_r" '^│ passing +MERGED +api#9 +Bump the retry budget +main +[0-9]+d │$' "live: a PR gh reports merged just now is listed as MERGED"
+if [ -f "$SCRATCH/xdg/fm-board/config.json" ]; then pass; else fail "the first live render wrote the example config to \$XDG_CONFIG_HOME/fm-board/config.json (falsify: drop writeExampleConfig from loadOrCreateConfig)"; fi
+# The rows come from the fake gh's answers (tests/fake-gh.sh names them). My PRs: the identity's own
+# open PR in a repository no task touches, its own PR that asked its team for a review, the
+# bot-authored PR recorded on ship-alpha (through the lookup), ship-gamma's recorded PR the lookup
+# answered null (unlisted, and with no status file on this host no age to fall back to), the PR
+# merged at run time inside the window; the PR closed in 2020 is dropped by the fetch. To review:
+# the labelled gemini PR and not the unlabelled one, the acme/api PR with no label rule (checks
+# failing), the request through the identity's team, the PR the identity approved (STATUS
+# APPROVED), the PR merged at run time after that approval, and never the identity's own PR (falsify:
+# drop the lookup from runGhPrs, the label rule or the author check from the To review filter, or
+# myReview from ghSearch).
+assert_contains "$frame_r" "My PRs (5)" "live: My PRs counts its five rows"
+assert_row "$frame_r" '^│ passing +IN REVIEW +dotfiles#5 +Tidy the zsh prompt +main +[0-9]+d │$' "live: the identity's own PR outside the candidate repositories is in My PRs (the author search, not the repositories, is the scope)"
+assert_row "$frame_r" '^│ pending +IN REVIEW +api#12 +Retry budget: ask the API team +main +[0-9]+d │$' "live: the identity's own PR that asked its team is in My PRs"
+assert_row "$frame_r" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +[0-9]+d │$' "live: the bot-authored PR recorded on ship-alpha is in My PRs through the lookup, under the task id"
+assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "live: a recorded PR the lookup answered null stays unlisted"
+assert_row "$frame_r" '^│ passing +MERGED +api#9 +Bump the retry budget +main +[0-9]+d │$' "live: the identity's PR merged just now is listed as MERGED"
 assert_no_row "$frame_r" 'api#10|Old spike' "live: a PR closed in 2020 is outside the 12-hour window and dropped by the fetch"
-assert_contains "$frame_r" "Ready for review (4)" "live: the pane counts the rows shown after the window filter"
-assert_before "$frame_r" '^│ failing +IN REVIEW +api#8' '^│ passing +MERGED +api#9' "live: MERGED sorts after the open PRs"
-frame_r=$(render_live --keys "r" --prs) || fail "refresh --prs: render exited non-zero"
+assert_no_row "$frame_r" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]*(Rename the widget table|widgets#30)' "live: ship-old's PR merged in 2020 is dropped by the window although the lookup returned it (its Landed and In flight rows stay)"
+assert_before "$frame_r" '^│ pending +IN REVIEW +api#12' '^│ passing +MERGED +api#9' "live: MERGED sorts after the open PRs"
+assert_contains "$frame_r" "To review (5)" "live: To review counts its five rows"
+assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#120 +Gemini: index the parcel table +main +[0-9]+d │$' "live: the gemini PR with the ready-to-merge label is in To review (a configured repository searched with no fleet work in it)"
+assert_no_row "$frame_r" 'gemini#121|still cooking' "live: the gemini PR without the label is dropped by the label rule"
+assert_row "$frame_r" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +[0-9]+d │$' "live: a PR in a candidate repository with no label rule is in To review, its FAILURE conclusion mapped to failing"
+assert_row "$frame_r" '^│ passing +IN REVIEW +etl#15 +ETL: nightly loader for the team +main +[0-9]+d │$' "live: a request to the identity's team is in To review"
+assert_row "$frame_r" '^│ passing +APPROVED +widgets#45 +Widget: approved by captain +main +[0-9]+d │$' "live: a PR the identity already approved reads APPROVED"
+assert_row "$frame_r" '^│ passing +MERGED +etl#14 +ETL: merged after review +main +[0-9]+d │$' "live: a reviewed PR merged just now is in To review as MERGED"
+assert_count "$frame_r" "Retry budget: ask the API team" 1 "live: the identity's own PR that asked its team is in My PRs only, never in To review"
+assert_before "$frame_r" "My PRs \(5\)" "To review \(5\)" "live: To review is drawn below My PRs"
+frame_r=$(render_live --keys "r" --prs --rows 60) || fail "refresh --prs: render exited non-zero"
 assert_fetch_log "$expected_live" "--prs is a no-op: the same calls (falsify: make --prs disable or double the fetch)"
-frame_r=$(render_live --keys "r" --no-prs) || fail "refresh --no-prs: render exited non-zero"
+# --no-prs: no gh call at all, not even for the identity; both panes read the off state (falsify:
+# call fetchPrs or ghLogin unconditionally, or drop the toreview off text from prPaneEmpty).
+frame_r=$(render_live --keys "r" --no-prs --rows 60) || fail "refresh --no-prs: render exited non-zero"
 assert_fetch_log "snapshot
-snapshot" "r with --no-prs runs only the snapshot again (falsify: call fetchPrs unconditionally)"
-assert_contains "$frame_r" "PR checks off: start without --no-prs" "r with --no-prs says why the PR pane did not change (falsify: drop the notice)"
+snapshot" "r with --no-prs runs only the snapshot again and logs no gh call"
+assert_contains "$frame_r" "PR checks off: start without --no-prs" "r with --no-prs says why the PR panes did not change (falsify: drop the notice)"
 assert_not_contains "$frame_r" "fetching" "--no-prs: nothing reads fetching after r"
-# Without gh on PATH the firstmate script is the fallback and the footer says so. The board runs here
-# as node index.mjs under a PATH holding only node, bash and cat (the stand-in scripts need the last
-# two), so the PATH lookup finds no gh (falsify: drop the whichOnPath check in fetchPrs, and the gh
-# spawn fails instead of the script running; or drop the note from fetchPrs).
+assert_row "$frame_r" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +- +- │$' "--no-prs: My PRs lists the recorded PRs with the off note"
+assert_row "$frame_r" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs: To review reads the off text"
+assert_not_contains "$frame_r" "identity unknown" "--no-prs: no identity row, since nothing needs the login"
+# Without gh on PATH the firstmate script is the fallback for My PRs and To review says why it has
+# nothing. The board runs here as node index.mjs under a PATH holding only node, bash and cat (the
+# stand-in scripts need the last two), so the PATH lookup finds no gh (falsify: drop the whichOnPath
+# check in fetchPrs, and the gh spawn fails instead of the script running; or drop the note from
+# fetchPrs, or the unavailable text from prPaneEmpty).
 NOGH_BIN="$SCRATCH/nogh"
 mkdir -p "$NOGH_BIN"
 ln -s "$(command -v node)" "$NOGH_BIN/node"
 ln -s "$(command -v bash)" "$NOGH_BIN/bash"
 ln -s "$(command -v cat)" "$NOGH_BIN/cat"
 rm -f "${FETCH_LOG:?}"
-frame_r=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$NOGH_BIN" "$NOGH_BIN/node" "$ROOT/bin/firstmate-tui/index.mjs" --render-once --no-herdr --keys "r") || fail "refresh without gh: render exited non-zero"
+frame_r=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$NOGH_BIN" "$NOGH_BIN/node" "$ROOT/bin/firstmate-tui/index.mjs" --render-once --no-herdr --keys "r" --rows 60) || fail "refresh without gh: render exited non-zero"
 assert_fetch_log "prs --json --include-prs
 prs --json --include-prs
 snapshot
 snapshot" "without gh on PATH, r runs the snapshot and fm-bearings-snapshot.sh --include-prs, and no gh (falsify: spawn gh without the PATH check)"
 assert_contains "$frame_r" "gh not on PATH: PR data from fm-bearings-snapshot.sh" "without gh the footer names the fallback (falsify: drop the note)"
+assert_row "$frame_r" '^│ gh not on PATH: To review needs the GitHub CLI +│$' "without gh To review says what it needs"
+assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "without gh My PRs still lists the recorded PRs (the script fallback needs no login)"
+assert_not_contains "$frame_r" "identity unknown" "without gh no identity row: the fallback lists recorded PRs whoever the captain is"
 frame_r=$(render populated.json --keys "r") || fail "refresh fixture: render exited non-zero"
 assert_contains "$frame_r" "refresh is not available with --fixture" "r on a fixture render only reports"
 # A fixture render runs no script at all, whatever the prs default: with the stand-in home and the log
@@ -1229,6 +1552,119 @@ assert_contains "$frame_r" "refresh is not available with --fixture" "r on a fix
 rm -f "$FETCH_LOG"
 FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" render populated.json --keys "r" >/dev/null || fail "fixture with FM_HOME: render exited non-zero"
 if [ -f "$FETCH_LOG" ]; then fail "a fixture render ran a snapshot script: $(cat "$FETCH_LOG")"; else pass; fi
+# The fake refuses the old call, so a board that went back to `gh pr list` could not pass the checks
+# above (falsify: answer pr list in tests/fake-gh.sh).
+rm -f "$FETCH_LOG"
+if FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" bash "$ROOT/tests/fake-gh.sh" pr list --repo acme/api >/dev/null 2>&1; then fail "the fake gh answered pr list"; else pass; fi
+
+# ------------------------------------------------------------------ identity
+# The login the two PR panes are built around, resolved live: the config file's identity.github_login
+# first (no gh call at all), else `gh api user`, else `git config --get github.user`, else unknown,
+# which puts one row in both panes, a warning on the Settings page and a footer notice. Each case runs
+# against its own XDG_CONFIG_HOME so the config file is what the case wrote (or the example, written
+# on the first run); the fake gh fails its login call under FM_BOARD_TEST_GH_LOGIN_FAIL and a fake
+# git on IDENT_BIN answers `config --get github.user` from FM_BOARD_TEST_GIT_LOGIN (nothing set: exit
+# 1, the unset-key answer) and hands every other git call to the real one (falsify: reorder the
+# rungs in resolveIdentityLive, read user.name from git, or drop identityRow from the two builders).
+IDENT_BIN="$SCRATCH/ident-bin"
+mkdir -p "$IDENT_BIN"
+real_git=$(command -v git)
+# shellcheck disable=SC2016 # the fake expands its variables at run time, not here
+printf '#!/usr/bin/env bash\nif [ "$1 $2 $3" = "config --get github.user" ]; then [ -n "${FM_BOARD_TEST_GIT_LOGIN:-}" ] || exit 1; printf "%%s\\n" "$FM_BOARD_TEST_GIT_LOGIN"; exit 0; fi\nexec %s "$@"\n' "$real_git" > "$IDENT_BIN/git"
+chmod +x "$IDENT_BIN/git"
+render_identity() { # <xdg dir> [flags]: a live render with the fake git first on PATH and its own config directory
+  rm -f "${FETCH_LOG:?}"
+  FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$1" PATH="$IDENT_BIN:$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr --rows 60 "${@:2}"
+}
+# config over gh: the file names the login, gh is never asked and the searches carry it.
+mkdir -p "$SCRATCH/ident-config/fm-board"
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":"cfg-user"},"review":{"default_labels":[],"repos":{}}}\n' > "$SCRATCH/ident-config/fm-board/config.json"
+frame_i=$(FM_BOARD_TEST_GIT_LOGIN=gituser render_identity "$SCRATCH/ident-config") || fail "identity config: render exited non-zero"
+if grep -q "api user" "$FETCH_LOG"; then fail "identity from the config file: gh api user was still called: $(cat "$FETCH_LOG")"; else pass; fi
+if grep -q "author:cfg-user" "$FETCH_LOG"; then pass; else fail "identity from the config file: the searches carry the file's login: $(cat "$FETCH_LOG")"; fi
+frame_i=$(FM_BOARD_TEST_GIT_LOGIN=gituser render_identity "$SCRATCH/ident-config" --install-root "$SCRATCH/nowhere" --keys ".") || fail "identity config settings: render exited non-zero"
+assert_row "$frame_i" '^ Identity +cfg-user  \(from config\) +$' "Settings: the identity line names the login and the config source"
+# gh over git: the example config names no login, gh answers, git is not asked.
+frame_i=$(FM_BOARD_TEST_GIT_LOGIN=gituser render_identity "$SCRATCH/ident-gh") || fail "identity gh: render exited non-zero"
+if grep -q "author:captain" "$FETCH_LOG"; then pass; else fail "identity from gh: the searches carry gh's login: $(cat "$FETCH_LOG")"; fi
+assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "identity from gh: exactly one gh api user call"
+frame_i=$(FM_BOARD_TEST_GIT_LOGIN=gituser render_identity "$SCRATCH/ident-gh" --install-root "$SCRATCH/nowhere" --keys ".") || fail "identity gh settings: render exited non-zero"
+assert_row "$frame_i" '^ Identity +captain  \(from gh api user\) +$' "Settings: the identity line names gh api user as the source"
+# git alone: gh fails (not logged in), git's github.user answers.
+frame_i=$(FM_BOARD_TEST_GH_LOGIN_FAIL=1 FM_BOARD_TEST_GIT_LOGIN=gituser render_identity "$SCRATCH/ident-git") || fail "identity git: render exited non-zero"
+if grep -q "author:gituser" "$FETCH_LOG"; then pass; else fail "identity from git: the searches carry git's github.user: $(cat "$FETCH_LOG")"; fi
+frame_i=$(FM_BOARD_TEST_GH_LOGIN_FAIL=1 FM_BOARD_TEST_GIT_LOGIN=gituser render_identity "$SCRATCH/ident-git" --install-root "$SCRATCH/nowhere" --keys ".") || fail "identity git settings: render exited non-zero"
+assert_row "$frame_i" '^ Identity +gituser  \(from git config github.user\) +$' "Settings: the identity line names git config github.user as the source"
+# none: gh fails and github.user is unset; nothing is searched, both panes show the row, the footer
+# and the Settings page say what to do, and r asks again (one more gh api user call) while it is
+# unknown.
+frame_i=$(FM_BOARD_TEST_GH_LOGIN_FAIL=1 render_identity "$SCRATCH/ident-none") || fail "identity none: render exited non-zero"
+if grep -q "api graphql" "$FETCH_LOG"; then fail "identity unknown: a search ran anyway: $(cat "$FETCH_LOG")"; else pass; fi
+assert_count "$frame_i" "identity unknown: see Settings (.)" 2 "identity unknown: one row in each PR pane (falsify: drop identityRow from mineRows or toReviewRows)"
+assert_row "$frame_i" '^│ - +- +- +identity unknown: see Settings \(\.\) +- +- │$' "identity unknown: the row reads across the six columns"
+assert_no_row "$frame_i" '^│ (unlisted|PR) +- +ship-gamma' "identity unknown: My PRs lists no recorded PR either, since nothing was fetched (its Needs you and In flight rows stay)"
+frame_i=$(FM_BOARD_TEST_GH_LOGIN_FAIL=1 render_identity "$SCRATCH/ident-none" --install-root "$SCRATCH/nowhere" --keys "." --cols 260) || fail "identity none settings: render exited non-zero"
+assert_row "$frame_i" "^ Identity +identity unknown: set identity.github_login in $SCRATCH/ident-none/fm-board/config.json, or run gh auth login +\$" "Settings: the unknown identity names the config file and the gh login"
+assert_contains "$frame_i" "tried: config: identity.github_login not set; gh: exit 1: fake gh: not logged in to github.com; git: github.user not set" "Settings: the unknown identity lists what each rung answered"
+frame_i=$(FM_BOARD_TEST_GH_LOGIN_FAIL=1 render_identity "$SCRATCH/ident-none" --keys "r") || fail "identity none r: render exited non-zero"
+assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 2 "identity unknown: r asks gh again (falsify: never retry, or retry while known)"
+frame_i=$(render_identity "$SCRATCH/ident-gh" --keys "r") || fail "identity known r: render exited non-zero"
+assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "identity known: r does not ask gh again"
+
+# -------------------------------------------------------------------- config
+# The config file's chain and its one-time write: --config first, else the plugin directory the
+# wrapper passes (checked with the wrapper checks below), else $XDG_CONFIG_HOME/fm-board/config.json,
+# else ~/.config/fm-board/config.json; a path inside FM_HOME is refused with a notice; a malformed
+# file gives the defaults plus a notice and the Settings line; an absent file is written once from
+# docs/config.example.json and never rewritten (falsify: drop a rung from resolveConfigPath, write
+# the example over an existing file, or drop the notice from driveOnce).
+cfg_dir="$SCRATCH/cfg"
+mkdir -p "$cfg_dir"
+frame_c=$(render populated.json --config "$cfg_dir/mine.json") || fail "config explicit: render exited non-zero"
+if cmp -s "$cfg_dir/mine.json" "$ROOT/docs/config.example.json"; then pass; else fail "--config to an absent file writes the example there byte for byte"; fi
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":"edited"},"review":{"default_labels":["go"],"repos":{"acme/api":{"labels":[]}}}}\n' > "$cfg_dir/mine.json"
+frame_c=$(render populated.json --config "$cfg_dir/mine.json" --install-root "$SCRATCH/nowhere" --keys ".") || fail "config edited: render exited non-zero"
+if grep -q '"edited"' "$cfg_dir/mine.json"; then pass; else fail "an existing config file is never rewritten"; fi
+assert_row "$frame_c" "^ Config +$cfg_dir/mine.json +\$" "Settings: the Config line names the --config path with no suffix once the file is read"
+assert_row "$frame_c" '^ Review labels +default: go +$' "Settings: the default labels line reads the file"
+assert_row "$frame_c" '^ +acme/api: unfiltered +$' "Settings: a repository entry with an empty list reads unfiltered"
+frame_c=$(render populated.json --config "$cfg_dir/fresh.json" --install-root "$SCRATCH/nowhere" --keys ".") || fail "config created settings: render exited non-zero"
+assert_row "$frame_c" "^ Config +$cfg_dir/fresh.json  \\(created from the example\\) +\$" "Settings: a file just written from the example says so"
+assert_row "$frame_c" '^ Review labels +default: none +$' "Settings: the example has no default labels"
+assert_row "$frame_c" '^ +MatthewsREIS/gemini: ready-to-merge +$' "Settings: the example's gemini rule is listed"
+# A fixture render without --config touches no config file (falsify: drop the fixture guard in configFor).
+frame_c=$(HOME="$SCRATCH/cfg-home" XDG_CONFIG_HOME='' render populated.json) || fail "config fixture default: render exited non-zero"
+if [ -e "$SCRATCH/cfg-home/.config/fm-board/config.json" ]; then fail "a fixture render without --config wrote the default config file"; else pass; fi
+# The XDG and HOME rungs, on a live render (falsify: drop defaultConfigPath's XDG or HOME branch).
+if [ -f "$SCRATCH/xdg/fm-board/config.json" ]; then pass; else fail "a live render without --config uses \$XDG_CONFIG_HOME/fm-board/config.json"; fi
+mkdir -p "$SCRATCH/cfg-home"
+rm -f "${FETCH_LOG:?}"
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" HOME="$SCRATCH/cfg-home" XDG_CONFIG_HOME='' PATH="$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr >/dev/null || fail "config HOME rung: render exited non-zero"
+if cmp -s "$SCRATCH/cfg-home/.config/fm-board/config.json" "$ROOT/docs/config.example.json"; then pass; else fail "without XDG_CONFIG_HOME a live render writes the example to ~/.config/fm-board/config.json"; fi
+# Refused inside FM_HOME: the notice, the fallback path, nothing written inside the home.
+frame_c=$(XDG_CONFIG_HOME="$SCRATCH/cfg-xdg" render populated.json --config /fixture/firstmate/state/config.json) || fail "config FM_HOME guard: render exited non-zero"
+assert_contains "$frame_c" "refusing --config inside FM_HOME (/fixture/firstmate/state/config.json)" "a config path inside FM_HOME is refused with a notice"
+if [ -e /fixture/firstmate/state/config.json ]; then fail "the refused config path was written"; else pass; fi
+if [ -f "$SCRATCH/cfg-xdg/fm-board/config.json" ]; then pass; else fail "the refused config path falls back to \$XDG_CONFIG_HOME/fm-board/config.json and the example is written there"; fi
+# Malformed: the defaults, a footer notice, the Settings line, and the file left alone.
+printf '{"schema":"firstmate-tui-config.v1","review":{"default_labels":"ready"}}\n' > "$cfg_dir/bad.json"
+frame_c=$(render populated.json --config "$cfg_dir/bad.json" --cols 260) || fail "config malformed: render exited non-zero"
+assert_contains "$frame_c" "config: $cfg_dir/bad.json: review.default_labels is not a list; running with the defaults" "a malformed config is named in the footer once"
+frame_c=$(render populated.json --config "$cfg_dir/bad.json" --install-root "$SCRATCH/nowhere" --keys "." --cols 260) || fail "config malformed settings: render exited non-zero"
+assert_row "$frame_c" "^ Config +$cfg_dir/bad.json  \\(using defaults: $cfg_dir/bad.json: review.default_labels is not a list\\) +\$" "Settings: the Config line says the defaults are in effect and why"
+assert_row "$frame_c" '^ Review labels +default: none +$' "Settings: a malformed file leaves no default labels"
+assert_not_contains "$frame_c" "MatthewsREIS/gemini" "Settings: a malformed file leaves no configured repository (the example is not used in its place)"
+if grep -q '"ready"' "$cfg_dir/bad.json"; then pass; else fail "a malformed config file is left as it was"; fi
+# A live render with a malformed config searches without label rules (the gemini PR without the label
+# is listed too) and the configured repository is not in the scope (falsify: fall back to the example
+# instead of the defaults).
+mkdir -p "$SCRATCH/cfg-bad-xdg/fm-board"
+cp "$cfg_dir/bad.json" "$SCRATCH/cfg-bad-xdg/fm-board/config.json"
+rm -f "${FETCH_LOG:?}"
+frame_c=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/cfg-bad-xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr --rows 60) || fail "config malformed live: render exited non-zero"
+if grep -q "repo:MatthewsREIS/gemini" "$FETCH_LOG"; then fail "a malformed config still put the example's repository into the scope: $(cat "$FETCH_LOG")"; else pass; fi
+assert_not_contains "$frame_c" "gemini#120" "a malformed config: gemini is out of the scope, so its PRs are not listed"
+assert_contains "$frame_c" "To review (4)" "a malformed config: the four To review rows of the candidate repositories remain"
 
 # ------------------------------------------------------------- settings page
 # The `.` page. Install identity comes from --install-root: INSTALL is a fake prefix (package.json
@@ -1301,9 +1737,13 @@ assert_row "$frame_s" '^ refresh cadence +30 s \(--refresh\) +$' "settings: refr
 assert_row "$frame_s" '^ PR data +on: live GitHub checks on every tick +$' "settings: PR data, read-only"
 assert_row "$frame_s" '^ herdr overlay +off \(--no-herdr\) +$' "settings: the herdr line reflects --no-herdr"
 assert_row "$frame_s" '^ mouse +on: click selects, double-click acts, wheel scrolls, a header boundary drags +$' "settings: the mouse line, on by default (falsify: drop the mouse entry from settingsFlags)"
+assert_row "$frame_s" '^ Identity +captain  \(from fixture\) +$' "settings: the identity block names the fixture's login and source (falsify: drop settingsInfo from renderSettings)"
+assert_row "$frame_s" '^ Config +none: using defaults \(not read \(fixture render without --config\)\) +$' "settings: a fixture render without --config says no config file was read"
+assert_row "$frame_s" '^ Review labels +default: none +$' "settings: the label rules line with the defaults"
+assert_before "$frame_s" '^ mouse ' '^ Identity ' "settings: the identity block follows the flags"
 assert_row "$frame_s" '^ j/k move  enter choose  r refetch  esc/\. back  \? help +$' "settings: the footer names the page's keys"
 assert_row "$frame_s" '^ firstmate-tui · /fixture/firstmate · 3 homes ' "settings: the title line stays and leads with firstmate-tui"
-assert_lines "$frame_s" 40 "settings: the frame is 40 lines"
+assert_lines "$frame_s" 44 "settings: the frame is 44 lines"
 assert_widths "$frame_s" 160 "settings: lines are 160 columns"
 # Opening the page fetches once: the latest release and the list, for the record's repository
 # (falsify: drop settingsFetch from the settings case in handleKey, or fetch on the refresh tick).
@@ -1524,12 +1964,12 @@ assert_no_upgrade "checkout: y with nothing pending runs nothing"
 
 # Closing: esc, . and q bring the board back with its selection and expanded groups intact (falsify:
 # reset view.pane or view.row when the page closes, or drop the close case).
-# tab,j selects the second Ready for review row, api#8 (the pane sorts by status, newest first, so
+# tab,j selects the second My PRs row, api#8 (the pane sorts by status, newest first, so
 # ship-alpha's newer PR 41 comes first), a selection enter would not reach from the default one.
 rm -f "$OPENER_LOG"
 frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings esc: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "esc closes the page and enter acts on the row selected before it opened"
-assert_count "$frame_o" "┌─" 5 "esc: the grid is back"
+assert_count "$frame_o" "┌─" 6 "esc: the grid is back"
 rm -f "$OPENER_LOG"
 frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,.,enter" --opener-cmd "$FAKE_OPENER") || fail "settings dot: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" ". closes the page with the selection intact"
@@ -1539,9 +1979,9 @@ assert_opened "https://github.com/acme/api/pull/8" "q closes the page like the h
 frame_k=$(render populated.json --install-root "$INSTALL" --keys "tab,tab,j,j,j,j,l,.,escape") || fail "settings expanded: render exited non-zero"
 assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "a group expanded before the page opened is still expanded after it closes"
 # . works from the landing page too and esc returns there (falsify: drop . from LANDING_KEYS).
-frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,.") || fail "settings landing: render exited non-zero"
+frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,6,.") || fail "settings landing: render exited non-zero"
 assert_row "$frame_s" '^ Settings +$' ". opens the page from the landing page"
-frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,.,escape") || fail "settings landing esc: render exited non-zero"
+frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,6,.,escape") || fail "settings landing esc: render exited non-zero"
 assert_row "$frame_s" '^ +all panes hidden +$' "esc returns to the landing page"
 # Help: the overlay documents . and opens over the page (falsify: drop the . line from HELP_LINES).
 frame_k=$(render populated.json --keys "?") || fail "help settings: render exited non-zero"
@@ -1575,7 +2015,7 @@ frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "wheel:down:80,20") || f
 assert_row "$frame_s" '^ ▸ Betas ' "wheel down moves the highlight one entry, wherever the pointer is"
 frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "wheel:up:80,20") || fail "settings wheel up: render exited non-zero"
 assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "wheel up at the top stays on the first entry"
-frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "click:10,12 click:30,0 click:30,39") || fail "settings chrome click: render exited non-zero"
+frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "click:10,12 click:30,0 click:30,43") || fail "settings chrome click: render exited non-zero"
 assert_row "$frame_s" '^ ▸ Upgrade to 0\.2\.0 ' "clicks on a flag line, the title line and the footer change nothing on the page"
 frame_s=$(render_settings "$REL" "$INSTALL" "." --mouse "dblclick:10,7") || fail "settings dblclick upgrade: render exited non-zero"
 assert_row "$frame_s" '^ install 0\.2\.0 \(firstmate-tui upgrade --version 0\.2\.0\)\? y to confirm, esc to cancel +$' "a double-click on Upgrade asks for confirmation like enter"
@@ -1601,13 +2041,15 @@ assert_opened "https://github.com/acme/api/pull/8" "a click and a wheel on the p
 # --refresh 5 (the minimum) and the fake gh on PATH. The next refresh is due 5 s after the last
 # one started, armed when it completes, so a refresh slower than the cadence is followed by the
 # next one at once and never by two. From launch: the start refresh runs the snapshot (0-7 s) and
-# then the three gh calls; its timer is already due, so the second refresh runs the snapshot
-# (7-14 s) and the gh calls; the third starts its snapshot at 14 s and is still in it at 19 s.
-# Stopped at 19 s, the log holds three snapshot lines, the first two each followed by their three
-# gh lines, and no script fallback (falsify: arm the timer from the completion instead of the
-# start, two snapshots and three gh lines; keep the old fixed interval, two snapshots; never
-# clear the refreshing flag, one; re-arm the timer at the start of a refresh as well, four; start
-# the fetch with the snapshot instead of after it, and gh lines land before the snapshot line).
+# then the identity call and the five gh calls (four searches, one lookup); its timer is already
+# due, so the second refresh runs the snapshot (7-14 s) and the gh calls; the third starts its
+# snapshot at 14 s and is still in it at 19 s. Stopped at 19 s, the log holds three snapshot lines,
+# the first two each followed by their gh lines, one identity call in all, and no script fallback
+# (falsify: arm the timer from the completion instead of the start, two snapshots and five gh
+# lines; keep the old fixed interval, two snapshots; never clear the refreshing flag, one; re-arm
+# the timer at the start of a refresh as well, four; start the fetch with the snapshot instead of
+# after it, and gh lines land before the snapshot line; resolve the identity per tick, two user
+# calls).
 SLOW_HOME="$SCRATCH/firstmate-slow"
 mkdir -p "$SLOW_HOME/bin"
 # shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
@@ -1622,10 +2064,9 @@ kill "$headless_pid" 2>/dev/null
 wait "$headless_pid" 2>/dev/null
 headless_log=$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')
 if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 3 ]; then pass; else fail "headless schedule: expected three snapshot starts in 19 s (0, 7 and 14 s), log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
-if [ "$(grep -c '^gh pr list ' "$FETCH_LOG" 2>/dev/null)" = 6 ]; then pass; else fail "headless schedule: no second PR fetch during a running refresh, and one per completed refresh (two completed, three repositories each); log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
-if [ "$(sed -n '1p;5p;9p' "$FETCH_LOG" 2>/dev/null)" = "snapshot
-snapshot
-snapshot" ]; then pass; else fail "headless schedule: each refresh runs the snapshot before its gh calls, and the third starts only after the second's gh calls; log is '$headless_log'"; fi
+if [ "$(grep -c '^gh api graphql ' "$FETCH_LOG" 2>/dev/null)" = 10 ]; then pass; else fail "headless schedule: no second PR fetch during a running refresh, and one per completed refresh (two completed, four searches and one lookup each); log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(grep -c '^gh api user ' "$FETCH_LOG" 2>/dev/null)" = 1 ]; then pass; else fail "headless schedule: the identity is resolved once per session, not per tick; log is '$headless_log'"; fi
+if [ "$(grep -n '^snapshot$' "$FETCH_LOG" 2>/dev/null | cut -d: -f1 | tr '\n' ' ')" = "1 8 14 " ]; then pass; else fail "headless schedule: each refresh runs the snapshot before its identity call and gh calls (lines 1, 8 and 14), and the third starts only after the second's gh calls; log is '$headless_log'"; fi
 if grep -q '^prs ' "$FETCH_LOG" 2>/dev/null; then fail "headless schedule: the firstmate PR script ran although gh is on PATH; log is '$headless_log'"; else pass; fi
 if [ -s "$SCRATCH/headless.log" ]; then fail "headless run wrote to the terminal: $(head -c 300 "$SCRATCH/headless.log")"; else pass; fi
 
@@ -1651,10 +2092,21 @@ frame_f=$(render "$fx_pf") || fail "PR fetch failed: render exited non-zero"
 tags_f=$(render "$fx_pf" --tags) || fail "PR fetch failed --tags: render exited non-zero"
 assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh failed 40s ago, retrying in 20s $' "PR fetch failed: the title line reads refresh failed 40s ago, retrying in 20s"
 assert_contains "$tags_f" "{red-fg}refresh failed 40s ago, retrying in 20s{/red-fg}" "PR fetch failed: the label is red"
-assert_contains "$frame_f" "┌─ [2] Ready for review (3) (stale) ─" "PR fetch failed: the review header is marked stale"
-assert_count "$frame_f" "(stale)" 1 "PR fetch failed: no other pane is marked stale"
+assert_contains "$frame_f" "┌─ [2] My PRs (3) (stale) ─" "PR fetch failed: the review header is marked stale"
+assert_count "$frame_f" "(stale)" 2 "PR fetch failed: a fixture error with no per-pane block marks both PR panes stale and nothing else"
+assert_contains "$frame_f" "┌─ [6] To review (0) (stale) ─" "PR fetch failed: To review is marked stale too"
+# A failure of one pane's searches alone: that pane is stale, the other PR pane is not (falsify: read
+# the top-level error in paneStale instead of the pane's own).
+frame_f=$(render "$(variant populated.json review-failed '{"prs": {"toreview": {"error": "To review: exit 1"}}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: To review: exit 1"}}')") || fail "To review fetch failed: render exited non-zero"
+assert_count "$frame_f" "(stale)" 1 "To review fetch failed: one pane is stale"
+assert_contains "$frame_f" "┌─ [6] To review (0) (stale) ─" "To review fetch failed: To review is the stale pane"
+assert_contains "$frame_f" "┌─ [2] My PRs (3) ─" "To review fetch failed: My PRs, whose searches succeeded, is not stale"
+frame_f=$(render "$(variant populated.json mine-failed '{"prs": {"mine": {"error": "My PRs: exit 1"}}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: My PRs: exit 1"}}')") || fail "My PRs fetch failed: render exited non-zero"
+assert_count "$frame_f" "(stale)" 1 "My PRs fetch failed: one pane is stale"
+assert_contains "$frame_f" "┌─ [2] My PRs (3) (stale) ─" "My PRs fetch failed: My PRs is the stale pane and keeps its rows"
+assert_contains "$frame_f" "┌─ [6] To review (0) ─" "My PRs fetch failed: To review is not stale"
 assert_row "$frame_f" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "PR fetch failed: the previous PR rows stay on screen"
-# A failed snapshot: the four snapshot panes are marked stale and Ready for review is not (falsify:
+# A failed snapshot: the four snapshot panes are marked stale and My PRs is not (falsify:
 # swap the pane test in paneStale).
 frame_f=$(render "$(variant populated.json snap-failed '{"snapshot_error": "exit 1", "refresh": {"failed_ago": 5, "next_in": 25, "failed": "snapshot: exit 1"}}')") || fail "snapshot failed: render exited non-zero"
 assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh failed 5s ago, retrying in 25s $' "snapshot failed: the title line names the failure"
@@ -1663,7 +2115,8 @@ assert_contains "$frame_f" "┌─ [1] Needs you (4) (stale) ─" "snapshot fail
 assert_contains "$frame_f" "┌─ [3] In flight (7) (stale) ─" "snapshot failed: In flight is stale"
 assert_contains "$frame_f" "┌─ [4] Findings (3) (stale) ─" "snapshot failed: Findings is stale"
 assert_contains "$frame_f" "┌─ [5] Landed (4) (stale) ─" "snapshot failed: Landed is stale"
-assert_contains "$frame_f" "┌─ [2] Ready for review (3) ─" "snapshot failed: Ready for review, whose fetch succeeded, is not stale"
+assert_contains "$frame_f" "┌─ [2] My PRs (3) ─" "snapshot failed: My PRs, whose fetch succeeded, is not stale"
+assert_contains "$frame_f" "┌─ [6] To review (0) ─" "snapshot failed: To review is not stale either"
 # The failure text stays in the facts but the label keeps the spec's words: a failure with no age given
 # reads 0s ago (falsify: require failed_ago in refreshFromFixture).
 frame_f=$(render "$(variant populated.json failed-noage '{"refresh": {"failed": "snapshot: exit 1", "next_in": 30}}')") || fail "failed no age: render exited non-zero"
@@ -1720,13 +2173,15 @@ frame_ld=$(render cold-start.json) || fail "cold start: render exited non-zero"
 tags_ld=$(render cold-start.json --tags) || fail "cold start --tags: render exited non-zero"
 assert_row "$frame_ld" '^ firstmate-tui · /fixture/firstmate · 1 home +refreshing… · herdr disconnected \(--no-herdr\) $' "cold start: the title line reads refreshing… (the block that puts the panes into the loading state)"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start: Needs you, In flight, Findings and Landed each spin and name the fleet snapshot"
-assert_count "$frame_ld" "⠋ loading GitHub checks…" 1 "cold start: Ready for review alone names the GitHub checks"
+assert_count "$frame_ld" "⠋ loading GitHub checks…" 1 "cold start: My PRs alone names the GitHub checks"
 assert_line "$frame_ld" 4 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Needs you's first body line is the spinner"
-assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "cold start: Ready for review's first body line is the spinner"
+assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "cold start: My PRs' first body line is the spinner"
 assert_line "$frame_ld" 12 '^│ ⠋ loading fleet snapshot… +│$' "cold start: In flight's first body line is the spinner"
-assert_line "$frame_ld" 34 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Findings' first body line is the spinner"
-assert_line "$frame_ld" 38 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Landed's first body line is the spinner"
-for empty_text in "no captain decisions, holds or blocked workers" "no recorded pull requests" "no workers in flight" "no scout reports" "nothing landed yet"; do
+assert_line "$frame_ld" 30 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Findings' first body line is the spinner"
+assert_line "$frame_ld" 34 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Landed's first body line is the spinner"
+assert_count "$frame_ld" "⠋ loading GitHub review requests…" 1 "cold start: To review alone names the GitHub review requests (falsify: name one source for both PR panes)"
+assert_line "$frame_ld" 38 '^│ ⠋ loading GitHub review requests… +│$' "cold start: To review's first body line is its own spinner"
+for empty_text in "no captain decisions, holds or blocked workers" "no pull requests of yours" "no workers in flight" "no scout reports" "nothing landed yet" "no pull requests waiting for your review"; do
   assert_not_contains "$frame_ld" "$empty_text" "cold start: the spinner replaces the empty text (falsify: draw the empty text beside the loading line)"
 done
 assert_contains "$frame_ld" "┌─ [3] In flight (0) ─" "cold start: the headers count zero rows and carry no stale marker"
@@ -1734,17 +2189,18 @@ assert_count "$frame_ld" "(stale)" 0 "cold start: nothing has failed, so nothing
 assert_widths "$frame_ld" 120 "cold start: every line is still 120 columns"
 assert_contains "$tags_ld" "{blue-fg}⠋ loading fleet snapshot…" "cold start --tags: the spinner line is dimmed like the empty text (falsify: give it the row style)"
 # The snapshot landed, the PR fetch still running (populated.json with prs null and refreshing):
-# only Ready for review spins, above the recorded PR rows it already has from the snapshot, and the
+# only My PRs spins, above the recorded PR rows it already has from the snapshot, and the
 # four snapshot panes keep their rows (falsify: key the review pane on the snapshot, or drop the
 # rows under the loading line).
 frame_ld=$(render "$(variant populated.json snap-landed '{"prs": null, "refresh": {"refreshing": true}}')") || fail "snapshot landed: render exited non-zero"
-assert_count "$frame_ld" "loading" 1 "snapshot landed: one spinner on the board"
-assert_line "$frame_ld" 11 '^│ ⠋ loading GitHub checks… +│$' "snapshot landed: Ready for review's first body line is the spinner"
+assert_count "$frame_ld" "loading" 2 "snapshot landed: the two PR panes spin and nothing else"
+assert_row "$frame_ld" '^│ ⠋ loading GitHub review requests… +│$' "snapshot landed: To review spins on its own fetch"
+assert_line "$frame_ld" 11 '^│ ⠋ loading GitHub checks… +│$' "snapshot landed: My PRs' first body line is the spinner"
 assert_row "$frame_ld" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "snapshot landed: the recorded PR rows stay under the spinner"
-assert_contains "$frame_ld" "┌─ [2] Ready for review (2) ─" "snapshot landed: the header counts the recorded rows"
+assert_contains "$frame_ld" "┌─ [2] My PRs (2) ─" "snapshot landed: the header counts the recorded rows"
 assert_contains "$frame_ld" "┌─ [1] Needs you (4) ─" "snapshot landed: Needs you has its rows and no spinner"
 assert_row "$frame_ld" '^│ working +working +ship-alpha +harness busy \(claude-hook\)' "snapshot landed: In flight's rows are drawn"
-# --no-prs: Ready for review is never loading; it shows the off state, and a cold start's empty
+# --no-prs: My PRs is never loading; it shows the off state, and a cold start's empty
 # review pane reads the empty text while the other four spin (falsify: drop the prs.enabled test
 # from paneLoadingSource).
 frame_ld=$(render "$(variant populated.json snap-landed-noprs '{"prs": null, "refresh": {"refreshing": true}}')" --no-prs) || fail "--no-prs refreshing: render exited non-zero"
@@ -1752,8 +2208,9 @@ assert_count "$frame_ld" "loading" 0 "--no-prs: no spinner while the snapshot da
 assert_row "$frame_ld" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +- +1m~ │$' "--no-prs: the recorded PR rows read the off state"
 frame_ld=$(render cold-start.json --no-prs) || fail "cold start --no-prs: render exited non-zero"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start --no-prs: the four snapshot panes still spin"
-assert_not_contains "$frame_ld" "GitHub checks" "cold start --no-prs: Ready for review does not spin"
-assert_line "$frame_ld" 8 '^│ no recorded pull requests +│$' "cold start --no-prs: Ready for review reads its empty text"
+assert_not_contains "$frame_ld" "GitHub checks" "cold start --no-prs: My PRs does not spin"
+assert_line "$frame_ld" 8 '^│ no pull requests of yours +│$' "cold start --no-prs: My PRs reads its empty text"
+assert_line "$frame_ld" 38 '^│ PR fetch off \(--no-prs\) +│$' "cold start --no-prs: To review reads the off text (falsify: drop PRS_OFF_TEXT from prPaneEmpty)"
 # Data on screen: a refresh over landed data spins nothing, so rows are never covered (falsify:
 # key the loading state on refreshing alone). The populated frame without a running refresh spins
 # nothing either.
@@ -1766,7 +2223,7 @@ assert_count "$frame" "loading" 0 "populated: no spinner when no refresh runs"
 # spinnerGlyph, or read the clock instead of the counter).
 frame_ld=$(render "$(variant cold-start.json frame3 '{"refresh": {"refreshing": true, "loading_frame": 3}}')") || fail "loading_frame 3: render exited non-zero"
 assert_count "$frame_ld" "⠸ loading fleet snapshot…" 4 "loading_frame 3: the fourth braille glyph on the snapshot panes"
-assert_contains "$frame_ld" "⠸ loading GitHub checks…" "loading_frame 3: the same glyph on Ready for review"
+assert_contains "$frame_ld" "⠸ loading GitHub checks…" "loading_frame 3: the same glyph on My PRs"
 assert_not_contains "$frame_ld" "⠋" "loading_frame 3: the first glyph is gone"
 frame_ld=$(render "$(variant cold-start.json frame10 '{"refresh": {"refreshing": true, "loading_frame": 10}}')") || fail "loading_frame 10: render exited non-zero"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "loading_frame 10: the cycle wraps to the first glyph"
@@ -1782,23 +2239,24 @@ frame_ld=$(render "$(variant cold-start.json narrow '{"cols": 70, "rows": 24}')"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "narrow cold start: the four snapshot sections spin"
 assert_line "$frame_ld" 3 '^── \[1\] Needs you \(0\) ─+$' "narrow cold start: the first section header"
 assert_line "$frame_ld" 4 '^ ⠋ loading fleet snapshot… +$' "narrow cold start: the spinner line follows the section header"
-assert_line "$frame_ld" 6 '^ ⠋ loading GitHub checks… +$' "narrow cold start: Ready for review's line names the GitHub checks"
+assert_line "$frame_ld" 6 '^ ⠋ loading GitHub checks… +$' "narrow cold start: My PRs' line names the GitHub checks"
+assert_line "$frame_ld" 14 '^ ⠋ loading GitHub review requests… +$' "narrow cold start: To review's line names the review requests"
 assert_not_contains "$frame_ld" "no workers in flight" "narrow cold start: no empty text beside the spinner"
 assert_widths "$frame_ld" 70 "narrow cold start: every line is 70 columns"
 # A failed first fetch shows the failure text, not the spinner: a PR fetch that failed before any
 # fetch landed leaves the recorded rows reading checks: fetch failed under a stale header, and a
 # snapshot that failed before any landed leaves the four panes stale with their empty text while
-# Ready for review, whose own fetch is still running, spins (falsify: drop the prs.error or the
+# My PRs, whose own fetch is still running, spins (falsify: drop the prs.error or the
 # snapshotError test from paneLoadingSource).
 frame_ld=$(render "$(variant populated.json pr-first-failed '{"prs": {"candidate_prs": null, "error": "exit 1"}, "refresh": {"refreshing": true}}')") || fail "PR first fetch failed: render exited non-zero"
 assert_count "$frame_ld" "loading" 0 "PR first fetch failed: no spinner"
-assert_contains "$frame_ld" "┌─ [2] Ready for review (2) (stale) ─" "PR first fetch failed: the review header is stale"
+assert_contains "$frame_ld" "┌─ [2] My PRs (2) (stale) ─" "PR first fetch failed: the review header is stale"
 assert_row "$frame_ld" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: fetch failed +- +1m~ │$' "PR first fetch failed: the rows read checks: fetch failed"
 frame_ld=$(render "$(variant cold-start.json snap-first-failed '{"snapshot_error": "exit 1"}')") || fail "snapshot first fetch failed: render exited non-zero"
 assert_count "$frame_ld" "loading fleet snapshot" 0 "snapshot first fetch failed: the snapshot panes do not spin"
 assert_count "$frame_ld" "(stale)" 4 "snapshot first fetch failed: the four snapshot panes are stale"
 assert_line "$frame_ld" 4 '^│ no captain decisions, holds or blocked workers +│$' "snapshot first fetch failed: Needs you reads its empty text"
-assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "snapshot first fetch failed: Ready for review still spins on its own fetch"
+assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "snapshot first fetch failed: My PRs still spins on its own fetch"
 # Herdr: once the snapshot has landed, In flight names herdr while the link is still connecting,
 # above the rows it already has, and only while a refresh runs; on a cold start the snapshot
 # comes first (falsify: drop the herdr branch from paneLoadingSource, or move it above the
@@ -1816,12 +2274,13 @@ assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start connectin
 assert_not_contains "$frame_ld" "loading herdr" "cold start connecting: herdr is not named before the snapshot lands"
 
 # ------------------------------------------------------------------- mouse
-# Cells are column,line from 0 at the top-left. In populated.json at 160x40 the lines are: 0 title,
+# Cells are column,line from 0 at the top-left. In populated.json at 160x44 the lines are: 0 title,
 # 1 Needs you title, 3-6 its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 8 Ready for
 # review title, 10-12 its rows (ship-alpha #41, api#8, ship-gamma #7), 14 In flight title, 15 its
 # column header, 16-22 its rows (ship-alpha, tmux-task, remote-sm group, scout-beta, hyperion group,
 # ship-gamma, ship-old), 26 Findings title, 28-30 its rows (scout-beta, mobile-fix, old-scout),
-# 32 Landed title, 34-37 its rows (etl-index, ship-old, mobile-fix, old-scout), 39 footer.
+# 32 Landed title, 34-37 its rows (etl-index, ship-old, mobile-fix, old-scout), 39 To review title,
+# 41 its empty text, 43 footer.
 #
 # A left click selects: the pane gets the focus border and the row the inverse style, the same as
 # tab/j/k would leave them (falsify: drop the 'select' case from applyAction, or the row zones from
@@ -1846,7 +2305,7 @@ assert_contains "$frame_m" "would view /fixture/firstmate/data/scout-beta/report
 tags_m=$(render populated.json --mouse "click:30,15" --tags) || fail "mouse empty click: render exited non-zero"
 assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[3\].*In flight \(7\)' "click on In flight's column header focuses In flight"
 # A click on the title line or the footer changes nothing (falsify: give those lines a zone).
-frame_m=$(render populated.json --mouse "click:30,0 click:30,39") || fail "mouse chrome click: render exited non-zero"
+frame_m=$(render populated.json --mouse "click:30,0 click:30,43") || fail "mouse chrome click: render exited non-zero"
 if [ "$frame_m" = "$frame" ]; then pass; else fail "a click on the title line or footer changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # The narrow list has zones too (falsify: drop the zones from renderList).
 tags_m=$(render narrow.json --mouse "click:10,12" --tags) || fail "mouse narrow click: render exited non-zero"
@@ -1859,7 +2318,7 @@ assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[1\].*Needs you \(1\)' "list 
 # lib/controller.mjs, not by the terminal library (falsify: drop the lastClick check from mouseAction, or
 # stamp the two dblclick events with different times in driveOnce).
 frame_m=$(render_mouse populated.json "dblclick:30,10") || fail "mouse dblclick review: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/41" "double-click on the first Ready for review row opens its PR, as enter does"
+assert_opened "https://github.com/acme/widgets/pull/41" "double-click on the first My PRs row opens its PR, as enter does"
 assert_contains "$frame_m" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "double-click: the footer names the opened PR"
 frame_m=$(render_mouse populated.json "click:30,11 click:30,11") || fail "mouse two clicks: render exited non-zero"
 assert_not_opened "two single clicks a second apart on one row open nothing"
@@ -1991,8 +2450,8 @@ frame_m=$(render populated.json --no-mouse --mouse "click:30,29 x") || fail "--n
 assert_contains "$frame_m" "Needs you (3, 1 hidden)" "--no-mouse: the key tokens of the list still apply (x hid the row the keyboard selection was on)"
 assert_contains "$frame_m" "hidden scout-beta" "--no-mouse: the click was ignored, so x acted on the first Needs you row, not the clicked Findings row"
 # The landing page has no mouse targets (falsify: give renderLanding zones).
-frame_l=$(render populated.json --keys "1,2,3,4,5")
-frame_m=$(render populated.json --keys "1,2,3,4,5" --mouse "click:30,20 dblclick:30,20 wheel:down:30,20") || fail "mouse on landing: render exited non-zero"
+frame_l=$(render populated.json --keys "1,2,3,4,5,6")
+frame_m=$(render populated.json --keys "1,2,3,4,5,6" --mouse "click:30,20 dblclick:30,20 wheel:down:30,20") || fail "mouse on landing: render exited non-zero"
 if [ "$frame_m" = "$frame_l" ]; then pass; else fail "mouse events changed the landing page: $(diff <(printf '%s\n' "$frame_l") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # A click while the help is up closes it (falsify: ignore mouse events under view.help).
 frame_m=$(render populated.json --keys "?" --mouse "click:30,29") || fail "mouse click on help: render exited non-zero"
@@ -2041,10 +2500,10 @@ assert_row "$frame_cw" '^│ STATE  KEY       ID {24}WHAT ' "column widths: STAT
 assert_widths "$frame_cw" 160 "column widths: lines are 160 columns"
 assert_lines "$frame_cw" 40 "column widths: 40 lines"
 
-# Dragging a boundary. populated.json at 160x40: Needs you's column header is line 2 and its columns
+# Dragging a boundary. populated.json at 160x44: Needs you's column header is line 2 and its columns
 # start at x=2 STATE (7 wide), 11 KEY (9), 22 ID (13), 37 WHAT (96), 135 REPO (12), 149 HOME (4),
 # 155 AGE (3), two blank cells between neighbours, so the ID/WHAT gutter is cells 35-36 and a left press
-# on cells 34 to 37 takes that boundary. Ready for review's header is line 9 with CHECKS (8), STATUS
+# on cells 34 to 37 takes that boundary. My PRs' header is line 9 with CHECKS (8), STATUS
 # (9), ID (10) and its ID/TITLE gutter at 33-34. In the header line a column W cells wide reads as its
 # label followed by W blank cells (its padding plus the gutter) before the next label.
 # A drag from 35 to 45 widens ID by ten cells and WHAT gives up exactly those ten: the columns right of
@@ -2130,11 +2589,11 @@ assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "and changes nothi
 # dropped; the review pane's own column set resizes and resets the same way (falsify: drop the = case
 # from keyAction, the reset-columns entry from settingsEntries, or the review pane's header geometry).
 frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,2->45 drag:33,9->43") || fail "two drags: render exited non-zero"
-assert_row "$frame_d" '^│ CHECKS    STATUS     ID {20}TITLE ' "Ready for review's ID/TITLE boundary drags its ID to 20"
-assert_file_contains "$vs_cols" '"review": {' "the review pane's width is saved under its own id"
+assert_row "$frame_d" '^│ CHECKS    STATUS     ID {20}TITLE ' "My PRs' ID/TITLE boundary drags its ID to 20"
+assert_file_contains "$vs_cols" '"mine": {' "the review pane's width is saved under its own id"
 frame_d=$(render populated.json --view-state "$vs_cols" --keys "=") || fail "reset all: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "= resets Needs you's ID"
-assert_row "$frame_d" '^│ CHECKS    STATUS     ID {10}TITLE ' "= resets Ready for review's ID"
+assert_row "$frame_d" '^│ CHECKS    STATUS     ID {10}TITLE ' "= resets My PRs' ID"
 assert_contains "$frame_d" "column widths reset: 2 custom widths dropped" "= counts the widths it dropped"
 assert_file_not_contains "$vs_cols" '"id"' "= empties the saved widths"
 frame_d=$(render populated.json --keys "=") || fail "reset none: render exited non-zero"
@@ -2146,7 +2605,7 @@ frame_s=$(render populated.json --keys ".") || fail "settings entry: render exit
 assert_row "$frame_s" '^   Reset column widths +every pane back to its automatic widths \(= on the board\) +$' "the Settings page lists the entry"
 # A saved file naming a pane or column the board does not know, or a width that is not a positive
 # integer, loses only that entry (falsify: drop sanitizeColumns from loadViewState).
-printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":[],"columns":{"needs":{"id":30,"bogus":9},"nope":{"id":5},"review":{"id":"wide"}}}\n' > "$vs_cols"
+printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":[],"columns":{"needs":{"id":30,"bogus":9},"nope":{"id":5},"mine":{"id":"wide"}}}\n' > "$vs_cols"
 frame_d=$(render populated.json --view-state "$vs_cols" --keys "tab,tab,tab,tab,x") || fail "hand-written columns: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {30}WHAT ' "a saved width for a known pane and column applies"
 assert_row "$frame_d" '^│ CHECKS    STATUS     ID {10}TITLE ' "a width that is not a number is ignored"
@@ -2231,6 +2690,7 @@ if "$BOARD" --help 2>/dev/null | grep -Fq -- "--render-once"; then pass; else fa
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--keys"; then pass; else fail "wrapper --help lists --keys"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--viewer-cmd"; then pass; else fail "wrapper --help lists --viewer-cmd"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--view-state"; then pass; else fail "wrapper --help lists --view-state"; fi
+if "$BOARD" --help 2>/dev/null | grep -Fq -- "--config <path>"; then pass; else fail "wrapper --help lists --config"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "-firstmate"; then fail "wrapper --help still lists a firstmate pane subcommand"; else pass; fi
 # Bare, `open` and `run` are one command: with the same flags all three print the same
 # frame, and it is the frame the suite checked above (falsify: drop the open -> run mapping
@@ -2296,6 +2756,12 @@ if printf '%s\n' "$help" | grep -Fq -- "running from a checkout at $ROOT"; then 
 # entry keeps running the board in place (falsify: edit either command in herdr-plugin.toml).
 if grep -Fq -- '"open", "--detached"]' "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml open action carries --detached"; fi
 if grep -Fq -- '"../firstmate-tui.sh", "open"]' "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then pass; else fail "herdr-plugin.toml pane entry runs the board in place with the public subcommand"; fi
+if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --config 2>&1); then
+  fail "--config without a value should exit non-zero"
+else
+  pass
+fi
+if printf '%s\n' "$out" | grep -Fq -- "--config needs a value"; then pass; else fail "--config without a value is named in the error: $out"; fi
 if out=$("$BOARD" --render-once --fixture "$FIX/empty.json" --no-herdr --view-state 2>&1); then
   fail "--view-state without a value should exit non-zero"
 else
@@ -2336,6 +2802,19 @@ PATH="$FAKE_NODE:$PATH" FM_BOARD_TEST_NODE_LOG="$NODE_LOG" FM_BOARD_TEST_NODE_FI
 status=$?
 if [ "$status" -eq 3 ]; then pass; else fail "relaunch: exit 3 should pass through, got $status"; fi
 assert_lines "$(cat "$NODE_LOG" 2>/dev/null)" 1 "exit 3 runs the board once and relaunches nothing"
+# A live run with herdr answering gets both files in herdr's plugin config directory, view-state.json
+# and config.json, unless the flag was given; the fake node logs the argv the launcher built (falsify:
+# drop the --config line from the plugin-directory block in bin/firstmate-tui.sh).
+rm -f "$NODE_LOG"
+FM_HOME="$FAKE_HOME" fake_herdr_env env PATH="$FAKE_NODE:$FAKE_BIN:$PATH" FM_BOARD_TEST_NODE_LOG="$NODE_LOG" FM_BOARD_TEST_NODE_FIRST_EXIT=0 "$BOARD" open --no-prs >/dev/null 2>&1
+assert_contains "$(cat "$NODE_LOG" 2>/dev/null)" "--view-state $PLUGIN_DIR/view-state.json" "a live run passes the plugin directory's view-state.json"
+assert_contains "$(cat "$NODE_LOG" 2>/dev/null)" "--config $PLUGIN_DIR/config.json" "a live run passes the plugin directory's config.json the same way"
+assert_file_contains "$HERDR_LOG" "herdr plugin config-dir firstmate.board" "the directory came from herdr plugin config-dir"
+rm -f "$NODE_LOG"
+FM_HOME="$FAKE_HOME" fake_herdr_env env PATH="$FAKE_NODE:$FAKE_BIN:$PATH" FM_BOARD_TEST_NODE_LOG="$NODE_LOG" FM_BOARD_TEST_NODE_FIRST_EXIT=0 "$BOARD" open --no-prs --config /tmp/own.json >/dev/null 2>&1
+assert_contains "$(cat "$NODE_LOG" 2>/dev/null)" "--config /tmp/own.json" "an explicit --config is passed through"
+assert_count "$(cat "$NODE_LOG" 2>/dev/null)" "--config" 1 "an explicit --config is not doubled by the plugin directory's"
+assert_contains "$(cat "$NODE_LOG" 2>/dev/null)" "--view-state $PLUGIN_DIR/view-state.json" "an explicit --config still gets the plugin directory's view-state.json"
 
 # ---------------------------------------------------- real terminal input
 # The one section that runs the interactive board itself, on a pseudo-terminal through tests/pty-keys.py,
@@ -2373,7 +2852,7 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   done
   [ -n "$pty_terms" ] || pty_terms=xterm-256color
   for t in $pty_terms; do
-    # One 0x0d on the first Ready for review row (tab moves there once the row is drawn): exactly one opener
+    # One 0x0d on the first My PRs row (tab moves there once the row is drawn): exactly one opener
     # call, made by the board (the trace names one pid and the URL as the only argument).
     run_pty "$t" "cr-$t" "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\r" "wait:opened$PTY_URL" "sleep:0.4" "send:q" exit
     pty_ok "cr-$t" "pty $t: one Enter on a PR row reaches the opened notice and q quits"

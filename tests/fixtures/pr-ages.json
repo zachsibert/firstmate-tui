@@ -1,5 +1,5 @@
 {
-  "_comment": "Ready for review AGE sources. now is 2026-09-16T12:00:00Z = epoch 1789560000; six main-home tasks each record one PR on acme/api. Live candidates: 101 created_at 3h ago (AGE 3h, no marker); 102 no creation time (status-log age 2d~); 103 created_at in the future (falls back, 4h~); 104 created_at malformed (falls back, 30m~); 105 carries the camel-case createdAt 5d ago (5d); 107 has no task and created_at 2h ago (api#107, 2h); 108 has no task and no creation time (-, no marker since there is no age at all). Recorded PR 106 is not in the live list (unlisted, 45m~). With --no-prs every recorded row shows its status-log age with ~.",
+  "_comment": "My PRs AGE sources. now is 2026-09-16T12:00:00Z = epoch 1789560000; six main-home tasks each record one PR on acme/api. Live candidates: 101 created_at 3h ago (AGE 3h, no marker); 102 no creation time (status-log age 2d~); 103 created_at in the future (falls back, 4h~); 104 created_at malformed (falls back, 30m~); 105 carries the camel-case createdAt 5d ago (5d); 107 has no task and created_at 2h ago (api#107, 2h); 108 has no task and no creation time (-, no marker since there is no age at all). Recorded PR 106 is not in the live list (unlisted, 45m~). With --no-prs every recorded row shows its status-log age with ~.",
   "now": "2026-09-16T12:00:00Z",
   "cols": 160,
   "rows": 40,

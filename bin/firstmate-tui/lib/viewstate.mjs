@@ -1,6 +1,7 @@
-// lib/viewstate.mjs - the one file the board owns besides the pane record:
-// which rows the captain hid (`x`), which panes he switched off (`1`-`5`) and
-// the column widths he dragged (lib/controller.mjs). Hiding is view state,
+// lib/viewstate.mjs - the file the board owns besides the pane record and its
+// config (lib/config.mjs): which rows the captain hid (`x`), which panes he
+// switched off (`1`-`6`) and the column widths he dragged
+// (lib/controller.mjs). Hiding is view state,
 // not firstmate state: firstmate retires Done rows on its own (done_keep per
 // home, archived to data/done-archive.md), so nothing here is ever written
 // into FM_HOME, a project or a state directory.
@@ -25,13 +26,27 @@
 // (COLUMN_KEYS); a pane or column the board does not know, or a width that is
 // not a positive integer, is dropped on read, so an older or a newer board
 // reading the file loses nothing else. The `columns` key was added after the
-// first release and is optional on read.
+// first release and is optional on read. Up to 0.3.x the second pane's id was
+// `review` (Ready for review); a file written then is read with that id
+// mapped to `mine` in every three places, so the captain's hidden rows,
+// hidden pane and dragged widths survive the rename.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { COLUMN_KEYS, PANES } from './layout.mjs';
 
 export const VIEW_STATE_SCHEMA = 'fm-board-view-state.v1';
+
+const RENAMED_PANES = { review: 'mine' };
+
+function paneIdOf(id) {
+  return RENAMED_PANES[id] || id;
+}
+
+function renameHideKey(key) {
+  const i = key.indexOf(':');
+  return i > 0 ? `${paneIdOf(key.slice(0, i))}${key.slice(i)}` : key;
+}
 
 export function defaultViewStatePath(env = process.env) {
   const base = env.XDG_CONFIG_HOME && env.XDG_CONFIG_HOME.startsWith('/') ? env.XDG_CONFIG_HOME : env.HOME ? `${env.HOME.replace(/\/+$/, '')}/.config` : null;
@@ -66,7 +81,7 @@ export function sanitizeColumns(doc) {
   const out = {};
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return out;
   for (const pane of PANES) {
-    const cols = doc[pane.id];
+    const cols = doc[pane.id] || Object.entries(RENAMED_PANES).filter(([, to]) => to === pane.id).map(([from]) => doc[from]).find(Boolean);
     if (!cols || typeof cols !== 'object' || Array.isArray(cols)) continue;
     for (const key of COLUMN_KEYS) {
       const w = cols[key];
@@ -99,8 +114,8 @@ export function loadViewState(path) {
   }
   if (!doc || typeof doc !== 'object') return { state, error: `${path}: not an object` };
   if (doc.schema && doc.schema !== VIEW_STATE_SCHEMA) return { state, error: `${path}: unexpected schema ${doc.schema}` };
-  for (const k of Array.isArray(doc.hidden) ? doc.hidden : []) if (typeof k === 'string' && k) state.hidden.add(k);
-  for (const p of Array.isArray(doc.hidden_panes) ? doc.hidden_panes : []) if (typeof p === 'string' && p) state.hiddenPanes.add(p);
+  for (const k of Array.isArray(doc.hidden) ? doc.hidden : []) if (typeof k === 'string' && k) state.hidden.add(renameHideKey(k));
+  for (const p of Array.isArray(doc.hidden_panes) ? doc.hidden_panes : []) if (typeof p === 'string' && p) state.hiddenPanes.add(paneIdOf(p));
   state.columns = sanitizeColumns(doc.columns);
   return { state, error: null };
 }

@@ -4,22 +4,29 @@
 
 import { width } from './text.mjs';
 
+// The six panes in screen order. To review was added after the first five
+// and sits last so the keys 1-5 and every saved view-state file keep their
+// meaning (hidden_panes stores pane ids; the new id simply joins the set).
 export const PANES = [
   { id: 'needs', title: 'Needs you', empty: 'no captain decisions, holds or blocked workers' },
-  { id: 'review', title: 'Ready for review', empty: 'no recorded pull requests' },
+  { id: 'mine', title: 'My PRs', empty: 'no pull requests of yours' },
   { id: 'inflight', title: 'In flight', empty: 'no workers in flight' },
   { id: 'findings', title: 'Findings', empty: 'no scout reports' },
   { id: 'landed', title: 'Landed', empty: 'nothing landed yet' },
+  { id: 'toreview', title: 'To review', empty: 'no pull requests waiting for your review' },
 ];
+
+// The two panes that draw pull requests (CHECKS, STATUS, ID, TITLE, BASE, AGE).
+export const PR_PANES = new Set(['mine', 'toreview']);
 
 export const MIN_ROWS = 20;
 export const MIN_COLS = 40;
 export const LIST_BREAKPOINT = 80; // below: one scrolling list with section headers
-export const WIDE_BREAKPOINT = 100; // below: drop REPO and AGE (Ready for review: drop BASE, keep AGE)
+export const WIDE_BREAKPOINT = 100; // below: drop REPO and AGE (the PR panes: drop BASE, keep AGE)
 
 // Column labels per pane for the two narrow leading columns.
-const TAG_LABEL = { needs: 'STATE', review: 'CHECKS', inflight: 'STATE', findings: 'KIND', landed: 'VERB' };
-const EXTRA_LABEL = { needs: 'KEY', review: 'STATUS', inflight: 'HERDR', findings: 'VERB', landed: 'DATE' };
+const TAG_LABEL = { needs: 'STATE', mine: 'CHECKS', toreview: 'CHECKS', inflight: 'STATE', findings: 'KIND', landed: 'VERB' };
+const EXTRA_LABEL = { needs: 'KEY', mine: 'STATUS', toreview: 'STATUS', inflight: 'HERDR', findings: 'VERB', landed: 'DATE' };
 
 export function layoutMode(cols) {
   return cols < LIST_BREAKPOINT ? 'list' : 'panes';
@@ -51,7 +58,7 @@ export const COLUMN_KEYS = ['tag', 'extra', 'id', 'text', 'repo', 'home', 'base'
 //
 //   shared            STATE INFO ID WHAT (flex) REPO HOME AGE; below
 //                     WIDE_BREAKPOINT REPO and AGE go
-//   Ready for review  CHECKS STATUS ID TITLE (flex) BASE AGE: the PR's title,
+//   My PRs, To review CHECKS STATUS ID TITLE (flex) BASE AGE: the PR's title,
 //                     base branch and age, no REPO or HOME (repo, home and url
 //                     stay on the row for enter and the notices); below
 //                     WIDE_BREAKPOINT BASE goes and AGE stays, since the age is
@@ -60,9 +67,9 @@ function columnSpec(cols, paneId) {
   const mode = layoutMode(cols);
   const wide = cols >= WIDE_BREAKPOINT;
   const spec = [{ key: 'tag', label: mode === 'panes' ? TAG_LABEL[paneId] || 'STATE' : 'STATE', cap: 14 /* "awaiting merge" */ }];
-  if (mode === 'panes') spec.push({ key: 'extra', label: EXTRA_LABEL[paneId] || 'INFO', cap: 16 });
+  if (mode === 'panes') spec.push({ key: 'extra', label: EXTRA_LABEL[paneId] || 'INFO', cap: 17 /* "CHANGES REQUESTED" */ });
   spec.push({ key: 'id', label: 'ID', cap: COLUMN_CAP });
-  if (mode === 'panes' && paneId === 'review') {
+  if (mode === 'panes' && PR_PANES.has(paneId)) {
     spec.push({ key: 'text', label: 'TITLE', flex: true });
     if (wide) spec.push({ key: 'base', label: 'BASE', cap: COLUMN_CAP });
     spec.push({ key: 'age', label: 'AGE', cap: 6, align: 'right' });
@@ -168,12 +175,13 @@ export function maxWidth(spec, columnId) {
   return col.width + Math.max(0, flex.width - minWidth(flex));
 }
 
-// Content heights (rows inside the borders) for the five panes. Every shown
-// pane gets at least one content row; spare rows go where the demand is, then
-// to In flight and Needs you, which are the panes the captain watches most.
-// `visible[i] === false` switches pane i off (the 1-5 keys): it draws nothing
-// and its rows go to the panes still shown. The result always has one entry
-// per pane, 0 for a hidden one.
+// Content heights (rows inside the borders) for the six panes. Every shown
+// pane gets at least one content row; spare rows go where the demand is (Needs
+// you, In flight and the two PR panes first), then to In flight and Needs you,
+// which are the panes the captain watches most. `visible[i] === false`
+// switches pane i off (the 1-6 keys): it draws nothing and its rows go to the
+// panes still shown. The result always has one entry per pane, 0 for a hidden
+// one.
 export function paneHeights(totalRows, demands, visible = []) {
   const rows = Math.max(totalRows, MIN_ROWS);
   const shown = PANES.map((_, i) => visible[i] !== false);
@@ -183,7 +191,7 @@ export function paneHeights(totalRows, demands, visible = []) {
   let spare = rows - chrome - borders - shownCount;
   const heights = PANES.map((_, i) => (shown[i] ? 1 : 0));
   const want = PANES.map((_, i) => Math.max(1, demands[i] || 0));
-  const priority = [0, 2, 1, 3, 4].filter((i) => shown[i]);
+  const priority = [0, 2, 1, 5, 3, 4].filter((i) => shown[i]);
   let progressed = true;
   while (spare > 0 && progressed) {
     progressed = false;
@@ -196,7 +204,7 @@ export function paneHeights(totalRows, demands, visible = []) {
       }
     }
   }
-  for (const i of [2, 0, 1, 3, 4]) {
+  for (const i of [2, 0, 1, 5, 3, 4]) {
     if (spare <= 0) break;
     if (!shown[i]) continue;
     heights[i] += spare;

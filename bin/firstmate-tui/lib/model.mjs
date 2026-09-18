@@ -1,4 +1,4 @@
-// lib/model.mjs - pure projection from firstmate facts to the five board panes.
+// lib/model.mjs - pure projection from firstmate facts to the six board panes.
 //
 // Input (one `facts` object, built by lib/sources.mjs from live reads or by
 // index.mjs from a --fixture file):
@@ -10,14 +10,23 @@
 //   ledgers[]     one per secondmate home: { id, home, remote, cached, summary,
 //                 error, generatedAt } where summary is fm-secondmate-home-summary.v1
 //   herdr         { state, detail, agents: { <pane-id>: { agent_status, title } } }
-//   prs           { enabled, fetchedAt, error, candidate_prs[] } from the live
-//                 PR fetch in lib/sources.mjs (enabled unless --no-prs; fetchedAt
-//                 is null until the first fetch of a session lands). A candidate
-//                 is {num, repo, task, url, review, mergeable, checks} plus,
-//                 from gh only (absent from the fm-bearings-snapshot.sh
-//                 fallback): created_at, merged_at, closed_at (ISO 8601),
-//                 title, base (the base branch), draft (boolean) and state
-//                 (OPEN, MERGED or CLOSED)
+//   prs           { enabled, fetchedAt, error, candidate_prs[], identity, mine,
+//                 toreview } from the live PR fetch in lib/sources.mjs (enabled
+//                 unless --no-prs; fetchedAt is null until the first fetch of a
+//                 session lands). A candidate is {num, repo, task, url, review,
+//                 mergeable, checks} plus, from gh only (absent from the
+//                 fm-bearings-snapshot.sh fallback): created_at, merged_at,
+//                 closed_at (ISO 8601), title, base (the base branch), draft
+//                 (boolean), state (OPEN, MERGED or CLOSED), author (a login or
+//                 null), labels (strings), requested (the identity was asked
+//                 to review it), my_review (APPROVED, CHANGES_REQUESTED or
+//                 null: the identity's own latest review) and pane ('mine' or
+//                 'toreview'; absent means 'mine'). identity is { login,
+//                 source, reason } (lib/identity.mjs; unknown when login is
+//                 null). mine and toreview each carry that pane's own
+//                 { fetchedAt, error } (falling back to the top-level pair
+//                 when absent), toreview also `scope` (the repositories
+//                 searched) and `unavailable` (why it cannot fetch at all)
 //   refresh       the schedule for the title line, or null when nothing is
 //                 scheduled (a one-shot render): { nextAt, refreshing,
 //                 failedAt, failed, loadingFrame }, the times in epoch seconds,
@@ -33,16 +42,16 @@
 //                 you (the --all-homes-needs flag); default off, main home only
 //   hidden        Set of row hide keys the captain hid with `x` (view state)
 //   showHidden    list hidden rows anyway, marked "(hidden)" (the `H` toggle)
-//   hiddenPanes   Set of pane ids switched off with `1`-`5`
+//   hiddenPanes   Set of pane ids switched off with `1`-`6`
 //
-// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading } x5 ], meta },
+// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading } x6 ], meta },
 // where header is `Title (count[, n hidden])` plus ` (stale)` when that pane's
 // own data failed to refresh, loading is null or { source, text } while the
 // pane still waits for its first data (paneLoading below; text is the spinner
 // line the renderer draws), and meta carries the title line's refresh label
 // ({ text, failed }) and herdr warning ('' while the link is up).
 // Every row carries tag, extra, id, text, repo, home, base, age (display
-// fields; base is the PR's base branch, drawn by Ready for review only) plus
+// fields; base is the PR's base branch, drawn by the two PR panes only) plus
 // name (the undecorated id for notices), homeId (main or the secondmate id),
 // hideKey (pane:home:name, plus the completion date for Landed), ageSeconds
 // (numeric; `age` is its short form, with a trailing `~` when ageFallback says
@@ -58,6 +67,7 @@
 
 import { PANES } from './layout.mjs';
 import { basename, clean, fmtAge, parseTime, relativeTo, repoFromUrl } from './text.mjs';
+import { identityKnown } from './identity.mjs';
 
 const MAIN_HOME_LABEL = 'main';
 
@@ -318,10 +328,16 @@ function needsRows(facts, opts) {
     .map((x) => x.r);
 }
 
-// --------------------------------------------------------- Ready for review
+// ------------------------------------------------------ My PRs, To review
 //
-// One row per pull request GitHub lists for the candidate repositories, plus
-// the recorded PRs of unfinished tasks the fetch did not list. A PR stays
+// Two panes over one live fetch (lib/sources.mjs), each row stamped with the
+// pane it belongs to.
+//
+// My PRs: every open pull request the identity authored, in any repository
+// the account can see, plus the recorded PRs of unfinished fleet tasks
+// whatever their author (a worker's PR is the captain's to look at before
+// the team sees it), plus PRs of either kind that finished inside the window.
+// A recorded PR the fetch did not return keeps a '-' STATUS row. A PR stays
 // listed while it is open and, once merged or closed, for
 // TERMINAL_WINDOW_SECONDS after it finished, so the captain sees what landed
 // or was abandoned since the last look; then it leaves the pane. A PR a
@@ -330,19 +346,35 @@ function needsRows(facts, opts) {
 // appears only through its fetched record, and only while that record is
 // terminal and inside the window: the task is finished, so the row is a notice
 // that its PR landed, not open work.
+//
+// To review: the open PRs in the To review scope (the candidate repositories
+// plus the config file's) where the identity is a requested reviewer,
+// directly or through a team, and not the author, filtered by the per
+// repository label rule at fetch time, plus those that finished inside the
+// window. STATUS reads APPROVED or CHANGES REQUESTED when the identity's own
+// latest review says so, else the same words as My PRs.
+//
+// With the identity unknown neither pane can be built: each shows one row
+// pointing at the Settings page.
 
 export const TERMINAL_WINDOW_SECONDS = 12 * 3600;
 
-// The STATUS column's words, in the order the pane lists them: open work
-// first, then what finished. '-' is a recorded PR the fetch did not list (or
-// the fetch is off), whose status is unknown; it sits between the two.
-export const REVIEW_STATUSES = ['DRAFT', 'IN REVIEW', 'APPROVED', 'CLOSED', 'MERGED'];
-const STATUS_ORDER = { DRAFT: 0, 'IN REVIEW': 1, APPROVED: 2, '-': 3, CLOSED: 4, MERGED: 5 };
+// The STATUS column's words, in the order the panes list them: open work
+// first (a PR the identity already reviewed after the ones still waiting),
+// then what finished. '-' is a recorded PR the fetch did not list (or the
+// fetch is off), whose status is unknown; it sits between the two.
+export const REVIEW_STATUSES = ['DRAFT', 'IN REVIEW', 'CHANGES REQUESTED', 'APPROVED', 'CLOSED', 'MERGED'];
+const STATUS_ORDER = { DRAFT: 0, 'IN REVIEW': 1, 'CHANGES REQUESTED': 2, APPROVED: 3, '-': 4, CLOSED: 5, MERGED: 6 };
+
+export const IDENTITY_UNKNOWN_TEXT = 'identity unknown: see Settings (.)';
+export const SCOPE_EMPTY_TEXT = 'no repositories in scope: see Settings (.)';
+export const PRS_OFF_TEXT = 'PR fetch off (--no-prs)';
 
 // Recorded PRs: task records and backlog rows with a PR URL, keyed by URL, each
 // with its task id, the backlog title (the TITLE fallback for a source that
-// carries no PR titles) and whether the task's backlog row is done.
-function recordedPrs(facts) {
+// carries no PR titles) and whether the task's backlog row is done. Exported
+// for lib/sources.mjs, which looks up the ones the author search missed.
+export function recordedPrs(facts) {
   const snap = facts.snapshot || {};
   const backlogById = backlogIndex(snap);
   const out = new Map();
@@ -390,14 +422,49 @@ export function insideWindow(c, status, now) {
   return at !== null && now - at < TERMINAL_WINDOW_SECONDS;
 }
 
+// One PR pane's own fetch state: its block on facts.prs when the fetch keeps
+// one per pane, else the top-level pair (a fixture with one `error` marks
+// both panes).
+function paneFetch(prs, paneId) {
+  const own = prs && prs[paneId] && typeof prs[paneId] === 'object' ? prs[paneId] : {};
+  return {
+    fetchedAt: own.fetchedAt !== undefined ? own.fetchedAt : (prs && prs.fetchedAt) ?? null,
+    error: own.error !== undefined ? own.error : (prs && prs.error) ?? null,
+    scope: Array.isArray(own.scope) ? own.scope : null,
+    unavailable: typeof own.unavailable === 'string' && own.unavailable ? own.unavailable : null,
+  };
+}
+
+// The candidates of one pane: a row without a pane belongs to My PRs, which
+// is what every source before To review produced.
+function paneCandidates(prs, paneId) {
+  if (!prs || !prs.enabled || !Array.isArray(prs.candidate_prs)) return [];
+  return prs.candidate_prs.filter((c) => c && (c.pane || 'mine') === paneId);
+}
+
 // The CHECKS cell and the text suffix of a recorded PR the live list does not
 // carry: off, still fetching (before the first fetch of a session lands),
 // failed before any fetch landed, or fetched and simply not in the list.
 function unlistedChecks(prs) {
   if (!prs.enabled) return { tag: 'PR', note: 'checks: off (--no-prs)' };
-  if (prs.fetchedAt) return { tag: 'unlisted', note: 'checks: not fetched' };
-  if (prs.error) return { tag: 'PR', note: 'checks: fetch failed' };
+  const mine = paneFetch(prs, 'mine');
+  if (mine.fetchedAt) return { tag: 'unlisted', note: 'checks: not fetched' };
+  if (mine.error) return { tag: 'PR', note: 'checks: fetch failed' };
   return { tag: 'PR', note: 'checks: fetching' };
+}
+
+// The one row a PR pane shows while the identity is unknown: nothing can be
+// fetched for nobody, so the row points at the Settings page.
+function identityRow() {
+  return makeRow({ tag: '-', extra: '-', status: '-', id: '-', name: 'identity', text: IDENTITY_UNKNOWN_TEXT });
+}
+
+// Whether a PR pane's rows come from a fetch that needs the identity: the
+// fetch is on, gh is there to run it (without gh My PRs lists the recorded
+// PRs through the script fallback, which needs no login, and To review says
+// why it is empty) and the identity is unknown.
+function identityMissing(prs) {
+  return Boolean(prs && prs.enabled) && !paneFetch(prs, 'toreview').unavailable && !identityKnown(prs.identity);
 }
 
 // When the PR was opened, as epoch seconds, from a candidate's created_at
@@ -408,11 +475,11 @@ function prCreatedAt(c, now) {
   return created === null || created > now ? null : created;
 }
 
-// AGE in Ready for review: the time since the PR was opened when the live
-// fetch carries it, else the task's status-log age marked `~` (fetch off,
-// failed, PR not in the fetched set, no creation time, or one that does not
-// parse). The marker tells the two sources apart at a glance: a PR age is a
-// GitHub fact, the file-time age is only how long since the worker last wrote.
+// AGE in the PR panes: the time since the PR was opened when the live fetch
+// carries it, else the task's status-log age marked `~` (fetch off, failed,
+// PR not in the fetched set, no creation time, or one that does not parse).
+// The marker tells the two sources apart at a glance: a PR age is a GitHub
+// fact, the file-time age is only how long since the worker last wrote.
 function reviewAge(facts, taskById, taskId, created) {
   if (created !== null) return { ageSeconds: facts.now - created, ageFallback: false };
   const task = taskById.get(taskId);
@@ -429,38 +496,51 @@ function byNewest(a, b) {
   return aa - bb;
 }
 
-function reviewRows(facts) {
+// Status order first (open work, then unknown, then finished), newest first
+// inside a status, fetch order for a tie.
+function byStatus(rows) {
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (STATUS_ORDER[a.r.status] ?? 4) - (STATUS_ORDER[b.r.status] ?? 4) || byNewest(a.r, b.r) || a.i - b.i)
+    .map((x) => x.r);
+}
+
+// One fetched PR as a row: the task id when a fleet task recorded the PR (or
+// its head branch names one), else repo#number; the title from the fetch,
+// else the recorded task's, else the URL.
+function fetchedPrRow(facts, taskById, c, rec, status) {
+  const taskId = rec ? rec.task : c.task && c.task !== '-' ? c.task : '-';
+  return makeRow({
+    tag: c.checks || 'none',
+    extra: status,
+    status,
+    id: taskId === '-' ? `${basename(c.repo)}#${c.num}` : taskId,
+    text: c.title || (rec && rec.title) || c.url,
+    base: c.base || '-',
+    repo: c.repo,
+    url: c.url,
+    ...reviewAge(facts, taskById, taskId, prCreatedAt(c, facts.now)),
+  });
+}
+
+function mineRows(facts) {
+  const prs = facts.prs || { enabled: false };
+  if (identityMissing(prs)) return [identityRow()];
   const rows = [];
   const recorded = recordedPrs(facts);
   const byUrl = new Map(recorded.map((r) => [r.url, r]));
   const snap = facts.snapshot || {};
   const taskById = new Map((Array.isArray(snap.tasks) ? snap.tasks : []).map((t) => [t.id, t]));
-  const prs = facts.prs || { enabled: false };
   const unlisted = unlistedChecks(prs);
   const seen = new Set();
-  if (prs.enabled && Array.isArray(prs.candidate_prs)) {
-    for (const c of prs.candidate_prs) {
-      seen.add(c.url);
-      const status = prStatus(c);
-      const terminal = status === 'MERGED' || status === 'CLOSED';
-      if (terminal && !insideWindow(c, status, facts.now)) continue;
-      const rec = byUrl.get(c.url);
-      if (rec && rec.done && !terminal) continue;
-      const taskId = rec ? rec.task : c.task && c.task !== '-' ? c.task : '-';
-      rows.push(
-        makeRow({
-          tag: c.checks || 'none',
-          extra: status,
-          status,
-          id: taskId === '-' ? `${basename(c.repo)}#${c.num}` : taskId,
-          text: c.title || (rec && rec.title) || c.url,
-          base: c.base || '-',
-          repo: c.repo,
-          url: c.url,
-          ...reviewAge(facts, taskById, taskId, prCreatedAt(c, facts.now)),
-        }),
-      );
-    }
+  for (const c of paneCandidates(prs, 'mine')) {
+    seen.add(c.url);
+    const status = prStatus(c);
+    const terminal = status === 'MERGED' || status === 'CLOSED';
+    if (terminal && !insideWindow(c, status, facts.now)) continue;
+    const rec = byUrl.get(c.url);
+    if (rec && rec.done && !terminal) continue;
+    rows.push(fetchedPrRow(facts, taskById, c, rec, status));
   }
   for (const r of recorded) {
     if (seen.has(r.url) || r.done) continue;
@@ -478,12 +558,50 @@ function reviewRows(facts) {
       }),
     );
   }
-  // Status order first (open work, then unknown, then finished), newest first
-  // inside a status, fetch order for a tie.
-  return rows
-    .map((r, i) => ({ r, i }))
-    .sort((a, b) => (STATUS_ORDER[a.r.status] ?? 3) - (STATUS_ORDER[b.r.status] ?? 3) || byNewest(a.r, b.r) || a.i - b.i)
-    .map((x) => x.r);
+  return byStatus(rows);
+}
+
+// The STATUS cell of a To review row: the identity's own verdict when it
+// gave one and the PR is still open, else the PR's own status.
+export function toReviewStatus(c) {
+  const status = prStatus(c);
+  if (status === 'MERGED' || status === 'CLOSED' || status === 'DRAFT') return status;
+  if (c.my_review === 'APPROVED') return 'APPROVED';
+  if (c.my_review === 'CHANGES_REQUESTED') return 'CHANGES REQUESTED';
+  return status;
+}
+
+function toReviewRows(facts) {
+  const prs = facts.prs || { enabled: false };
+  if (identityMissing(prs)) return [identityRow()];
+  const rows = [];
+  const snap = facts.snapshot || {};
+  const taskById = new Map((Array.isArray(snap.tasks) ? snap.tasks : []).map((t) => [t.id, t]));
+  const login = prs.identity ? prs.identity.login : null;
+  for (const c of paneCandidates(prs, 'toreview')) {
+    // The fetch filters authorship, scope and labels; the author check is
+    // repeated here so a fixture row of the captain's own never lists.
+    if (login && c.author === login) continue;
+    const status = toReviewStatus(c);
+    const terminal = status === 'MERGED' || status === 'CLOSED';
+    if (terminal && !insideWindow(c, status, facts.now)) continue;
+    rows.push(fetchedPrRow(facts, taskById, c, null, status));
+  }
+  return byStatus(rows);
+}
+
+// The empty text of a PR pane, by what stands between it and its rows: the
+// fetch switched off, no way to fetch at all (To review without gh), an empty
+// To review scope, else the pane's own words.
+function prPaneEmpty(facts, pane) {
+  const prs = facts.prs || { enabled: false };
+  if (!prs.enabled) return pane.id === 'toreview' ? PRS_OFF_TEXT : pane.empty;
+  if (pane.id === 'toreview') {
+    const own = paneFetch(prs, 'toreview');
+    if (own.unavailable) return `${own.unavailable}: To review needs the GitHub CLI`;
+    if (own.scope && own.scope.length === 0) return SCOPE_EMPTY_TEXT;
+  }
+  return pane.empty;
 }
 
 // ---------------------------------------------------------------- In flight
@@ -908,6 +1026,51 @@ function landedRows(facts) {
   return rows.sort((a, b) => (a.ageSeconds ?? Infinity) - (b.ageSeconds ?? Infinity));
 }
 
+// ---------------------------------------------------------------- PR facts
+// The facts.prs shape across a session, shared by lib/app.mjs and the live
+// one-shot render in index.mjs.
+
+// The PR facts of a session start: nothing fetched, nothing failed, both
+// panes waiting.
+export function initialPrs(enabled, identity = null) {
+  return { enabled, fetchedAt: null, error: null, candidate_prs: [], identity, mine: { fetchedAt: null, error: null }, toreview: { fetchedAt: null, error: null, scope: null, unavailable: null } };
+}
+
+// Fold one fetch (lib/sources.mjs fetchPrs: { mine, toreview, note }) into the
+// previous PR facts at `at`: a pane whose searches failed keeps its previous
+// rows and records the failure, a pane that answered replaces them. The
+// top-level error names the first failing pane for the title line; the
+// per-pane errors mark the pane titles stale.
+export function mergePrs(prev, fetched, at, identity) {
+  const keep = (paneId) => (Array.isArray(prev.candidate_prs) ? prev.candidate_prs : []).filter((c) => c && (c.pane || 'mine') === paneId);
+  const pane = (paneId) => {
+    const r = fetched[paneId] || { rows: [], error: null };
+    const before = prev[paneId] || {};
+    if (r.error) return { rows: keep(paneId), state: { ...before, error: r.error, scope: r.scope ?? before.scope ?? null, unavailable: r.unavailable ?? null } };
+    return { rows: r.rows || [], state: { fetchedAt: at, error: null, scope: r.scope ?? null, unavailable: r.unavailable ?? null } };
+  };
+  const mine = pane('mine');
+  const toreview = pane('toreview');
+  return {
+    enabled: true,
+    fetchedAt: mine.state.fetchedAt ?? null,
+    error: mine.state.error || toreview.state.error || null,
+    candidate_prs: [...mine.rows, ...toreview.rows],
+    identity,
+    mine: mine.state,
+    toreview: toreview.state,
+  };
+}
+
+// The footer's words for the failures of one fetch, or null: each failing
+// pane named once.
+export function prsFailureText(fetched) {
+  const parts = [];
+  if (fetched.mine && fetched.mine.error) parts.push(fetched.mine.error);
+  if (fetched.toreview && fetched.toreview.error && fetched.toreview.error !== (fetched.mine && fetched.mine.error)) parts.push(fetched.toreview.error);
+  return parts.length ? parts.join('; ') : null;
+}
+
 // ------------------------------------------------------------------- Header
 // The title line's herdr text: nothing while the subscription is up (or a
 // fixture block stands in for it, which the HERDR column also reads as
@@ -941,11 +1104,13 @@ export function refreshLabel(facts) {
   return { text: countdown === null ? '' : `next refresh in ${countdown}`, failed: false };
 }
 
+const PR_PANE_IDS = new Set(['mine', 'toreview']);
+
 // A pane is stale when its own data failed to refresh and the rows on screen
-// are the previous ones: Ready for review when the PR fetch failed, the other
+// are the previous ones: a PR pane when its own searches failed, the other
 // four when the snapshot failed. The title line's refresh label says when.
 function paneStale(facts, pane) {
-  if (pane.id === 'review') return Boolean(facts.prs && facts.prs.enabled && facts.prs.error);
+  if (PR_PANE_IDS.has(pane.id)) return Boolean(facts.prs && facts.prs.enabled && paneFetch(facts.prs, pane.id).error);
   return Boolean(facts.snapshotError);
 }
 
@@ -968,18 +1133,22 @@ export function spinnerGlyph(frame) {
 // What a pane is still waiting for, or null: a pane is loading only while a
 // refresh is in flight and the source it draws from has never landed in this
 // session. Needs you, In flight, Findings and Landed wait on the fleet
-// snapshot; Ready for review waits on the GitHub fetch (with --no-prs it is
-// never loading: the pane shows the off state); In flight's HERDR column comes
-// from herdr, which its spinner names only once the snapshot has landed while
-// the herdr link is still connecting. A source that landed once never loads
-// again (an empty pane reads its empty text, a refreshing pane keeps its rows),
-// and a source whose first fetch failed shows the failure text, not the
-// spinner, until a later refresh lands it.
+// snapshot; My PRs waits on the GitHub checks and To review on the GitHub
+// review requests (with --no-prs neither is ever loading: the panes show the
+// off state, and with the identity unknown they show its row); In flight's
+// HERDR column comes from herdr, which its spinner names only once the
+// snapshot has landed while the herdr link is still connecting. A source that
+// landed once never loads again (an empty pane reads its empty text, a
+// refreshing pane keeps its rows), and a source whose first fetch failed
+// shows the failure text, not the spinner, until a later refresh lands it.
 function paneLoadingSource(facts, pane) {
   if (!facts.refresh || !facts.refresh.refreshing) return null;
-  if (pane.id === 'review') {
+  if (PR_PANE_IDS.has(pane.id)) {
     const prs = facts.prs;
-    return prs && prs.enabled && !prs.fetchedAt && !prs.error ? 'GitHub checks' : null;
+    if (!prs || !prs.enabled || identityMissing(prs)) return null;
+    const own = paneFetch(prs, pane.id);
+    if (own.fetchedAt || own.error || own.unavailable) return null;
+    return pane.id === 'mine' ? 'GitHub checks' : 'GitHub review requests';
   }
   if (!facts.snapshot && !facts.snapshotError) return 'fleet snapshot';
   if (pane.id === 'inflight' && facts.herdr && facts.herdr.state === 'connecting') return 'herdr';
@@ -1030,10 +1199,11 @@ export function buildModel(facts, options = {}) {
     refresh: facts.refresh || null,
     mtime: typeof facts.mtime === 'function' ? facts.mtime : () => null,
   };
-  const builders = { needs: needsRows, review: reviewRows, inflight: inflightRows, findings: findingsRows, landed: landedRows };
+  const builders = { needs: needsRows, mine: mineRows, inflight: inflightRows, findings: findingsRows, landed: landedRows, toreview: toReviewRows };
   const panes = PANES.map((p, i) => {
     const { rows, hiddenCount } = applyHidden(p.id, builders[p.id](f, opts), opts);
-    return { id: p.id, title: p.title, key: String(i + 1), empty: p.empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden), loading: paneLoading(f, p) };
+    const empty = PR_PANE_IDS.has(p.id) ? prPaneEmpty(f, p) : p.empty;
+    return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden), loading: paneLoading(f, p) };
   });
   const homes = 1 + f.ledgers.length;
   return {

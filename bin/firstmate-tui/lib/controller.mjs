@@ -32,21 +32,21 @@
 // mid-drag ends the drag first.
 //
 // Actions on a row:
-//   enter   group row: expand or collapse; Ready for review or Needs you row
-//           with a PR URL: open it; In flight worker or Needs you worker:
-//           herdr focus; Findings row: open its report in the viewer; Landed
-//           row: the first target it has (landedTarget): its PR, else its
-//           report on this host, else its worker pane while herdr lists it,
-//           else a footer notice
+//   enter   group row: expand or collapse; My PRs, To review or Needs you
+//           row with a PR URL: open it; In flight worker or Needs you
+//           worker: herdr focus; Findings row: open its report in the viewer;
+//           Landed row: the first target it has (landedTarget): its PR, else
+//           its report on this host, else its worker pane while herdr lists
+//           it, else a footer notice
 //   l/right expand the selected group      h/left collapse it (from the group
 //           row or from one of its children; the selection lands on the group)
 //   x       hide the row (view state); on a hidden row shown by H: unhide it
 //   X       unhide every row of the current pane
 // Board-wide:
 //   H       toggle showing hidden rows (greyed, marked "(hidden)")
-//   1-5     show or hide one pane (Needs you .. Landed); 0 shows all five.
-//           Any pane may go, the last one too: with all five hidden the frame
-//           is the landing page (lib/render.mjs) and only 0-5, r, ? and q act
+//   1-6     show or hide one pane (Needs you .. To review); 0 shows all six.
+//           Any pane may go, the last one too: with all six hidden the frame
+//           is the landing page (lib/render.mjs) and only 0-6, r, ? and q act
 //   r       refresh (the snapshot and the PR checks, unless --no-prs)
 //   =       reset every column width to its automatic size (view state)
 //   .       the Settings page (lib/settings.mjs): installed version, latest
@@ -60,7 +60,7 @@ import { boundaryAt, hitTest, PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
 import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
 
-const OPEN_PANES = new Set(['review', 'needs']);
+const OPEN_PANES = new Set(['mine', 'toreview', 'needs']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
 const VIEW_PANES = new Set(['findings']);
 const LANDED_PANE = 'landed';
@@ -192,13 +192,13 @@ export function paneForKey(key) {
 // key that would otherwise move the selection or act on a row nobody can see
 // only reminds the captain how to bring a pane back; a key the board does not
 // bind stays the silent no-op it is everywhere else.
-const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', 'r', '.', '?', 'q', 'ctrl-c']);
+const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', 'r', '.', '?', 'q', 'ctrl-c']);
 const ROW_KEYS = new Set(['enter', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
 
 export function keyAction(model, view, key) {
   const pane = model.panes[view.pane];
   const row = pane && !pane.hidden ? pane.rows[view.row] || null : null;
-  if (allPanesHidden(model) && !LANDING_KEYS.has(key)) return ROW_KEYS.has(key) ? { type: 'notice', text: 'all panes hidden · 1-5 shows a pane, 0 shows all' } : { type: 'none' };
+  if (allPanesHidden(model) && !LANDING_KEYS.has(key)) return ROW_KEYS.has(key) ? { type: 'notice', text: 'all panes hidden · 1-6 shows a pane, 0 shows all' } : { type: 'none' };
   switch (key) {
     case 'q':
     case 'ctrl-c':
@@ -220,6 +220,7 @@ export function keyAction(model, view, key) {
     case '3':
     case '4':
     case '5':
+    case '6':
       return { type: 'toggle-pane', paneId: paneForKey(key), key };
     case 'x':
       if (!row) return { type: 'notice', text: 'nothing selected to hide', bad: true };
@@ -247,7 +248,7 @@ export function keyAction(model, view, key) {
       if (OPEN_PANES.has(pane.id) && row.url) return { type: 'open', row };
       if (FOCUS_PANES.has(pane.id)) return { type: 'focus', row };
       if (VIEW_PANES.has(pane.id)) return { type: 'view', row };
-      // Ready for review without a PR URL (every other pane is covered above).
+      // A PR pane without a PR URL (every other pane is covered above).
       return { type: 'notice', text: `${row.name}: no PR URL on this row`, bad: true };
     default:
       return { type: 'move', key };
@@ -649,7 +650,7 @@ function applyAction(ctx, action) {
       ctx.rebuild();
       clamp();
       ctx.persist();
-      if (allPanesHidden(ctx.model)) ctx.notice(`pane hidden: ${pane.title} · every pane hidden; 1-5 or 0 shows them`);
+      if (allPanesHidden(ctx.model)) ctx.notice(`pane hidden: ${pane.title} · every pane hidden; 1-6 or 0 shows them`);
       else ctx.notice(`pane hidden: ${pane.title} · ${action.key} or 0 shows it again`);
       return;
     }

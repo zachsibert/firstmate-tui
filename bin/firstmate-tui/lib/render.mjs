@@ -4,7 +4,7 @@
 // --render-once mode can print them plain. Nothing here touches a terminal.
 
 import { columns, GUTTER, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights } from './layout.mjs';
-import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, upgradeOffer } from './settings.mjs';
+import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, settingsInfo, upgradeOffer } from './settings.mjs';
 import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
 const H = '─';
@@ -15,7 +15,7 @@ export const HELP_LINES = [
   '',
   '  j / down     next row            k / up       previous row',
   '  tab          next pane           shift-tab    previous pane',
-  '  enter        Ready for review, Landed or a Needs-you PR row: open the PR in the browser',
+  '  enter        My PRs, To review, Landed or a Needs-you PR row: open the PR in the browser',
   '               Landed row without a PR: view its report, else focus its worker pane',
   '               In flight group row: expand or collapse it',
   '               In flight worker or Needs-you worker: focus its herdr pane',
@@ -25,9 +25,9 @@ export const HELP_LINES = [
   '  x            hide the selected row from view (x on a shown hidden row unhides it)',
   '  X            unhide every row in the current pane',
   '  H            toggle showing hidden rows, greyed and marked (hidden)',
-  '  1 - 5        show or hide a pane; each pane title carries its key: [1] Needs you',
-  '               [2] Ready for review  [3] In flight  [4] Findings  [5] Landed',
-  '  0            show every pane (with all five hidden the board lists these keys)',
+  '  1 - 6        show or hide a pane; each pane title carries its key: [1] Needs you',
+  '               [2] My PRs  [3] In flight  [4] Findings  [5] Landed  [6] To review',
+  '  0            show every pane (with all six hidden the board lists these keys)',
   '  r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)',
   '  .            settings page: installed version, latest release, upgrade or a beta',
   '               (each install asks y first; . or esc brings the board back)',
@@ -148,8 +148,8 @@ function titleLine(model, cols) {
   return fitSegments([seg(leftText, 'title'), seg(' '.repeat(gap), 'title'), ...right], cols, 'title');
 }
 
-const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  . settings  ? help  q quit';
-const FOOTER_KEYS_SHORT = ' j/k  tab  enter  l/h  x hide  H  1-5 panes  r  . settings  ? help  q quit';
+const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  . settings  ? help  q quit';
+const FOOTER_KEYS_SHORT = ' j/k  tab  enter  l/h  x hide  H  1-6 panes  r  . settings  ? help  q quit';
 const FOOTER_KEYS_MIN = ' ? help';
 const BOARD_FOOTER_HINTS = [FOOTER_KEYS, FOOTER_KEYS_SHORT, FOOTER_KEYS_MIN];
 
@@ -380,9 +380,10 @@ function renderLanding(model, cols, rows, view) {
 // (each selectable entry's line is a { kind: 'settings', entry } zone, so a
 // click can land on it). The identity
 // block, the latest-release line and the menu are laid out from the top and
-// the read-only flags follow; the confirmation line, the upgrade output and
-// the result take what is left, newest lines kept, so the installer's last
-// line and the result are always on screen.
+// the read-only flags follow, then the identity and config block
+// (settingsInfo); the confirmation line, the upgrade output and the result
+// take what is left, newest lines kept, so the installer's last line and the
+// result are always on screen.
 const SETTINGS_FOOTER = ' j/k move  enter choose  r refetch  esc/. back  ? help';
 const SETTINGS_FOOTER_BETAS = ' j/k move  enter choose  esc back  . close  r refetch  ? help';
 const SETTINGS_FOOTER_SHORT = ' j/k  enter  r  esc/. back  ? help';
@@ -460,7 +461,8 @@ function renderSettings(model, cols, rows, view) {
   const selectable = entries.filter((e) => e.selectable);
   const current = selectable[clampCursor(s)] || null;
   const currentIdx = current ? entries.indexOf(current) : 0;
-  const after = s.menu === 'main' ? s.flags.length + 1 : 0;
+  const info = s.menu === 'main' ? settingsInfo(s) : [];
+  const after = s.menu === 'main' ? s.flags.length + info.length + 2 : 0;
   const room = Math.max(3, height - head.length - after - Math.min(tail.length, 4));
   let start = 0;
   let shown = entries;
@@ -489,6 +491,10 @@ function renderSettings(model, cols, rows, view) {
     head.push(L([]));
     const flagW = Math.max(1, ...s.flags.map((f) => width(f.label)));
     for (const f of s.flags) head.push(L([seg(` ${padRight(f.label, flagW)}  `, 'dim'), seg(f.value, 'row')]));
+    // Identity, config file and the To review label rules, the same shape.
+    head.push(L([]));
+    const infoW = Math.max(1, ...info.map((f) => width(f.label)));
+    for (const f of info) head.push(L([seg(` ${padRight(f.label, infoW)}  `, 'dim'), seg(f.value, f.bad ? 'bad' : 'row')]));
   }
   head.push(L([]));
   const body = head.slice(0, height);
