@@ -20,10 +20,28 @@
 //                  found on PATH, so a test can shadow glow with a fake without
 //                  ever launching a real viewer); --expand <all|ids>
 //                  expands In flight groups; --tags prints the color tags;
-//                  --view-state <file> loads hidden rows, hidden panes and
-//                  dragged column widths from that file and saves x/X/1-6/0
-//                  changes and drags back to it (without the flag a fixture
-//                  render loads nothing and saves nothing); --config <file>
+//                  --view-state <file> loads hidden rows, hidden panes,
+//                  dragged column widths and the saved selection (the focused
+//                  pane, the selected row by its hide key else its index, the
+//                  expanded groups, the scroll offsets) from that file and
+//                  saves x/X/1-6/0 changes and drags back to it; the selection
+//                  it restores is written back as it was read, never as the
+//                  keys left it, since a one-shot render is scripted from a
+//                  known start and successive renders over one file must stay
+//                  independent (the app records the selection; lib/app.mjs).
+//                  Without the flag a fixture render loads nothing and saves
+//                  nothing;
+//                  --cache <file> reads the state cache before the frame is
+//                  built, the way the app does at launch: a fresh cache fills
+//                  in whatever the fixture (or the live home) has not landed,
+//                  no snapshot, no PR data, and those panes are marked
+//                  `(cached Nm ago)` against the fixture's clock; a stale,
+//                  damaged or foreign cache is ignored (the footer says so) and
+//                  the frame is the fixture's alone. When nothing was taken
+//                  from it the rendered facts are written to it at the end,
+//                  as a clean tick of the app would, so a test can build a
+//                  cache with the real serializer; without the flag a
+//                  one-shot render reads and writes no cache; --config <file>
 //                  reads the board's config (the GitHub login, the To review
 //                  label rules) and writes the example there when absent
 //                  (without the flag a fixture render reads none, and a live
@@ -93,10 +111,11 @@ import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
 import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
-import { focusProblem, handleKey, handleMouse, viewProblem } from './lib/controller.mjs';
+import { focusFromSaved, focusProblem, handleKey, handleMouse, scrollFromSaved, viewProblem } from './lib/controller.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './lib/viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
+import { cachedFlags, loadStateCache, resolveCachePath, saveStateCache } from './lib/cache.mjs';
 import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsConfig, settingsFlags } from './lib/settings.mjs';
 import { defaultInstallRoot, readInstall, runUpgrade } from './lib/upgrade.mjs';
 import { defaultConfig, loadOrCreateConfig } from './lib/config.mjs';
@@ -238,6 +257,44 @@ function viewStateFor(opts, fmHome) {
   return resolveViewStatePath({ explicit: opts.viewState, fmHome, env: process.env });
 }
 
+// The state cache for a one-shot render: only with --cache, so a render never
+// reads or writes one by accident (the app resolves the default beside the
+// view-state file; here that default applies only to a refused --cache path).
+function cacheFor(opts, fmHome, viewStatePath) {
+  if (!opts.cachePath) return { path: null, problem: null };
+  return resolveCachePath({ explicit: opts.cachePath, viewStatePath, fmHome });
+}
+
+// A fresh cache into the facts, where they have not landed: the snapshot (and
+// its ledgers) when the fixture or the home gave none, the PR block when the
+// fetch is on and has not landed. A failure the fixture carries (snapshot_error,
+// a prs error) stays beside the cached rows, as the app keeps the cached rows
+// under a failed launch refresh: the pane is stale and cached at once.
+// Mutates facts, sets facts.cached for the markers, and says whether anything
+// was taken.
+function restoreFromCache(facts, cache) {
+  const c = cache.facts;
+  if (!c) return false;
+  const flags = { at: cache.fetchedAt, snapshot: false, prs: { mine: false, toreview: false } };
+  let took = false;
+  if (!facts.snapshot) {
+    facts.snapshot = c.snapshot;
+    facts.snapshotAt = c.snapshotAt;
+    facts.ledgers = c.ledgers;
+    flags.snapshot = true;
+    took = true;
+  }
+  const prs = facts.prs || { enabled: false };
+  if (prs.enabled && !prs.fetchedAt && c.prs && c.prs.enabled) {
+    const paneError = (id) => (prs[id] && prs[id].error !== undefined ? prs[id].error : prs.error) ?? null;
+    facts.prs = { ...c.prs, enabled: true, error: prs.error ?? null, mine: { ...c.prs.mine, error: paneError('mine') }, toreview: { ...c.prs.toreview, error: paneError('toreview') } };
+    flags.prs = cachedFlags(cache, { prsEnabled: true }).prs;
+    took = true;
+  }
+  if (took) facts.cached = flags;
+  return took;
+}
+
 // The config file for a one-shot render, the same way: a fixture render reads
 // (and creates) one only with --config, so a fixture frame depends on the
 // fixture alone; a live render walks the default chain as the app does.
@@ -266,6 +323,9 @@ function configFor(opts, fmHome) {
 async function driveOnce(facts, opts, size, cfg) {
   const vs = viewStateFor(opts, facts.fmHome);
   const loaded = loadViewState(vs.path);
+  const cachePath = cacheFor(opts, facts.fmHome, vs.path);
+  const cache = opts.cache === false ? { facts: null, fetchedAt: null, error: null, stale: false } : loadStateCache(cachePath.path, { now: facts.now, maxAge: opts.cacheMaxAge, fmHome: facts.fmHome });
+  const restored = restoreFromCache(facts, cache);
   const settings = initialSettings({
     install: readInstall(opts.installRoot || defaultInstallRoot()),
     flags: settingsFlags(opts),
@@ -273,7 +333,7 @@ async function driveOnce(facts, opts, size, cfg) {
     identity: facts.prs && facts.prs.identity ? facts.prs.identity : facts.identity || null,
     config: settingsConfig(cfg),
   });
-  const view = { pane: 0, row: 0, scroll: [], expanded: new Set(), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, page: 'board', settings };
+  const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, page: 'board', settings };
   const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
   let model = build();
   if (opts.expand.length) {
@@ -282,6 +342,13 @@ async function driveOnce(facts, opts, size, cfg) {
       if (row.group && (opts.expand.includes('all') || opts.expand.includes(row.homeId))) view.expanded.add(row.group);
     }
     model = build();
+  }
+  // The saved selection, as the app restores it once the pane has its rows: a
+  // pane still loading in this frame keeps the default selection.
+  const focus = focusFromSaved(model, loaded.state.focus);
+  if (focus) {
+    view.pane = focus.pane;
+    view.row = focus.row;
   }
   const pending = [];
   const ctx = {
@@ -301,13 +368,16 @@ async function driveOnce(facts, opts, size, cfg) {
         ctx.notice(`${row.name}: not an http(s) URL`, true);
         return;
       }
+      // A row whose pane still draws the state cache names the data's age.
+      const pane = model.panes[view.pane];
+      const cached = pane && pane.cached ? ` · ${pane.cached.label.replace(/^cached /, 'data cached ')}` : '';
       if (!opts.openerCmd) {
-        ctx.notice(`would open ${row.url} (${row.name}); no --opener-cmd in --render-once`);
+        ctx.notice(`would open ${row.url} (${row.name}); no --opener-cmd in --render-once${cached}`);
         return;
       }
       pending.push(
         openUrl(row.url, { cmd: opts.openerCmd, wait: true })
-          .then(() => ctx.notice(`opened ${row.url} (${row.name})`))
+          .then(() => ctx.notice(`opened ${row.url} (${row.name})${cached}`))
           .catch((e) => ctx.notice(`open failed: ${e.message} · ${row.url}`, true)),
       );
     },
@@ -350,7 +420,9 @@ async function driveOnce(facts, opts, size, cfg) {
     },
     persist: () => {
       if (!vs.path) return;
-      const err = saveViewState(vs.path, { hidden: view.hidden, hiddenPanes: view.hiddenPanes, columns: view.columns });
+      // The selection goes back as it was read (see the header): a hide never
+      // wipes a saved selection, and never records the scripted one.
+      const err = saveViewState(vs.path, { hidden: view.hidden, hiddenPanes: view.hiddenPanes, columns: view.columns, focus: loaded.state.focus, expanded: loaded.state.expanded, scroll: loaded.state.scroll });
       if (err) ctx.notice(`view state not saved: ${err}`, true);
     },
     // Settings page effects. Without --curl-cmd nothing is fetched, so a test
@@ -385,6 +457,8 @@ async function driveOnce(facts, opts, size, cfg) {
   };
   if (loaded.error) ctx.notice(`view state: ${loaded.error}`, true);
   if (vs.problem) ctx.notice(vs.problem, true);
+  if (cache.error) ctx.notice(`state cache ignored: ${cache.error}`, true);
+  if (cachePath.problem) ctx.notice(cachePath.problem, true);
   if (cfg.problem) ctx.notice(cfg.problem, true);
   if (cfg.status === 'defaults' && cfg.error) ctx.notice(`config: ${cfg.error}; running with the defaults`, true);
   for (const [n, input] of opts.inputs.entries()) {
@@ -402,7 +476,15 @@ async function driveOnce(facts, opts, size, cfg) {
     }
   }
   await Promise.all(pending);
-  return { model, view };
+  // After the frame: the rendered facts go to the cache when none of them
+  // came from it and nothing failed, as a clean tick of the app writes them.
+  const finish = () => {
+    if (cachePath.path && !restored && facts.snapshot && !facts.snapshotError && !(facts.prs && facts.prs.error)) {
+      const err = saveStateCache(cachePath.path, { fmHome: facts.fmHome, snapshot: facts.snapshot, snapshotAt: facts.snapshotAt, ledgers: facts.ledgers, prs: facts.prs, identity: facts.identity || (facts.prs && facts.prs.identity) || null, herdr: { agents: facts.herdr && facts.herdr.agents ? facts.herdr.agents : {} } }, { fetchedAt: facts.now });
+      if (err) process.stderr.write(`firstmate-tui: state cache not saved: ${err}\n`);
+    }
+  };
+  return { model, view, finish };
 }
 
 // The r key against a live home: the same refresh a tick of the app runs, the
@@ -451,8 +533,9 @@ async function main() {
     const live = opts.fixture ? null : configFor(opts, opts.fmHome ? opts.fmHome.replace(/\/+$/, '') : null);
     const { facts, size } = opts.fixture ? factsFromFixture(opts.fixture, opts) : await factsLive(opts, live);
     const cfg = live || configFor(opts, facts.fmHome);
-    const { model, view } = await driveOnce(facts, opts, size, cfg);
+    const { model, view, finish } = await driveOnce(facts, opts, size, cfg);
     const frame = renderFrame(model, size, view);
+    finish();
     process.stdout.write(opts.tags ? `${toTags(frame.lines)}\n` : `${toPlain(frame.lines).join('\n')}\n`);
     if (facts.snapshotError && !opts.fixture) {
       process.stderr.write(`firstmate-tui: snapshot failed: ${facts.snapshotError}\n`);
