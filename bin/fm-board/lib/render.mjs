@@ -106,16 +106,30 @@ export function paneBadge(pane) {
   return `[${pane.key}]`;
 }
 
-function titleLine(model, cols, view) {
+// The title line: the board, its home and the home count on the left; on the
+// right the refresh label from the model (`next refresh in 18s`, `refreshing…`,
+// or `refresh failed 40s ago, retrying in 20s` in red) and, only while the
+// herdr subscription is down, `herdr disconnected (<reason>)` in the red the
+// lost-pane cell uses. Each right-hand label is its own segment so --tags can
+// color it; when the line is too narrow for both sides, the left text gives
+// way first.
+function titleLine(model, cols) {
   const m = model.meta;
   const home = cols >= 100 ? m.fmHome : m.fmHome.split('/').filter(Boolean).slice(-1)[0] || m.fmHome;
   const allHidden = m.hiddenPanes && m.hiddenPanes.length === model.panes.length;
   const hiddenPanes = allHidden ? ' · all panes hidden' : m.hiddenPanes && m.hiddenPanes.length ? ` · panes hidden: ${m.hiddenPanes.join(',')}` : '';
   const left = ` fm-board · ${home} · ${m.homes} home${m.homes === 1 ? '' : 's'}${hiddenPanes}`;
-  const right = `${m.snapshot} · ${m.herdr} `;
-  const gap = cols - width(left) - width(right);
-  const text = gap >= 1 ? `${left}${' '.repeat(gap)}${right}` : truncate(`${left} · ${right}`, cols);
-  return line([seg(padRight(text, cols), view.stale ? 'bad' : 'title')], cols);
+  const right = [];
+  if (m.refresh && m.refresh.text) right.push(seg(m.refresh.text, m.refresh.failed ? 'title bad' : 'title'));
+  if (m.herdrWarning) {
+    if (right.length) right.push(seg(' · ', 'title'));
+    right.push(seg(m.herdrWarning, 'title lost'));
+  }
+  if (right.length) right.push(seg(' ', 'title'));
+  const rightWidth = right.reduce((n, s) => n + width(s.text), 0);
+  const leftText = width(left) + rightWidth + 1 > cols ? truncate(left, Math.max(0, cols - rightWidth - 1)) : left;
+  const gap = Math.max(1, cols - width(leftText) - rightWidth);
+  return fitSegments([seg(leftText, 'title'), seg(' '.repeat(gap), 'title'), ...right], cols, 'title');
 }
 
 const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-5 panes  r refresh  . settings  ? help  q quit';
@@ -171,7 +185,7 @@ export function tagColumnWidth(model) {
 function renderPanes(model, cols, rows, view) {
   const lines = [];
   const zones = [];
-  lines.push(titleLine(model, cols, view));
+  lines.push(titleLine(model, cols));
   zones.push(null);
   const heights = paneHeights(
     rows,
@@ -260,7 +274,7 @@ export function flattenRows(model) {
 function renderList(model, cols, rows, view) {
   const lines = [];
   const zones = [];
-  lines.push(titleLine(model, cols, view));
+  lines.push(titleLine(model, cols));
   zones.push(null);
   const inner = cols - 1;
   const spec = columns(cols, inner, 'inflight', tagColumnWidth(model));
@@ -313,7 +327,7 @@ export function landingEntries(model) {
 }
 
 function renderLanding(model, cols, rows, view) {
-  const lines = [titleLine(model, cols, view)];
+  const lines = [titleLine(model, cols)];
   const entries = landingEntries(model);
   const blockW = Math.min(cols, Math.max(...entries.map((e) => (e ? width(e.key ? `${e.key}  ${e.text}` : e.text) : 0))));
   const left = Math.max(0, Math.floor((cols - blockW) / 2));
@@ -456,7 +470,7 @@ function renderSettings(model, cols, rows, view) {
   if (left > 0 && tail.length) body.push(...tail.slice(Math.max(0, tail.length - left)));
   while (body.length < height) body.push(L([]));
   const zones = [null, ...body.slice(0, height).map((_, i) => (entryAt.has(i) ? { kind: 'settings', entry: entryAt.get(i) } : null)), null];
-  return { lines: [titleLine(model, cols, view), ...body.slice(0, height), footerLine(model, cols, view, settingsFooterHints(s))], zones };
+  return { lines: [titleLine(model, cols), ...body.slice(0, height), footerLine(model, cols, view, settingsFooterHints(s))], zones };
 }
 
 function overlayHelp(lines, cols) {
@@ -479,7 +493,7 @@ function overlayHelp(lines, cols) {
   return lines;
 }
 
-// view: { pane, row, scroll[], help, notice, noticeBad, stale, page, settings }
+// view: { pane, row, scroll[], help, notice, noticeBad, page, settings }
 // (the app's view also carries `expanded`, `hidden`, `hiddenPanes` and
 // `showHidden`, which only buildModel reads). page is 'board' or 'settings';
 // with 'settings' the frame is the Settings page over view.settings.
@@ -499,7 +513,6 @@ export function renderFrame(model, size, view = {}) {
     help: Boolean(view.help),
     notice: view.notice || '',
     noticeBad: Boolean(view.noticeBad),
-    stale: Boolean(view.stale),
     page: view.page === 'settings' && view.settings ? 'settings' : 'board',
     settings: view.settings || null,
   };

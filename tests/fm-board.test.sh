@@ -54,7 +54,10 @@
 #                   secondmate-relayed decision, a green-unmerged PR, a done
 #                   task with a merged PR, recorded PRs (one live candidate
 #                   with a creation time), herdr statuses, a tmux task, a
-#                   remote cached home, reports and landed rows
+#                   remote cached home, reports and landed rows, and a refresh
+#                   block ({"next_in": 18}) standing in for the app's schedule;
+#                   the refreshing, failed and herdr-state variants are derived
+#                   from it at run time (variant)
 #   pr-ages.json    160x40, Ready for review AGE sources: candidates with a
 #                   creation time, without one, with a future and a malformed
 #                   one, the camel-case alias, no-task candidates and a
@@ -165,10 +168,27 @@ assert_widths() {
   if [ -z "$bad" ]; then pass; else fail "$3: lines with width != $2 -> $bad"; fi
 }
 
-render() { # <fixture> [extra flags...]
+render() { # <fixture name under tests/fixtures, or an absolute path> [extra flags...]
   local fixture=$1
   shift
-  "$BOARD" --render-once --fixture "$FIX/$fixture" --no-herdr "$@"
+  case $fixture in /*) ;; *) fixture="$FIX/$fixture" ;; esac
+  "$BOARD" --render-once --fixture "$fixture" --no-herdr "$@"
+}
+# variant <fixture> <name> <json patch>: a copy of the fixture under SCRATCH with the patch's
+# top-level keys replacing the fixture's, an object value merged one level deep (so a herdr or prs
+# patch keeps the fixture's agents or candidate list); prints the copy's path for render()
+variant() {
+  local out="$SCRATCH/variant-$2.json"
+  node -e '
+    const fs = require("fs");
+    const [src, dst, patchText] = process.argv.slice(1);
+    const fx = JSON.parse(fs.readFileSync(src, "utf8"));
+    const patch = JSON.parse(patchText);
+    const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+    for (const [k, v] of Object.entries(patch)) fx[k] = isObj(v) && isObj(fx[k]) ? { ...fx[k], ...v } : v;
+    fs.writeFileSync(dst, JSON.stringify(fx));
+  ' "$FIX/$1" "$out" "$3"
+  printf '%s\n' "$out"
 }
 # render_open <fixture> <keys>: render with the fake opener recording into OPENER_LOG (reset first)
 render_open() {
@@ -236,11 +256,11 @@ assert_before "$frame" "Findings \(3\)" "Landed \(4\)" "pane order 4"
 
 # Every pane title leads with its toggle key, btop-style (falsify: drop the badge segment from the
 # top border in renderPanes, or change paneBadge).
-assert_contains "$frame" "┌─ [1] Needs you (4) · snapshot 12s ago" "badge on Needs you"
-assert_contains "$frame" "┌─ [2] Ready for review (3) · snapshot 12s ago" "badge on Ready for review"
-assert_contains "$frame" "┌─ [3] In flight (7) · snapshot 12s ago" "badge on In flight"
-assert_contains "$frame" "┌─ [4] Findings (3) · snapshot 12s ago" "badge on Findings"
-assert_contains "$frame" "┌─ [5] Landed (4) · snapshot 12s ago" "badge on Landed"
+assert_contains "$frame" "┌─ [1] Needs you (4) ─" "badge on Needs you"
+assert_contains "$frame" "┌─ [2] Ready for review (3) ─" "badge on Ready for review"
+assert_contains "$frame" "┌─ [3] In flight (7) ─" "badge on In flight"
+assert_contains "$frame" "┌─ [4] Findings (3) ─" "badge on Findings"
+assert_contains "$frame" "┌─ [5] Landed (4) ─" "badge on Landed"
 assert_count "$frame" "┌─ [" 5 "exactly five badges, one per pane"
 # With --tags the badge is its own grey segment between the border segments (falsify: give the badge the
 # border style, or drop `badge` from STYLE_TAGS).
@@ -248,9 +268,11 @@ tags=$(render populated.json --tags) || fail "populated --tags: render exited no
 assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[2\]\{/grey-fg\}\{blue-fg\} Ready for review \(3\)' "--tags: the badge is grey and the title keeps the border color"
 assert_count "$tags" "{grey-fg}[" 5 "--tags: five grey badges"
 
-# Freshness header on every pane (falsify: drop herdrLabel() from paneHeader in lib/model.mjs).
-assert_count "$frame" "snapshot 12s ago · herdr fixture" 6 "title plus five pane headers carry snapshot age and herdr state"
-assert_contains "$frame" "checks 30s ago" "review header carries the PR data age by default (falsify: flip the prs default in parseArgs)"
+# Pane headers are `[n] Name (count)` and nothing else: the snapshot and checks ages, and the herdr
+# state, are gone from them (falsify: put snapshotLabel or herdrLabel back into paneHeader in
+# lib/model.mjs). The countdown and the herdr warning have their own section below.
+assert_no_row "$frame" '^┌─ \[[1-5]\] [^─]*(ago|snapshot|herdr|checks)' "no pane header carries an age, a snapshot, herdr or checks word"
+assert_count "$frame" " ago" 0 "nothing on the populated frame says N ago: no header age, and the title counts down instead"
 assert_contains "$frame" "fm-board · /fixture/firstmate · 3 homes" "title counts the main home plus two secondmate homes"
 
 # Needs you rows (falsify: remove scout-beta's blocked_event, ship-alpha's open_decisions entry,
@@ -278,7 +300,7 @@ assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ merge\?' "--all-hom
 # --no-prs case in parseArgs, or the !prs.enabled branch in unlistedChecks).
 frame_noprs=$(render populated.json --no-prs) || fail "populated --no-prs: render exited non-zero"
 assert_contains "$frame_noprs" "Ready for review (2)" "--no-prs lists the two recorded PRs only"
-assert_contains "$frame_noprs" "· checks off" "--no-prs: the review header says checks off"
+assert_contains "$frame_noprs" "┌─ [2] Ready for review (2) ─" "--no-prs: the review header is bare; the rows say checks: off (falsify: put checksLabel back into paneHeader)"
 assert_row "$frame_noprs" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: off[^│]* - +5m~ │$' "recorded PR 41 row: with the fetch off STATUS and BASE are unknown (-) and the AGE is the status-log age marked ~ (falsify: keep the PR age without the fetch)"
 assert_row "$frame_noprs" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +- +1m~ │$' "recorded PR 7 row names the flag"
 assert_not_contains "$frame_noprs" "passing" "no live check state with --no-prs"
@@ -402,7 +424,6 @@ assert_not_opened "without --opener-cmd nothing is launched"
 frame_prs=$(render populated.json --prs) || fail "populated --prs: render exited non-zero"
 if [ "$frame_prs" = "$frame" ]; then pass; else fail "--prs renders a different frame from the default: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_prs") | head -n 5)"; fi
 assert_contains "$frame_prs" "Ready for review (3)" "live PR data adds the unrecorded candidate"
-assert_contains "$frame_prs" "checks 30s ago" "review header shows the checks age"
 assert_row "$frame_prs" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "Ready for review draws its own six columns (falsify: drop the review branch from columns in lib/layout.mjs)"
 assert_no_row "$frame_prs" '^│ CHECKS [^│]*(REPO|HOME|WHAT|REVIEW)' "the review pane draws no REPO, HOME, WHAT or REVIEW column"
 assert_row "$frame_prs" '^│ failing +IN REVIEW +api#8 +Retry on 429 +main +- │$' "failing candidate nobody recorded: changes requested reads IN REVIEW, the title and base branch come from the fetch, no age without a creation time (falsify: map CHANGES_REQUESTED to its own word in prStatus)"
@@ -437,7 +458,12 @@ assert_row "$frame_empty" '^│ no recorded pull requests +│$' "empty review m
 assert_row "$frame_empty" '^│ no workers in flight +│$' "empty in-flight message"
 assert_row "$frame_empty" '^│ no scout reports +│$' "empty findings message"
 assert_row "$frame_empty" '^│ nothing landed yet +│$' "empty landed message"
-assert_count "$frame_empty" "herdr off" 6 "herdr off in the title and every pane header without a herdr block"
+# No herdr block under --no-herdr is the state "off" with the reason --no-herdr: the title line warns
+# once and no pane header says anything about herdr (falsify: drop the detail from factsFromFixture's
+# no-block branch, or the 'off' case from herdrWarning).
+assert_row "$frame_empty" '^ fm-board · /fixture/firstmate · 1 home +herdr disconnected \(--no-herdr\) $' "empty: the title line warns herdr disconnected with --no-herdr as the reason"
+assert_count "$frame_empty" "herdr" 1 "empty: the title warning is the only herdr text; no pane header carries one"
+assert_no_row "$frame_empty" '^ fm-board .*refresh' "empty: no refresh block in the fixture, so the title line has no refresh label"
 assert_contains "$frame_empty" "· 1 home " "empty board counts one home"
 assert_widths "$frame_empty" 120 "empty frame lines are 120 columns"
 assert_lines "$frame_empty" 40 "empty frame is 40 lines"
@@ -446,7 +472,7 @@ assert_lines "$frame_empty" 40 "empty frame is 40 lines"
 frame_narrow=$(render narrow.json) || fail "narrow: render exited non-zero"
 # Section headers carry the same key badge as the pane titles (falsify: drop `badge` from the section
 # entry in flattenRows, or the badge segment in renderList).
-assert_row "$frame_narrow" '^── \[1\] Needs you \(1\) · snapshot 12s ago · herdr fixture ─+$' "narrow: section header with its badge, padded with dashes"
+assert_row "$frame_narrow" '^── \[1\] Needs you \(1\) ─+$' "narrow: section header with its badge and count only, padded with dashes"
 assert_contains "$frame_narrow" "── [2] Ready for review (0)" "narrow: review section badge"
 assert_contains "$frame_narrow" "── [3] In flight (2)" "narrow: in-flight section badge"
 assert_contains "$frame_narrow" "── [4] Findings (0)" "narrow: findings section badge"
@@ -466,10 +492,10 @@ assert_lines "$frame_narrow" 24 "narrow frame is 24 lines"
 # --------------------------------------------------------------- grouped
 frame_g=$(render grouped.json) || fail "grouped: render exited non-zero"
 
-# No prs block in the fixture is the state before the first fetch of a session lands: the title and
-# the recorded PR say fetching, never "not fetched" (falsify: drop the fetching branch in
-# unlistedChecks or checksLabel).
-assert_contains "$frame_g" "Ready for review (1) · snapshot 12s ago · herdr fixture · checks fetching" "grouped: review header says checks fetching before the first fetch"
+# No prs block in the fixture is the state before the first fetch of a session lands: the recorded
+# PR row says fetching, never "not fetched", and the header stays bare (falsify: drop the fetching
+# branch in unlistedChecks).
+assert_contains "$frame_g" "┌─ [2] Ready for review (1) ─" "grouped: the review header is bare before the first fetch"
 assert_row "$frame_g" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "grouped: recorded PR row says checks fetching before the first fetch, STATUS unknown, AGE marked as the fallback"
 assert_not_contains "$frame_g" "not fetched" "grouped: nothing reads not fetched before the first fetch"
 
@@ -595,10 +621,11 @@ assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost
 # the unknown branch in herdrColumn, or the grey style in rowSegments).
 frame_d=$(render lost-disconnected.json) || fail "disconnected: render exited non-zero"
 tags_d=$(render lost-disconnected.json --tags) || fail "disconnected --tags: render exited non-zero"
-assert_contains "$frame_d" "herdr disconnected (ECONNREFUSED)" "disconnected fixture: header carries the herdr state"
+assert_row "$frame_d" '^ fm-board · /fixture/firstmate · 1 home +herdr disconnected \(ECONNREFUSED\) $' "disconnected fixture: the title line warns with the socket error as the reason"
 assert_row "$frame_d" '^│ working +unknown +ship-lost +adding the retry loop ' "disconnected: the missing pane reads unknown, not pane lost"
 assert_row "$tags_d" '\{grey-fg\}unknown +\{/grey-fg\}' "disconnected: the unknown cell is grey"
-assert_count "$tags_d" "{red-fg}" 0 "disconnected: nothing is red"
+assert_count "$tags_d" "{red-fg}" 1 "disconnected: the title warning is the only red text; no row is red"
+assert_contains "$tags_d" "{red-fg}herdr disconnected (ECONNREFUSED){/red-fg}" "disconnected: the warning carries the red tag the lost cell uses (falsify: give the warning the title style only)"
 assert_widths "$frame_l" 160 "lost frame lines are 160 columns"
 
 # -------------------------------------------------------------------- hide
@@ -1326,13 +1353,16 @@ assert_opened "https://github.com/acme/api/pull/8" "a click and a wheel on the p
 
 # ------------------------------------------------------------ refresh schedule
 # The interactive schedule, run with --headless against a stand-in whose snapshot sleeps 7 s, with
-# --refresh 5 (the minimum) and the fake gh on PATH. From launch: the start refresh runs the
-# snapshot (0-7 s) and then the three gh calls; the tick at 5 s lands while it is running and is
-# skipped; the tick at 10 s runs the snapshot (10-17 s) and the gh calls again; the tick at 15 s is
-# skipped. Stopped at 19 s, the log holds two snapshot lines, each followed by its three gh lines,
-# and no script fallback (falsify: drop the `state.refreshing` skip in refresh, three snapshots;
-# never clear the flag, or start the interval only after the first refresh, one; start the fetch
-# with the snapshot instead of after it, and gh lines land before the snapshot line).
+# --refresh 5 (the minimum) and the fake gh on PATH. The next refresh is due 5 s after the last
+# one started, armed when it completes, so a refresh slower than the cadence is followed by the
+# next one at once and never by two. From launch: the start refresh runs the snapshot (0-7 s) and
+# then the three gh calls; its timer is already due, so the second refresh runs the snapshot
+# (7-14 s) and the gh calls; the third starts its snapshot at 14 s and is still in it at 19 s.
+# Stopped at 19 s, the log holds three snapshot lines, the first two each followed by their three
+# gh lines, and no script fallback (falsify: arm the timer from the completion instead of the
+# start, two snapshots and three gh lines; keep the old fixed interval, two snapshots; never
+# clear the refreshing flag, one; re-arm the timer at the start of a refresh as well, four; start
+# the fetch with the snapshot instead of after it, and gh lines land before the snapshot line).
 SLOW_HOME="$SCRATCH/firstmate-slow"
 mkdir -p "$SLOW_HOME/bin"
 # shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
@@ -1346,12 +1376,89 @@ sleep 19
 kill "$headless_pid" 2>/dev/null
 wait "$headless_pid" 2>/dev/null
 headless_log=$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')
-if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 2 ]; then pass; else fail "headless schedule: expected two snapshot runs in 19 s, log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
-if [ "$(grep -c '^gh pr list ' "$FETCH_LOG" 2>/dev/null)" = 6 ]; then pass; else fail "headless schedule: a tick during a running refresh must not start a second PR fetch, and the next tick must (two refreshes, three repositories each); log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
-if [ "$(sed -n '1p;5p' "$FETCH_LOG" 2>/dev/null)" = "snapshot
-snapshot" ]; then pass; else fail "headless schedule: each refresh runs the snapshot before its gh calls; log is '$headless_log'"; fi
+if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 3 ]; then pass; else fail "headless schedule: expected three snapshot starts in 19 s (0, 7 and 14 s), log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(grep -c '^gh pr list ' "$FETCH_LOG" 2>/dev/null)" = 6 ]; then pass; else fail "headless schedule: no second PR fetch during a running refresh, and one per completed refresh (two completed, three repositories each); log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(sed -n '1p;5p;9p' "$FETCH_LOG" 2>/dev/null)" = "snapshot
+snapshot
+snapshot" ]; then pass; else fail "headless schedule: each refresh runs the snapshot before its gh calls, and the third starts only after the second's gh calls; log is '$headless_log'"; fi
 if grep -q '^prs ' "$FETCH_LOG" 2>/dev/null; then fail "headless schedule: the firstmate PR script ran although gh is on PATH; log is '$headless_log'"; else pass; fi
 if [ -s "$SCRATCH/headless.log" ]; then fail "headless run wrote to the terminal: $(head -c 300 "$SCRATCH/headless.log")"; else pass; fi
+
+# ------------------------------------------------- refresh countdown, herdr link
+# The title line carries one refresh label, from the fixture's refresh block at the fixture's clock
+# (now = 12:00:00Z), and the pane headers carry none of the old ages (falsify: drop refreshLabel from
+# buildModel's meta, or the refresh segment from titleLine).
+assert_row "$frame" '^ fm-board · /fixture/firstmate · 3 homes +next refresh in 18s $' "countdown: the title line reads next refresh in 18s from {\"next_in\": 18}"
+assert_count "$frame" "next refresh" 1 "countdown: the label is on the title line only"
+frame_c=$(render "$(variant populated.json due '{"refresh": {"next_in": 0}}')") || fail "countdown due: render exited non-zero"
+assert_row "$frame_c" '^ fm-board .* +next refresh in 0s $' "countdown: a due refresh reads 0s"
+frame_c=$(render "$(variant populated.json overdue '{"refresh": {"next_in": -5}}')") || fail "countdown overdue: render exited non-zero"
+assert_row "$frame_c" '^ fm-board .* +next refresh in 0s $' "countdown: never negative (falsify: drop Math.max from refreshLabel)"
+# While a refresh runs the label says so and counts nothing (falsify: drop the refreshing branch).
+frame_c=$(render "$(variant populated.json refreshing '{"refresh": {"refreshing": true, "next_in": 18}}')") || fail "refreshing: render exited non-zero"
+assert_row "$frame_c" '^ fm-board · /fixture/firstmate · 3 homes +refreshing… $' "refreshing: the title line reads refreshing…"
+assert_not_contains "$frame_c" "next refresh" "refreshing: no countdown beside it"
+# A failed PR fetch: the title line names the failure's age and the retry in red, the Ready for
+# review header alone is marked stale, and the previous PR rows stay (falsify: drop the failedAt
+# branch from refreshLabel, the 'title bad' style from titleLine, or the review case from paneStale).
+fx_pf=$(variant populated.json pr-failed '{"prs": {"error": "exit 1"}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: exit 1"}}')
+frame_f=$(render "$fx_pf") || fail "PR fetch failed: render exited non-zero"
+tags_f=$(render "$fx_pf" --tags) || fail "PR fetch failed --tags: render exited non-zero"
+assert_row "$frame_f" '^ fm-board · /fixture/firstmate · 3 homes +refresh failed 40s ago, retrying in 20s $' "PR fetch failed: the title line reads refresh failed 40s ago, retrying in 20s"
+assert_contains "$tags_f" "{red-fg}refresh failed 40s ago, retrying in 20s{/red-fg}" "PR fetch failed: the label is red"
+assert_contains "$frame_f" "┌─ [2] Ready for review (3) (stale) ─" "PR fetch failed: the review header is marked stale"
+assert_count "$frame_f" "(stale)" 1 "PR fetch failed: no other pane is marked stale"
+assert_row "$frame_f" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "PR fetch failed: the previous PR rows stay on screen"
+# A failed snapshot: the four snapshot panes are marked stale and Ready for review is not (falsify:
+# swap the pane test in paneStale).
+frame_f=$(render "$(variant populated.json snap-failed '{"snapshot_error": "exit 1", "refresh": {"failed_ago": 5, "next_in": 25, "failed": "snapshot: exit 1"}}')") || fail "snapshot failed: render exited non-zero"
+assert_row "$frame_f" '^ fm-board · /fixture/firstmate · 3 homes +refresh failed 5s ago, retrying in 25s $' "snapshot failed: the title line names the failure"
+assert_count "$frame_f" "(stale)" 4 "snapshot failed: four panes are marked stale"
+assert_contains "$frame_f" "┌─ [1] Needs you (4) (stale) ─" "snapshot failed: Needs you is stale"
+assert_contains "$frame_f" "┌─ [3] In flight (7) (stale) ─" "snapshot failed: In flight is stale"
+assert_contains "$frame_f" "┌─ [4] Findings (3) (stale) ─" "snapshot failed: Findings is stale"
+assert_contains "$frame_f" "┌─ [5] Landed (4) (stale) ─" "snapshot failed: Landed is stale"
+assert_contains "$frame_f" "┌─ [2] Ready for review (3) ─" "snapshot failed: Ready for review, whose fetch succeeded, is not stale"
+# The failure text stays in the facts but the label keeps the spec's words: a failure with no age given
+# reads 0s ago (falsify: require failed_ago in refreshFromFixture).
+frame_f=$(render "$(variant populated.json failed-noage '{"refresh": {"failed": "snapshot: exit 1", "next_in": 30}}')") || fail "failed no age: render exited non-zero"
+assert_row "$frame_f" '^ fm-board .* +refresh failed 0s ago, retrying in 30s $' "failed without an age: reads 0s ago"
+# Without a refresh block (lost.json) the title line carries no refresh label at all: a one-shot render
+# has no schedule (falsify: invent a label when facts.refresh is null).
+assert_no_row "$frame_l" '^ fm-board .*refresh' "no refresh block: no refresh label on the title line"
+# Herdr link. Connected: no herdr text anywhere on the frame (falsify: bring herdrLabel back into
+# the title or the headers). The populated fixture's block has no state, so under --no-herdr it is the
+# offline overlay "fixture", which also shows nothing; an explicit connected state is checked too.
+assert_count "$frame" "herdr" 0 "fixture overlay: no herdr text on the frame"
+frame_h=$(render "$(variant populated.json connected '{"herdr": {"state": "connected"}}')") || fail "connected: render exited non-zero"
+tags_h=$(render "$(variant populated.json connected '{"herdr": {"state": "connected"}}')" --tags) || fail "connected --tags: render exited non-zero"
+assert_count "$frame_h" "herdr" 0 "connected: no herdr text on the frame"
+assert_not_contains "$tags_h" "herdr disconnected" "connected --tags: no warning"
+# Down for any reason: one red warning on the title line naming the reason; the reason is left out
+# when the client recorded none (falsify: print empty parentheses, or drop a state from herdrWarning).
+frame_h=$(render "$(variant populated.json connecting '{"herdr": {"state": "connecting"}}')") || fail "connecting: render exited non-zero"
+assert_row "$frame_h" '^ fm-board .* +next refresh in 18s · herdr disconnected \(connecting\) $' "never connected: the title line warns herdr disconnected (connecting) beside the countdown"
+assert_count "$frame_h" "herdr" 1 "never connected: the title warning is the only herdr text"
+frame_h=$(render "$(variant populated.json unavailable '{"herdr": {"state": "unavailable", "detail": "cannot run herdr: not found"}}')") || fail "unavailable: render exited non-zero"
+assert_contains "$frame_h" "herdr disconnected (cannot run herdr: not found) " "herdr not on PATH: the warning carries the client's reason"
+frame_h=$(render "$(variant populated.json dropped '{"herdr": {"state": "disconnected", "detail": "closed"}}')") || fail "dropped: render exited non-zero"
+tags_h=$(render "$(variant populated.json dropped '{"herdr": {"state": "disconnected", "detail": "closed"}}')" --tags) || fail "dropped --tags: render exited non-zero"
+assert_contains "$frame_h" "next refresh in 18s · herdr disconnected (closed) " "dropped: the warning names the socket's close"
+assert_contains "$tags_h" "{red-fg}herdr disconnected (closed){/red-fg}" "dropped --tags: the warning is red"
+assert_row "$tags_h" '\{white-bg\}next refresh in 18s\{/white-bg\}' "dropped --tags: the countdown beside it keeps the plain title style"
+frame_h=$(render "$(variant populated.json noreason '{"herdr": {"state": "disconnected", "detail": ""}}')") || fail "no reason: render exited non-zero"
+assert_row "$frame_h" '^ fm-board .* · herdr disconnected $' "dropped with no recorded reason: the parentheses are left out"
+tags_e=$(render empty.json --tags) || fail "empty --tags: render exited non-zero"
+assert_contains "$tags_e" "{red-fg}herdr disconnected (--no-herdr){/red-fg}" "--no-herdr --tags: the warning is red"
+# Narrow: the left text gives way to the right-hand labels and the line keeps its width (falsify: pad
+# the title to cols before the labels, or drop the truncate in titleLine).
+frame_h=$(render "$(variant narrow.json narrow-both '{"refresh": {"next_in": 18}, "herdr": {"state": "disconnected", "detail": "ECONNREFUSED"}}')") || fail "narrow both labels: render exited non-zero"
+assert_row "$frame_h" '^ fm-board.* next refresh in 18s · herdr disconnected \(ECONNREFUSED\) $' "narrow: both labels fit and the home text is cut"
+assert_widths "$frame_h" 70 "narrow: the title line is still 70 columns"
+# The Settings page keeps the same title line (falsify: give renderSettings its own title).
+frame_h=$(render "$(variant populated.json settings-title '{"herdr": {"state": "disconnected", "detail": "closed"}}')" --install-root "$INSTALL" --keys ".") || fail "settings title: render exited non-zero"
+assert_row "$frame_h" '^ fm-board · /fixture/firstmate · 3 homes +next refresh in 18s · herdr disconnected \(closed\) $' "settings page: the title line carries the countdown and the warning"
+assert_row "$frame_h" '^ Settings +$' "settings page: the page itself is drawn"
 
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x40 the lines are: 0 title,
