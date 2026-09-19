@@ -5,9 +5,9 @@ It reads the state that [firstmate](https://github.com/kunchenguid/firstmate), a
 It asks GitHub about your pull requests, and it asks [herdr](https://herdr.dev), the terminal multiplexer those agents run in, which agent panes are still alive.
 All of it lands on one screen that refreshes itself: what needs your answer, your own pull requests and their checks, the pull requests teammates asked you to review, what is being worked on right now, the reports the agents wrote, and what shipped.
 You want it when several agents work for you at once and scrolling back through a chat no longer tells you where things stand.
-The board is read-only.
-It never writes into firstmate's files, never answers a question on your behalf and never merges anything.
-Its only actions are jumping to an agent's pane, opening a pull request in your browser and showing a report in the terminal.
+The board is read-only, with two exceptions: discarding a hold you set and deferring one to a later date.
+Each of those asks you to confirm first and then runs firstmate's own `fm-captain-hold.sh` in the home that owns the hold; the board never edits a firstmate file itself, never answers a question with words of its own and never merges anything.
+Its other actions are jumping to an agent's pane, opening a pull request in your browser and showing a report or a hold card in the terminal.
 
 ![A dark terminal filled by the board. The top line names the tool, the fleet directory and 4 homes, with the word refreshing at the right edge where the seconds to the next refresh normally count down. Below it six bordered panes stack top to bottom, each titled with its number key and a count: 1 Needs you (4) lists two items waiting on a decision and two on hold, with state, key, id, what, repo, home and age columns; 2 My PRs (4, 9 hidden) lists four pull requests with their checks, status, id, title, base branch and age, one of them failing in red; 3 Teammates' PRs (3) lists three pull requests awaiting review with an author column; 4 In flight (10) groups running agents by home with their state and live pane count, the selected row highlighted and a plus 3 more note at its foot; 5 Findings (21) lists reports by kind and path with plus 14 more; 6 Landed (16, 24 hidden) lists merged work by date with plus 9 more. The bottom line lists the keys: j/k move, tab pane, enter open/focus/view, l/h expand, x hide, H hidden, 1-6 panes, r refresh, . settings, ? help, q quit.](docs/fm-board.png)
 
@@ -86,7 +86,7 @@ Debian and Ubuntu: `sudo apt install gh`, or the packages at https://github.com/
 Then run `gh auth login` once.
 
 **glow.**
-glow renders a Markdown report in the terminal when you press `enter` on a Findings row.
+glow renders a Markdown report, or a hold card, in the terminal when you press `enter` on a Findings row or on a held task.
 Without it the board uses `$EDITOR`, then `vim`, then `less`.
 Check: `glow --version`.
 Install: macOS `brew install glow`.
@@ -227,6 +227,7 @@ An install older than 0.2.5 first runs its own `fm-board upgrade --version 0.2.5
 The six panes, top to bottom; each pane's key is its number:
 
 1. **Needs you**: what firstmate is waiting on you for: blocked agents, decisions to make, holds you set with their due dates, and one `review` row per pull request that is yours to review because its agent is done and GitHub reports the pull request open and mergeable.
+   `enter` on a hold, decision or blocked row shows its hold card in the terminal viewer: the task's facts, the full hold reason, the backlog body, the pull request, the first 40 lines of its report, its brief and other files under `data/<id>/`, and the last 10 lines of its status log, read from the home that owns it; `d` discards the hold and `D` defers it (the Keys table below).
 2. **My PRs**: every open pull request your GitHub login authored, in any repository, plus the pull requests recorded on unfinished firstmate tasks whoever opened them, plus either kind that merged or closed in the last 12 hours; the columns are CHECKS (`passing`, `pending` or `failing`, judged from the newest run of each check on the head commit, so a run that a re-run superseded does not count), STATUS, ID, TITLE, BASE (the branch it targets) and AGE.
 3. **Teammates' PRs**: the open pull requests where you are a requested reviewer, directly or through a team, and not the author, in the repositories firstmate works in plus the ones the config file names, filtered by the config file's label rules, with the same columns plus AUTHOR.
 4. **In flight**: one row per agent working in the main home, with firstmate's state (`working`, `awaiting merge`, `repairing PR`, `done`) beside herdr's live pane count, and one group row per delegate home that expands to its agents.
@@ -242,7 +243,10 @@ The bottom line lists the keys, and `?` shows them all.
 | --- | --- |
 | `j` / `k`, arrows | move the selection |
 | `tab` / `shift-tab` | next / previous pane |
-| `enter`, or a double-click | act on the row: open its pull request in your browser; on a Findings row show the report in the terminal viewer; on an In flight group expand or collapse it; on an agent row focus its herdr pane; on a Landed row without a pull request show its report, else focus its pane |
+| `enter`, or a double-click | act on the row: open its pull request in your browser; on a Needs you hold, decision or blocked row, or on an In flight or Landed row whose task is a captain hold, show its hold card in the terminal viewer; on a Findings row show the report; on an In flight group expand or collapse it; on an agent row focus its herdr pane; on a Landed row without a pull request show its report, else focus its pane |
+| `f` | focus the selected row's herdr pane, whatever the pane; a row without one says so |
+| `d` | discard the selected hold: the footer asks `y to discard, esc to cancel`, then firstmate's `fm-captain-hold.sh answer` closes the task in its home with the decision `Discarded by <your GitHub login> from firstmate-tui on <date>: no action; closed as not wanted.`; the row leaves on the refresh that follows, and a refusal from the command shows in red and changes nothing |
+| `D` | defer the selected hold: the footer takes a date (`YYYY-MM-DD`, prefilled with today plus 14 days; digits and dashes edit it, `enter` defers, `esc` cancels), then `fm-captain-hold.sh hold --until <date>` records it in the hold's home with the hold's own reason; a hold in a delegate home is deferred only when that home's full reason is readable here |
 | `l` / `right`, `h` / `left` | expand / collapse the selected In flight group |
 | `x`, `X`, `H` | hide the selected row; unhide every row in the pane; show hidden rows greyed and marked `(hidden)` |
 | `1` to `6`, `0` | show or hide that pane; show every pane (with all six hidden the board lists these keys) |
@@ -288,14 +292,14 @@ Flags go after `open` or directly after `firstmate-tui`.
 | `--cache-max-age <seconds>` | ignore a state cache whose data is older than this and start with the spinners instead, default 3600 |
 | `--no-cache` | never read the state cache, so every launch starts with the spinners; the file is still written for the next launch |
 | `--opener-cmd <argv>` | the command that opens a URL, default `open` on macOS and `xdg-open` on Linux; the URL is appended as one argument |
-| `--viewer-cmd <argv>` | the command that shows a Findings report, default `glow -p`, else `$EDITOR`, else `vim`, else `less`; the path is appended |
+| `--viewer-cmd <argv>` | the command that shows a Findings report or a hold card, default `glow -p`, else `$EDITOR`, else `vim`, else `less`; the path is appended |
 | `--snapshot-timeout <seconds>` | kill a snapshot run after this long, default 60 |
 | `--herdr-cmd <argv>`, `--herdr-socket <path>` | how to reach herdr when `HERDR_BIN_PATH`, `HERDR_SOCKET_PATH` and `herdr status` do not apply |
 | `--render-once`, `--fixture`, `--cols`, `--rows`, `--keys`, `--mouse`, `--expand`, `--tags`, `--headless`, `--curl-cmd`, `--install-root` | test mode: print one frame, or run the schedule without a terminal. `bin/firstmate-tui/lib/args.mjs` documents each one |
 
 ## Configuration
 
-The board owns three files and writes nowhere else: never into a firstmate home, a project or a `state/` directory.
+The board owns three files and writes nowhere else: never into a firstmate home, a project or a `state/` directory (the `d` and `D` keys change a hold through firstmate's own command, not through a file the board edits).
 All three live in the same directory: the one `herdr plugin config-dir firstmate.board` prints when herdr answers, else `$XDG_CONFIG_HOME/fm-board/`, else `~/.config/fm-board/`.
 `--config`, `--view-state` and `--cache` override the three paths one at a time.
 
@@ -381,6 +385,12 @@ Check: the Settings page's Identity line reads your login followed by `(from con
 Symptom: right after launch the footer names the state cache file with `bad JSON`, `not an object`, `unexpected schema` or `written for another home`, and the board starts as if it had no cache.
 Cause: the file at that path is damaged, was written by another version of the board, or belongs to a board that runs against a different `FM_HOME`; the board never draws data it cannot trust.
 Fix: nothing, unless the notice repeats on every launch: the next refresh that lands cleanly writes a fresh cache over the file, and `--no-cache` skips the read for good if you want a spinner start every time.
+
+**`d` or `D` ends with a red line in the footer and the hold is still there.**
+Symptom: after `y` on the discard prompt, or `enter` on the defer prompt, the footer shows a red line such as `fm-captain-hold: task <id> is not held for the captain; hold it first or name the right task`, and the row stays.
+Cause: the board ran firstmate's `fm-captain-hold.sh` in the hold's home and the command refused; the line is the command's own words, and nothing was changed.
+Check: run the same command in that home (`FM_HOME=<home> <home>/bin/fm-captain-hold.sh open <id>` shows what firstmate knows about the hold).
+Fix: whatever the message asks for; a hold whose home is on another machine cannot be changed from here at all, and the board says so before it prompts.
 
 **The title line reads `herdr disconnected (<reason>)` in red.**
 Symptom: the title line carries that warning, and the HERDR column in In flight reads `unknown` in grey instead of a live pane count.

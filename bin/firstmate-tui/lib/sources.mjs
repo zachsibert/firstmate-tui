@@ -1,13 +1,15 @@
 // lib/sources.mjs - every read the board performs against firstmate homes and
-// GitHub. Read-only by contract: it runs the fleet snapshot script, reads
-// ledgers, stats files, reads the verbs of a task's status log and asks
-// GitHub through `gh api graphql` (and, once at startup, `gh api user` for
-// the captain's login). It never writes into
-// FM_HOME, a project or a state directory, and every command is an argv
-// spawn, never a shell string.
+// GitHub. Read-only by contract: it runs the fleet snapshot script (for the
+// main home on every refresh, and for a delegate home when a hold card needs
+// that home's full record), reads ledgers, stats files, reads the verbs of a
+// task's status log and the files a hold card shows, and asks GitHub through
+// `gh api graphql` (and, once at startup, `gh api user` for the captain's
+// login). It never writes into FM_HOME, a project or a state directory (the
+// board's two writes run firstmate's own command from lib/hold.mjs), and
+// every command is an argv spawn, never a shell string.
 
 import { spawn } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, parseTime, repoFromUrl } from './text.mjs';
 import { whichOnPath } from './viewer.mjs';
 import { parseReleases, RELEASES_PER_PAGE } from './settings.mjs';
@@ -96,6 +98,67 @@ function isDir(path) {
   } catch {
     return false;
   }
+}
+
+function isFile(path) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// The lines of a text file, or null when it cannot be read. A trailing
+// newline ends the last line rather than starting an empty one.
+function fileLines(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  const lines = text.split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+// The files a hold card shows for task `id` in `home` (lib/card.mjs
+// buildHoldCard), read-only: the names under data/<id>/ other than the
+// report and the brief (null when there is no such directory), the first
+// `reportLines` lines of data/<id>/report.md with the file's line count, the
+// brief's path when data/<id>/brief.md exists, and the last `statusLines`
+// lines of state/<id>.status with its line count. Every path is absolute.
+export function readHoldMaterials(home, id, { reportLines = 40, statusLines = 10 } = {}) {
+  const base = String(home || '').replace(/\/+$/, '');
+  const dataDir = `${base}/data/${id}`;
+  const reportPath = `${dataDir}/report.md`;
+  const briefPath = `${dataDir}/brief.md`;
+  const statusPath = `${base}/state/${id}.status`;
+  let names = null;
+  try {
+    names = readdirSync(dataDir).sort();
+  } catch {
+    names = null;
+  }
+  const files = names === null ? null : names.filter((n) => n !== 'report.md' && n !== 'brief.md').map((n) => `${dataDir}/${n}`);
+  const reportAll = isFile(reportPath) ? fileLines(reportPath) : null;
+  const report = reportAll === null ? null : { path: reportPath, head: reportAll.slice(0, reportLines), total: reportAll.length };
+  const brief = isFile(briefPath) ? { path: briefPath } : null;
+  const statusAll = isFile(statusPath) ? fileLines(statusPath) : null;
+  const status = statusAll === null ? null : { path: statusPath, tail: statusAll.slice(Math.max(0, statusAll.length - statusLines)), total: statusAll.length };
+  return { dataDir, files, report, brief, status };
+}
+
+// The backlog record of task `id` in `home`, read through that home's own
+// bin/fm-fleet-snapshot.sh --json (runSnapshot, the one parser of a backlog;
+// the board never parses backlog.md itself): { record, error }. Used for a
+// delegate home's hold, whose ledger carries only a truncated reason.
+export async function readHoldRecord(home, id, { timeoutMs }) {
+  const r = await runSnapshot(String(home || '').replace(/\/+$/, ''), { timeoutMs });
+  if (r.error || !r.value) return { record: null, error: r.error || 'no snapshot' };
+  const records = r.value.backlog && Array.isArray(r.value.backlog.records) ? r.value.backlog.records : [];
+  const record = records.find((x) => x && x.id === id) || null;
+  return { record, error: record ? null : `no backlog record ${id}` };
 }
 
 // Homes named in FM_HOME/data/secondmates.md. Each registry line looks like

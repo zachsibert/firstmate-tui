@@ -18,7 +18,14 @@
 //                  reachable target, runs --viewer-cmd when given and otherwise only
 //                  reports the viewer the chain resolved to, naming the binary
 //                  found on PATH, so a test can shadow glow with a fake without
-//                  ever launching a real viewer); --expand <all|ids>
+//                  ever launching a real viewer; enter on a row with a hold
+//                  card builds the card (a delegate home's record is read
+//                  through that home's fm-fleet-snapshot.sh) and shows it the
+//                  same way, from a temp file removed afterwards; d,y and
+//                  D,enter really run bash <home>/bin/fm-captain-hold.sh in
+//                  the hold's home, awaited before the frame, so a test points
+//                  the fixture's homes at scratch directories holding a fake);
+//                  --expand <all|ids>
 //                  expands In flight groups; --tags prints the color tags;
 //                  --view-state <file> loads hidden rows, hidden panes,
 //                  dragged column widths and the saved selection (the focused
@@ -110,13 +117,15 @@
 // "off", which under --no-herdr warns `herdr disconnected (--no-herdr)`.
 
 import { readFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { parseArgs, USAGE } from './lib/args.mjs';
 import { buildModel, initialPrs, mergePrs, prsFailureText } from './lib/model.mjs';
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
-import { focusFromSaved, focusProblem, handleKey, handleMouse, scrollFromSaved, viewProblem } from './lib/controller.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
+import { focusFromSaved, focusProblem, handleKey, handleMouse, openDeferPrompt, scrollFromSaved, viewProblem } from './lib/controller.mjs';
+import { deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, prepareHoldCard, removeTempDir } from './lib/hold.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './lib/viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
@@ -346,7 +355,10 @@ async function driveOnce(facts, opts, size, cfg) {
     identity: facts.prs && facts.prs.identity ? facts.prs.identity : facts.identity || null,
     config: settingsConfig(cfg),
   });
-  const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, page: 'board', settings };
+  const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, prompt: null, busy: null, page: 'board', settings };
+  // The login a discard names: the fixture's or the live identity, else the OS user.
+  const identity = facts.identity || (facts.prs && facts.prs.identity) || null;
+  const holdLogin = () => (identityKnown(identity) ? { login: identity.login, os: false } : { login: userInfo().username, os: true });
   const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
   let model = build();
   if (opts.expand.length) {
@@ -394,10 +406,104 @@ async function driveOnce(facts, opts, size, cfg) {
           .catch((e) => ctx.notice(`open failed: ${e.message} · ${row.url}`, true)),
       );
     },
-    focus: (row) => {
+    focus: (row, { any = false } = {}) => {
       const pane = model.panes[view.pane];
-      const problem = focusProblem(pane, row, opts.herdr && facts.herdr && facts.herdr.state === 'connected');
+      const problem = focusProblem(pane, row, opts.herdr && facts.herdr && facts.herdr.state === 'connected', { any });
       ctx.notice(problem || `would focus ${row.paneId} (${row.name}); --render-once never runs herdr agent focus`, Boolean(problem));
+    },
+    // The hold card: built for real (a delegate home's record read through
+    // its own snapshot script), shown through --viewer-cmd when given and
+    // only described otherwise; the temp file goes either way.
+    viewCard: (row) => {
+      const what = `the hold card of ${row.name}`;
+      view.busy = `preparing ${what}`;
+      pending.push(
+        (async () => {
+          let prepared;
+          try {
+            prepared = await prepareHoldCard(row.card, { timeoutMs: opts.snapshotTimeout * 1000, onBusy: (text) => ctx.notice(text) });
+          } catch (e) {
+            ctx.notice(`${what}: ${e.message}`, true);
+            return;
+          }
+          const partial = prepared.partial ? ' (partial record)' : '';
+          const { argv, source } = resolveViewer({ cmd: opts.viewerCmd, env: process.env });
+          try {
+            if (!opts.viewerCmd) {
+              ctx.notice(`would view ${what}${partial}, ${prepared.text.split('\n').length} lines, with ${argv.join(' ')} (${source}); no --viewer-cmd in --render-once`);
+              return;
+            }
+            const r = await runViewer(prepared.path, { argv });
+            ctx.notice(r.code === 0 || r.code === null ? `viewed ${what}${partial} (${source})` : `${argv[0]} exited ${r.code} · ${what}`, r.code !== 0 && r.code !== null);
+          } catch (e) {
+            ctx.notice(`viewer failed (${argv[0]}): ${e.message} · ${what}`, true);
+          } finally {
+            removeTempDir(prepared.dir);
+          }
+        })().finally(() => {
+          view.busy = null;
+        }),
+      );
+    },
+    // The two writes, for real, against the home the row names: a fixture
+    // points its homes at scratch directories holding a fake fm-captain-hold.sh.
+    // A one-shot render refreshes nothing afterwards; the footer says what ran.
+    holdDiscard: (row) => {
+      const { hold } = row;
+      const who = holdLogin();
+      view.busy = `discarding ${hold.id}`;
+      pending.push(
+        discardHold({ home: hold.home, id: hold.id, login: who.login, timeoutMs: HOLD_TIMEOUT_MS })
+          .then((r) => {
+            if (!r.ok) {
+              ctx.notice(holdFailureText(r), true);
+              return;
+            }
+            const said = firstLine(r.stdout);
+            ctx.notice(`discarded ${hold.id}${who.os ? ` as OS user ${who.login} (GitHub login unknown)` : ''}${said ? ` · ${said}` : ''}`);
+          })
+          .finally(() => {
+            view.busy = null;
+          }),
+      );
+    },
+    holdDefer: (row, { reason, until }) => {
+      const { hold } = row;
+      view.busy = `deferring ${hold.id}`;
+      pending.push(
+        deferHold({ home: hold.home, id: hold.id, reason, until, timeoutMs: HOLD_TIMEOUT_MS })
+          .then((r) => {
+            if (!r.ok) {
+              ctx.notice(holdFailureText(r), true);
+              return;
+            }
+            const said = firstLine(r.stdout);
+            ctx.notice(`deferred ${hold.id} until ${until}${said ? ` · ${said}` : ''}`);
+          })
+          .finally(() => {
+            view.busy = null;
+          }),
+      );
+    },
+    // A delegate hold's full reason, read from its home before the defer
+    // prompt opens (the ledger's copy is cut at 160 characters).
+    holdReason: (row) => {
+      const { hold } = row;
+      view.busy = `reading the record of ${hold.id}`;
+      pending.push(
+        readHoldRecord(hold.home, hold.id, { timeoutMs: opts.snapshotTimeout * 1000 })
+          .then((r) => {
+            const reason = r.record && r.record.hold_reason ? String(r.record.hold_reason) : null;
+            if (!reason) {
+              ctx.notice(`${hold.id}: the full hold reason is not readable (${r.error || 'no hold reason on the record'}); defer it from ${hold.homeId} itself`, true);
+              return;
+            }
+            openDeferPrompt(view, row, reason);
+          })
+          .finally(() => {
+            view.busy = null;
+          }),
+      );
     },
     viewReport: (row) => {
       const pane = model.panes[view.pane];
@@ -475,7 +581,10 @@ async function driveOnce(facts, opts, size, cfg) {
   if (cfg.problem) ctx.notice(cfg.problem, true);
   if (cfg.status === 'defaults' && cfg.error) ctx.notice(`config: ${cfg.error}; running with the defaults`, true);
   for (const [n, input] of opts.inputs.entries()) {
-    if (view.page === 'settings' && pending.length) await Promise.all(pending.splice(0));
+    // On the Settings page, and while a hold effect runs (view.busy: a card,
+    // a delegate record read that opens the defer prompt, the command), the
+    // effects finish before the next input, so a list reads in order.
+    if ((view.page === 'settings' || view.busy) && pending.length) await Promise.all(pending.splice(0));
     if (input.kind === 'key') {
       handleKey(ctx, input.key);
       continue;

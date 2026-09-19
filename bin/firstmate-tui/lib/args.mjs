@@ -32,9 +32,10 @@ options:
                          In flight group instead)
   --opener-cmd <argv>    command that opens a URL in the browser (default: open on
                          macOS, xdg-open on Linux); quoted string, split on whitespace
-  --viewer-cmd <argv>    command that shows a Findings report in the terminal (default:
-                         glow -p when glow is on PATH, else $EDITOR, else vim, else
-                         less); quoted string, split on whitespace; the path is appended
+  --viewer-cmd <argv>    command that shows a Findings report or a hold card in the
+                         terminal (default: glow -p when glow is on PATH, else $EDITOR,
+                         else vim, else less); quoted string, split on whitespace; the
+                         path is appended
   --view-state <path>    where hidden rows, hidden panes, dragged column widths and the
                          selection (focused pane, selected row, expanded groups, scroll)
                          are remembered (default:
