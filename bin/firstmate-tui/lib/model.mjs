@@ -80,10 +80,25 @@
 // a connected herdr), unknown (herdr is disconnected, so absence is unproved),
 // focusable, url (a PR URL the row can open, or null), reportPath (Findings and
 // Landed: the absolute report path on this host, or null; reportRemote when a
-// remote home holds it) and, for In flight grouping,
+// remote home holds it), card and hold (below) and, for In flight grouping,
 // group / expanded / flag on a group row and parent on its children. A row
 // listed under showHidden carries hidden: true. The mapping follows the scout
 // report's section 1 table.
+//
+// card: null, or what `enter` opens as the row's hold card (lib/card.mjs,
+// lib/hold.mjs): { id, home (path), homeId, homeLabel, remote, source,
+// record }. A main-home row's record is the snapshot's backlog record
+// (source 'snapshot'); a delegate home's row carries a ledger-shaped stand-in
+// (source 'ledger') and the host reads the full record from that home on
+// demand. Which rows carry one: Needs you's hold rows and the decide and
+// blocked rows built from a task's status decisions (mainCard), a delegate's
+// decision rows (ledgerCard), and any In flight or Landed row whose task has
+// a backlog record with hold_kind captain, whatever its bucket. Review rows
+// never do: their enter opens the PR.
+// hold: null, or the captain hold d and D act on: { id, home, homeId, remote,
+// reason, truncated }, set only while the record is a captain hold that is
+// not done; a delegate's reason comes from its ledger cut at 160 characters
+// (truncated: true), so a defer reads the full record first (lib/app.mjs).
 
 import { PANES } from './layout.mjs';
 import { basename, clean, fmtAge, parseTime, relativeTo, repoFromUrl } from './text.mjs';
@@ -187,6 +202,8 @@ function makeRow(fields) {
     flag: false,
     hidden: false,
     ageFallback: false,
+    card: null,
+    hold: null,
     ...fields,
   };
   row.name = fields.name ?? row.id;
@@ -219,6 +236,63 @@ function childStatusAge(facts, ledger, id) {
 function backlogIndex(snap) {
   const backlog = snap.backlog && Array.isArray(snap.backlog.records) ? snap.backlog.records : [];
   return new Map(backlog.map((r) => [r.id, r]));
+}
+
+// The card and the hold of a main-home task from its backlog record (see the
+// header): every such row carries the card; the hold only while the record
+// is a captain hold that is not done, since the two actions act on an open
+// hold and a finished task has none to discard or defer.
+function mainCard(facts, id, record) {
+  const rec = record || null;
+  const at = { id, home: facts.fmHome, homeId: MAIN_HOME_LABEL, homeLabel: MAIN_HOME_LABEL, remote: false };
+  const held = Boolean(rec && rec.hold_kind === 'captain');
+  return {
+    card: { ...at, source: 'snapshot', record: rec },
+    hold: held && rec.state !== 'done' ? { ...at, reason: rec.hold_reason ?? null, truncated: false } : null,
+  };
+}
+
+// Whether a main-home task's backlog record carries a captain hold, any bucket.
+function heldForCaptain(record) {
+  return Boolean(record && record.hold_kind === 'captain');
+}
+
+// The card and the hold of a delegate home's task from its ledger: the
+// captain-hold entry of decisions_open (the one place the ledger says a hold
+// is the captain's), with the title and repo of its queued entry and the
+// reason of its holds entry when the decision carries none. The stand-in
+// record is shaped like a backlog record so the card builder reads it as
+// one; the host replaces it with the home's own record when it can. A row
+// without a captain-hold decision still gets a card (d is the decision it
+// lists), never a hold.
+function ledgerCard(ledger, id, summaryText = null) {
+  const summary = ledger.summary || {};
+  const list = (key) => (Array.isArray(summary[key]) ? summary[key] : []);
+  const d = list('decisions_open').find((x) => x && x.id === id && x.verb === 'captain-hold') || null;
+  const q = list('queued').find((x) => x && x.id === id) || {};
+  const h = list('holds').find((x) => x && x.id === id) || {};
+  const at = { id, home: ledger.home, homeId: homeIdOf(ledger), homeLabel: homeLabel(ledger), remote: Boolean(ledger.remote) };
+  const reason = (d && d.reason) || h.reason || null;
+  const record = {
+    id,
+    title: q.title || h.title || (d && d.summary) || summaryText || null,
+    repo: q.repo || null,
+    state: q.id ? 'queued' : null,
+    kind: q.kind || null,
+    hold_kind: d ? 'captain' : null,
+    hold_reason: reason,
+    hold_until: (d && d.hold_until) || q.hold_until || null,
+    hold_set: null,
+    hold_bucket: (d && d.hold_bucket) || q.hold_bucket || null,
+    hold_age_days: (d && d.hold_age_days) ?? q.hold_age_days ?? null,
+    body_lines: [],
+    pr_url: null,
+    report_path: null,
+  };
+  return {
+    card: { ...at, source: 'ledger', record },
+    hold: d ? { ...at, reason, truncated: true } : null,
+  };
 }
 
 // The backlog state of a task's row: the snapshot's backlog record first, then
@@ -369,12 +443,14 @@ function fleetPrTasks(facts) {
 
 // The keyed decisions and the blocked event of one task record, as rows
 // (without the review row). Needs you lists them for main-home workers; a
-// secondmate record's rows go under its In flight group instead.
-function taskDecisionRows(facts, task, decisions = null) {
+// secondmate record's rows go under its In flight group instead. Each row
+// carries the task's card (its backlog record, when the snapshot has one).
+function taskDecisionRows(facts, task, decisions = null, backlogById = new Map()) {
   const rows = [];
   const hints = task.hints || {};
   const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
   const list = decisions || (Array.isArray(hints.open_decisions) ? hints.open_decisions : []);
+  const held = mainCard(facts, task.id, backlogById.get(task.id));
   for (const d of list) {
     rows.push(
       makeRow({
@@ -388,6 +464,7 @@ function taskDecisionRows(facts, task, decisions = null) {
         lost: herdr.lost,
         unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId),
+        ...held,
       }),
     );
   }
@@ -404,6 +481,7 @@ function taskDecisionRows(facts, task, decisions = null) {
         lost: herdr.lost,
         unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId),
+        ...held,
       }),
     );
   }
@@ -430,7 +508,7 @@ function needsRows(facts, opts) {
   const fetched = fetchedByUrl(facts.prs);
 
   for (const task of tasks) {
-    if (task.kind !== 'secondmate' || opts.allHomesNeeds) rows.push(...taskDecisionRows(facts, task));
+    if (task.kind !== 'secondmate' || opts.allHomesNeeds) rows.push(...taskDecisionRows(facts, task, null, backlogById));
     if (parkedWithPr(task, backlogById)) {
       const row = backlogById.get(task.id);
       const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
@@ -485,6 +563,7 @@ function needsRows(facts, opts) {
           text: r.hold_reason ? `${r.title} · ${r.hold_reason}` : r.title,
           repo: r.repo,
           ageSeconds: ageSince(facts.now, since) ?? daysToSeconds(r.hold_age_days),
+          ...mainCard(facts, r.id, r),
         }),
       );
     }
@@ -936,14 +1015,19 @@ function decisionRow(ledger, d, extraFields = {}) {
     home: homeLabel(ledger),
     homeId: homeIdOf(ledger),
     ageSeconds: daysToSeconds(d.hold_age_days),
+    ...ledgerCard(ledger, d.id, d.summary),
     ...extraFields,
   });
 }
 
+// A main-home worker's row. A task whose backlog record is a captain hold,
+// any bucket, carries the card (and the hold while the task is not done), so
+// enter shows the hold instead of focusing the pane; f still focuses it.
 function mainTaskRow(facts, task, backlogById = new Map()) {
   const cs = task.current_state || {};
   const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
   const doing = cs.detail || (task.hints && task.hints.last_event_text) || (task.paths && task.paths.status_log && task.paths.status_log.last_event && task.paths.status_log.last_event.note) || '';
+  const record = backlogById.get(task.id);
   return makeRow({
     tag: prStateTag(cs.state, { awaiting: awaitingMerge(task, backlogById), repairing: isRepairing(facts, task) }),
     extra: herdr.extra,
@@ -956,6 +1040,7 @@ function mainTaskRow(facts, task, backlogById = new Map()) {
     unknown: herdr.unknown,
     focusable: Boolean(herdr.paneId),
     url: task.pr && task.pr.url ? task.pr.url : null,
+    ...(heldForCaptain(record) ? mainCard(facts, task.id, record) : {}),
   });
 }
 
@@ -992,6 +1077,8 @@ function ledgerChildRows(facts, ledger, decisionByChild) {
         lost: herdr.lost,
         unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId) && !ledger.remote,
+        // A child the ledger holds for the captain carries the card and the hold; any other child keeps enter = focus.
+        ...(d && d.verb === 'captain-hold' ? ledgerCard(ledger, child.id, d.summary) : {}),
       }),
     );
   }
@@ -1015,6 +1102,7 @@ function ledgerChildRows(facts, ledger, decisionByChild) {
         lost: herdr.lost,
         unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId) && !ledger.remote,
+        ...(d && d.verb === 'captain-hold' ? ledgerCard(ledger, ep.id, d.summary) : {}),
       }),
     );
   }
@@ -1028,7 +1116,7 @@ function childMarker(row) {
 // One group per secondmate home: { row, children } where children is the list
 // of rows shown under it when expanded (the mate's own agent row from the main
 // snapshot first, then workers by state, then the home's live decisions).
-function ledgerGroup(facts, ledger, mateTask, expanded) {
+function ledgerGroup(facts, ledger, mateTask, expanded, backlogById = new Map()) {
   const key = groupKeyFor(ledger);
   const decisions = liveDecisions(ledger);
   const summary = ledger.summary || {};
@@ -1044,7 +1132,7 @@ function ledgerGroup(facts, ledger, mateTask, expanded) {
   // in the main home (hints.open_decisions / blocked_event); one the ledger
   // already lists under the same id or key is not repeated.
   const relayedDecisions = (Array.isArray(mateTask && mateTask.hints && mateTask.hints.open_decisions) ? mateTask.hints.open_decisions : []).filter((d) => !decisions.some((x) => x.id === d.key || x.key === d.key));
-  const relayed = mateTask ? taskDecisionRows(facts, mateTask, relayedDecisions) : [];
+  const relayed = mateTask ? taskDecisionRows(facts, mateTask, relayedDecisions, backlogById) : [];
   const ranked = [...(mateRow ? [mateRow] : []), ...workers, ...relayed];
   const worst = ranked.reduce((w, r) => (w === null || stateRank(r.tag) < stateRank(w.tag) ? r : w), null);
   const live = workers.filter((r) => !TERMINAL_TAGS.has(r.tag)).length;
@@ -1090,7 +1178,7 @@ function inflightRows(facts, opts) {
   for (const ledger of facts.ledgers || []) {
     const mate = mateTaskFor(tasks, ledger);
     if (mate) folded.add(mate.id);
-    entries.push(ledgerGroup(facts, ledger, mate, expanded.has(groupKeyFor(ledger))));
+    entries.push(ledgerGroup(facts, ledger, mate, expanded.has(groupKeyFor(ledger)), backlogById));
   }
   const mainEntries = tasks.filter((t) => !folded.has(t.id)).map((t) => ({ row: mainTaskRow(facts, t, backlogById), children: [] }));
   const ordered = sortInflight([...mainEntries, ...entries]);
@@ -1238,6 +1326,8 @@ function landedRows(facts) {
         lost: herdr.lost,
         unknown: herdr.unknown,
         focusable: Boolean(herdr.paneId),
+        // A finished captain hold keeps its card (the answer is on the record); it is done, so there is no hold to act on.
+        ...(heldForCaptain(r) ? mainCard(facts, r.id, r) : {}),
       }),
     );
   }

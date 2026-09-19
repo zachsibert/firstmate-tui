@@ -71,6 +71,16 @@
 // buffer, raw mode off, input paused), the viewer runs with inherited stdio,
 // and the screen is resumed and repainted when it exits. SIGINT is ignored by
 // the board meanwhile so a ctrl-c meant for the viewer never quits the board.
+// A hold card (enter on a held row, lib/card.mjs) goes through the same path
+// (viewFile) from a temp file lib/hold.mjs writes and removes afterwards.
+//
+// The two writes, d (discard) and D (defer), run firstmate's own
+// fm-captain-hold.sh in the hold's home through lib/hold.mjs once the footer
+// prompt is confirmed (lib/controller.mjs); the result is the footer notice,
+// a success starts a refresh so the row leaves the board, and a failure
+// shows the command's own words in red and changes nothing else. The
+// refresh's own start and clear notices are weak (below), so they never
+// paint over a result the captain has not read yet.
 //
 // The Settings page (`.`, lib/settings.mjs) fetches the GitHub releases API
 // through --curl-cmd when it opens and on r inside it, never on the tick; a
@@ -79,13 +89,15 @@
 // process with RELAUNCH_EXIT, which bin/firstmate-tui.sh run answers by starting
 // the copy at the same path again (Node cannot exec in place).
 
+import { userInfo } from 'node:os';
 import { buildModel, initialPrs, mergePrs, parseTarget, prsFailureText } from './model.mjs';
 import { renderFrame } from './render.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
-import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, savedFocus, savedScroll, viewProblem } from './controller.mjs';
+import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openDeferPrompt, savedFocus, savedScroll, viewProblem } from './controller.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './viewer.mjs';
+import { deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, prepareHoldCard, removeTempDir } from './hold.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.mjs';
 import { cachedFlags, loadStateCache, resolveCachePath, saveStateCache } from './cache.mjs';
 import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsConfig, settingsFlags } from './settings.mjs';
@@ -174,9 +186,12 @@ export async function runApp(opts) {
       lastClick: null,
       notice: '',
       noticeBad: false,
+      prompt: null, // the discard or defer prompt in the footer (lib/card.mjs), or null
+      busy: null, // a short text while a hold effect runs (a delegate record read, the command); the controller refuses a second one meanwhile
       page: 'board',
       settings: initialSettings({ install: readInstall(opts.installRoot || defaultInstallRoot()), flags: settingsFlags(opts), config: settingsConfig(cfg) }),
     },
+    noticeStrongUntil: 0, // epoch ms until which the shown notice must not be painted over by a weak one
     refreshing: false,
     refreshPending: false,
     lastSnapshotStart: 0,
@@ -292,7 +307,12 @@ export async function runApp(opts) {
     screen.draw(frame.lines);
   };
 
-  const notice = (text, bad = false, ttlMs = 6000) => {
+  // A weak notice (the refresh's `refreshing...` and its clear) yields to a
+  // notice still inside its time to live, so the result of a hold action
+  // stays on screen through the refresh it starts.
+  const notice = (text, bad = false, ttlMs = 6000, { weak = false } = {}) => {
+    if (weak && state.noticeStrongUntil > Date.now()) return;
+    state.noticeStrongUntil = weak ? 0 : Date.now() + ttlMs;
     state.view.notice = text;
     state.view.noticeBad = bad;
     if (state.noticeTimer) clearTimeout(state.noticeTimer);
@@ -399,7 +419,7 @@ export async function runApp(opts) {
       state.refreshTimer = null;
     }
     state.nextRefreshAt = state.lastSnapshotStart + opts.refresh * 1000;
-    notice(`refreshing (${why})…`, false, 60000);
+    notice(`refreshing (${why})…`, false, 60000, { weak: true });
     const timeoutMs = opts.snapshotTimeout * 1000;
     const snap = await runSnapshot(state.fmHome, { timeoutMs });
     if (snap.value && !snap.error) {
@@ -469,7 +489,7 @@ export async function runApp(opts) {
       else if (state.prs.enabled && !identityKnown(state.identity) && !state.identityShown) {
         state.identityShown = true;
         notice(`GitHub identity unknown (${state.identity.reason}); set identity.github_login in ${cfg.path || 'the config file'} or run gh auth login`, true, 30000);
-      } else notice('', false, 1);
+      } else notice('', false, 1, { weak: true });
     }
     if (state.refreshPending) {
       state.refreshPending = false;
@@ -488,9 +508,9 @@ export async function runApp(opts) {
     state.debounceTimer.unref?.();
   };
 
-  const focusRow = async (row) => {
+  const focusRow = async (row, { any = false } = {}) => {
     const pane = state.model.panes[state.view.pane];
-    const problem = focusProblem(pane, row, Boolean(herdr));
+    const problem = focusProblem(pane, row, Boolean(herdr), { any });
     if (problem) {
       notice(problem, true);
       return;
@@ -528,17 +548,12 @@ export async function runApp(opts) {
     }
   };
 
-  // Show a Findings report: suspend the screen, run the viewer with the
+  // Show one file in the viewer: suspend the screen, run the viewer with the
   // terminal, resume and repaint. Refreshes keep running underneath; their
-  // draws are skipped until the viewer has exited.
-  const viewRow = async (row) => {
-    const pane = state.model.panes[state.view.pane];
-    const problem = viewProblem(pane, row);
-    if (problem) {
-      notice(problem, true);
-      return;
-    }
-    if (state.viewing) return;
+  // draws are skipped until the viewer has exited. Resolves to { argv,
+  // source, result, failure } for the caller's notice. Shared by a Findings
+  // report (viewRow) and a hold card (viewCard).
+  const viewFile = async (path) => {
     const { argv, source } = resolveViewer({ cmd: opts.viewerCmd, env: process.env });
     state.viewing = true;
     const sigint = process.listeners('SIGINT');
@@ -549,7 +564,7 @@ export async function runApp(opts) {
     let result = null;
     let failure = null;
     try {
-      result = await runViewer(row.reportPath, { argv });
+      result = await runViewer(path, { argv });
     } catch (e) {
       failure = e;
     } finally {
@@ -558,9 +573,117 @@ export async function runApp(opts) {
       for (const fn of sigint) process.on('SIGINT', fn);
       state.viewing = false;
     }
-    if (failure) notice(`viewer failed (${argv[0]}): ${failure.message.slice(0, 60)} · ${row.reportPath}`, true, 15000);
-    else if (result && result.code !== 0 && result.code !== null) notice(`${argv[0]} exited ${result.code} · ${row.reportPath}`, true, 10000);
-    else notice(`viewed ${row.reportPath} (${source})`, false, 8000);
+    return { argv, source, result, failure };
+  };
+
+  // The footer's words for a viewer run over `what` (a report path, or `the hold card of <id>`).
+  const viewNotice = ({ argv, source, result, failure }, what) => {
+    if (failure) notice(`viewer failed (${argv[0]}): ${failure.message.slice(0, 60)} · ${what}`, true, 15000);
+    else if (result && result.code !== 0 && result.code !== null) notice(`${argv[0]} exited ${result.code} · ${what}`, true, 10000);
+    else notice(`viewed ${what} (${source})`, false, 8000);
+  };
+
+  const viewRow = async (row) => {
+    const pane = state.model.panes[state.view.pane];
+    const problem = viewProblem(pane, row);
+    if (problem) {
+      notice(problem, true);
+      return;
+    }
+    if (state.viewing) return;
+    viewNotice(await viewFile(row.reportPath), row.reportPath);
+    draw();
+  };
+
+  // The hold card of a row: built from durable records (lib/hold.mjs
+  // prepareHoldCard, which reads a delegate home's record on demand), shown
+  // through the viewer from a temp file that is removed once it exits.
+  const viewCard = async (row) => {
+    if (state.viewing || state.view.busy) return;
+    const what = `the hold card of ${row.name}`;
+    state.view.busy = `preparing ${what}`;
+    let prepared;
+    try {
+      prepared = await prepareHoldCard(row.card, { timeoutMs: opts.snapshotTimeout * 1000, onBusy: (text) => notice(text, false, 60000) });
+    } catch (e) {
+      state.view.busy = null;
+      notice(`${what}: ${e.message.slice(0, 80)}`, true, 15000);
+      draw();
+      return;
+    }
+    state.view.busy = null;
+    let shown;
+    try {
+      shown = await viewFile(prepared.path);
+    } finally {
+      removeTempDir(prepared.dir);
+    }
+    viewNotice(shown, `${what}${prepared.partial ? ' (partial record)' : ''}`);
+    draw();
+  };
+
+  // The login the discard decision names: the resolved GitHub identity, else
+  // the OS user, which the success notice then says.
+  const holdLogin = () => (identityKnown(state.identity) ? { login: state.identity.login, os: false } : { login: userInfo().username, os: true });
+
+  // One hold command to its end: the footer names the run, then its result.
+  // A failure shows the command's own words in red for 15 s and changes
+  // nothing else; a success starts a refresh so the row leaves the board.
+  const runHold = async (row, label, run) => {
+    const { hold } = row;
+    state.view.busy = `${label} ${hold.id}`;
+    notice(`running fm-captain-hold.sh for ${hold.id} in ${hold.homeId}...`, false, HOLD_TIMEOUT_MS);
+    draw();
+    let r;
+    try {
+      r = await run(hold);
+    } catch (e) {
+      r = { ok: false, error: e.message, stdout: '', stderr: '' };
+    }
+    state.view.busy = null;
+    if (!r.ok) {
+      notice(holdFailureText(r), true, 15000);
+      draw();
+      return null;
+    }
+    return r;
+  };
+
+  const holdDiscard = async (row) => {
+    const who = holdLogin();
+    const r = await runHold(row, 'discarding', (hold) => discardHold({ home: hold.home, id: hold.id, login: who.login, timeoutMs: HOLD_TIMEOUT_MS }));
+    if (!r) return;
+    const said = firstLine(r.stdout);
+    notice(`discarded ${row.hold.id}${who.os ? ` as OS user ${who.login} (GitHub login unknown)` : ''}${said ? ` · ${said}` : ''}`, false, 15000);
+    refresh('discard');
+  };
+
+  const holdDefer = async (row, { reason, until }) => {
+    const r = await runHold(row, 'deferring', (hold) => deferHold({ home: hold.home, id: hold.id, reason, until, timeoutMs: HOLD_TIMEOUT_MS }));
+    if (!r) return;
+    const said = firstLine(r.stdout);
+    notice(`deferred ${row.hold.id} until ${until}${said ? ` · ${said}` : ''}`, false, 15000);
+    refresh('defer');
+  };
+
+  // A delegate home's hold carries only the ledger's truncated reason: read
+  // the home's own record for the full one before the defer prompt opens,
+  // and refuse rather than shorten the captain's own words.
+  const holdReason = async (row) => {
+    const { hold } = row;
+    state.view.busy = `reading the record of ${hold.id}`;
+    notice(`reading the record of ${hold.id} from ${hold.homeId}...`, false, 60000);
+    draw();
+    const r = await readHoldRecord(hold.home, hold.id, { timeoutMs: opts.snapshotTimeout * 1000 });
+    state.view.busy = null;
+    const reason = r.record && r.record.hold_reason ? String(r.record.hold_reason) : null;
+    if (!reason) {
+      notice(`${hold.id}: the full hold reason is not readable (${r.error || 'no hold reason on the record'}); defer it from ${hold.homeId} itself`, true, 15000);
+      draw();
+      return;
+    }
+    openDeferPrompt(state.view, row, reason);
+    notice('', false, 1);
     draw();
   };
 
@@ -616,11 +739,23 @@ export async function runApp(opts) {
     open: (row) => {
       openRow(row);
     },
-    focus: (row) => {
-      focusRow(row);
+    focus: (row, o) => {
+      focusRow(row, o);
     },
     viewReport: (row) => {
       viewRow(row);
+    },
+    viewCard: (row) => {
+      viewCard(row);
+    },
+    holdDiscard: (row) => {
+      holdDiscard(row);
+    },
+    holdDefer: (row, o) => {
+      holdDefer(row, o);
+    },
+    holdReason: (row) => {
+      holdReason(row);
     },
     refresh: () => {
       refresh('manual');

@@ -123,6 +123,16 @@
 #                   a report only, a live pane only and nothing; a local
 #                   secondmate's landed entries with a PR, a live pane, a report
 #                   and nothing; a remote home's report-only entry
+#   holds.json      160x60, the hold cards and the d / D actions: a keyed
+#                   decision on a working task with a pane, two live captain
+#                   holds (one with a PR, a report, a brief, other files and a
+#                   status log on disk, one with none), a review row, a paused
+#                   task whose record is a dated captain hold (In flight), a
+#                   done task that was a captain hold (Landed), a delegate
+#                   home with two captain holds and a remote home with one;
+#                   its two home paths are placeholders the suite rewrites to
+#                   scratch homes holding the files, a fake fm-fleet-snapshot.sh
+#                   and tests/fake-captain-hold.sh (the hold section below)
 #   cold-start.json 120x40, the first refresh in flight with nothing landed:
 #                   no snapshot, no prs block, no herdr block, so every pane
 #                   shows its loading spinner (the two PR panes each naming
@@ -179,6 +189,12 @@ printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\ncat "%
 # shellcheck disable=SC2016
 printf '#!/usr/bin/env bash\necho "prs $*" >> "$FM_BOARD_TEST_FETCH_LOG"\necho "{\\"candidate_prs\\":[]}"\n' > "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
 chmod +x "$FAKE_HOME/bin/fm-fleet-snapshot.sh" "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
+# The stand-in's fm-captain-hold.sh is the fake too, so the pty section's D prompt never reaches a
+# real firstmate command (tests/fake-captain-hold.sh logs to FM_BOARD_TEST_HOLD_LOG).
+cp "$ROOT/tests/fake-captain-hold.sh" "$FAKE_HOME/bin/fm-captain-hold.sh"
+chmod +x "$FAKE_HOME/bin/fm-captain-hold.sh"
+HOLD_LOG="$SCRATCH/hold-calls.log"
+FAKE_HOME_REAL=$(cd "$FAKE_HOME" && pwd -P) # the cwd the fake logs, the temp directory's symlink resolved
 
 fails=0
 checks=0
@@ -449,7 +465,11 @@ assert_contains "$frame" "┌─ [3] Teammates' PRs (0) ─" "badge on Teammates
 assert_row "$frame" '^│ no pull requests waiting for your review +│$' "populated: Teammates' PRs is empty (no toreview rows in the fixture)"
 assert_row "$frame" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' "populated: the empty Teammates' PRs pane still heads its AUTHOR column (falsify: size the column set by the rows present)"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
-assert_row "$frame" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys (falsify: drop . settings from FOOTER_KEYS)"
+# The default selection, scout-beta's blocked row, carries a hold card and a pane, so the footer names
+# enter card and f focus in place of enter open/focus/view and, with no captain hold on that task, no d
+# or D (falsify: drop . settings from FOOTER_KEYS, or the card branch from boardHints).
+assert_row "$frame" '^ j/k move  tab pane  enter card  f focus  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group)"
+assert_row "$(render populated.json --keys "tab")" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a PR row (falsify: drop . settings from FOOTER_KEYS)"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs).
 frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l") || fail "keys l: render exited non-zero"
@@ -524,7 +544,8 @@ assert_row "$frame_med" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "medium: My P
 assert_no_row "$frame_med" ' TITLE +BASE' "medium: no BASE column"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$frame_med" '^ j/k  tab  enter  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer"
+assert_row "$frame_med" '^ enter card  f focus  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer (the card form: the default selection is scout-beta's card row with a pane)"
+assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab")" '^ j/k  tab  enter  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer on a PR row"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -672,16 +693,22 @@ assert_viewed "-p
 frame_v=$(render_view populated.json "tab,tab,tab,j,enter") || fail "viewer remote: render exited non-zero"
 assert_not_viewed "a remote home's report is never opened"
 assert_contains "$frame_v" "mobile-fix: report lives on another host (remote-sm (remote)); not reachable from here" "remote report: red notice instead (falsify: drop reportRemote)"
-frame_v=$(render_view lost.json "enter") || fail "viewer wrong pane: render exited non-zero"
-assert_not_viewed "enter outside Findings never runs the viewer"
+frame_v=$(render_view lost.json "tab,enter") || fail "viewer wrong pane: render exited non-zero"
+assert_not_viewed "enter on a PR row never runs the viewer (a Needs you row would show its hold card through it; the hold section covers that)"
 frame_v=$(render lost.json --keys "?") || fail "help: render exited non-zero"
 assert_contains "$frame_v" "Findings row: open the report in the viewer (glow, \$EDITOR, vim, less)" "help overlay documents the viewer"
 assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
 assert_contains "$frame_v" "1 - 6        show or hide a pane" "help overlay documents 1-5"
 assert_contains "$frame_v" "r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)" "help overlay documents r"
-# The board never moves the firstmate pane; the captain splits panes himself (falsify: add an f line to HELP_LINES).
+# The board never moves the firstmate pane; the captain splits panes himself, and f focuses the
+# selected row's pane instead (falsify: bring a pane-move line back into HELP_LINES, or drop the f, d
+# or D lines).
 assert_not_contains "$frame_v" "firstmate pane" "help overlay does not mention the firstmate pane"
-assert_not_contains "$frame_v" "  f  " "help overlay has no f key"
+assert_contains "$frame_v" "f            focus the selected row's herdr pane, in any pane" "help overlay documents f as a focus"
+assert_contains "$frame_v" "d            discard the selected hold: asks y first, then runs fm-captain-hold.sh answer" "help overlay documents d"
+assert_contains "$frame_v" "D            defer the selected hold to a date (default today + 14 days): fm-captain-hold.sh hold" "help overlay documents D"
+assert_contains "$frame_v" "show its hold card in the viewer" "help overlay documents enter on a held row"
+assert_contains "$frame_v" "Its two writes, d and D," "help overlay names the board's two writes (falsify: put the read-only sentence back)"
 
 # ------------------------------------------------------------- lost panes
 frame_l=$(render lost.json --expand all) || fail "lost: render exited non-zero"
@@ -698,8 +725,8 @@ assert_no_row "$tags_l" '\{red-fg\}decide.*ship-alpha' "Needs you row of the liv
 # Enter on a lost row: a footer notice, never a focus (falsify: drop the lost check in focusProblem).
 frame_k=$(render lost.json --keys "tab,j,enter") || fail "lost enter inflight: render exited non-zero"
 assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "enter on the lost In flight row says pane lost"
-frame_k=$(render lost.json --keys "j,enter") || fail "lost enter needs: render exited non-zero"
-assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "enter on the lost Needs you row says pane lost"
+frame_k=$(render lost.json --keys "j,f") || fail "lost f needs: render exited non-zero"
+assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "f on the lost Needs you row says pane lost (enter there shows the hold card since 0.6.0)"
 # Disconnected herdr: absence is unproved, so the cell reads unknown in grey and nothing is red (falsify: drop
 # the unknown branch in herdrColumn, or the grey style in rowSegments).
 frame_d=$(render lost-disconnected.json) || fail "disconnected: render exited non-zero"
@@ -848,6 +875,342 @@ if [ "$(printf '%s\n' "$problems" | sed -n 4p)" = "null" ]; then pass; else fail
 if [ "$(printf '%s\n' "$problems" | sed -n 5p)" = "enter focuses a worker: pick a row in In flight" ]; then pass; else fail "focusProblem refuses a Landed row without a pane"; fi
 if [ "$(printf '%s\n' "$problems" | sed -n 6p)" = "enter views a report: pick a row in Findings" ]; then pass; else fail "viewProblem refuses a Landed row without a report"; fi
 if [ "$(printf '%s\n' "$problems" | sed -n '7,13p' | tr '\n' ' ')" = "open view focus null null null null " ]; then pass; else fail "landedTarget rung order (PR, local report, live focusable pane with herdr on, a remote report skipped over to the pane, else null): got '$(printf '%s\n' "$problems" | sed -n '7,13p' | tr '\n' ' ')'"; fi
+
+# --------------------------------------------------------- hold cards, d and D
+# tests/fixtures/holds.json names two placeholder homes; HOLD_FIX is a copy with them rewritten to
+# HOLD_HOME and HOLD_DELEGATE, scratch homes this section fills. HOLD_HOME holds the main hold's files
+# (a 45-line report, a brief, two other entries under data/main-hold/, a 13-line status log, and a scout
+# report for the Findings check) and tests/fake-captain-hold.sh as bin/fm-captain-hold.sh; HOLD_DELEGATE
+# holds a fake bin/fm-fleet-snapshot.sh that logs `snapshot FM_HOME=<home>` to HOLD_LOG and prints the
+# delegate's two full records (or fails under FAKE_SNAPSHOT_FAIL), a 3-line report and the same fake
+# hold command. The fake hold command logs FM_HOME, its cwd, its argv and the decision file's contents
+# to HOLD_LOG and answers as the real one does, or refuses with one stderr line under FAKE_HOLD_FAIL.
+# A one-shot render really runs the home's bin/fm-captain-hold.sh, which is why the homes are scratch.
+# Needs you rows: decide-task, main-hold, bare-hold, ship-review; with --all-homes-needs delegate-hold,
+# child-held and remote-hold sit between bare-hold and the review row. In flight: decide-task, the
+# delegate group, held-worker, the remote group, ship-review. Findings: scout-x. Landed: plain-landed,
+# landed-hold.
+HOLD_HOME="$SCRATCH/holds-main"
+HOLD_DELEGATE="$SCRATCH/holds-delegate"
+HOLD_CARD="$SCRATCH/hold-card.md"
+HOLD_FIX="$SCRATCH/holds.json"
+mkdir -p "$HOLD_HOME/data/main-hold/attachments" "$HOLD_HOME/data/scout-x" "$HOLD_HOME/state" "$HOLD_HOME/bin" "$HOLD_DELEGATE/bin" "$HOLD_DELEGATE/data/delegate-hold"
+# The fake logs the cwd the command ran in as the kernel reports it (bash's PWD after node's cwd),
+# which on macOS resolves the temp directory's /var symlink; the FM_HOME line keeps the path as given.
+HOLD_HOME_REAL=$(cd "$HOLD_HOME" && pwd -P)
+HOLD_DELEGATE_REAL=$(cd "$HOLD_DELEGATE" && pwd -P)
+for i in $(seq 1 45); do echo "# Report line $i"; done > "$HOLD_HOME/data/main-hold/report.md"
+printf 'the brief\n' > "$HOLD_HOME/data/main-hold/brief.md"
+printf 'notes\n' > "$HOLD_HOME/data/main-hold/notes.md"
+printf '# scout report\n' > "$HOLD_HOME/data/scout-x/report.md"
+for i in $(seq 1 13); do echo "working: status line $i"; done > "$HOLD_HOME/state/main-hold.status"
+printf 'one\ntwo\nthree\n' > "$HOLD_DELEGATE/data/delegate-hold/report.md"
+cp "$ROOT/tests/fake-captain-hold.sh" "$HOLD_HOME/bin/fm-captain-hold.sh"
+cp "$ROOT/tests/fake-captain-hold.sh" "$HOLD_DELEGATE/bin/fm-captain-hold.sh"
+# shellcheck disable=SC2016 # the template literal is node's, not the shell's
+node -e '
+  const fs = require("fs");
+  const [fixture, out, mainHome, delegateHome] = process.argv.slice(1);
+  fs.writeFileSync(out, fs.readFileSync(fixture, "utf8").split("/fixture/holds-main").join(mainHome).split("/fixture/holds-delegate").join(delegateHome));
+  const record = (id, state, title, kind, reason, set, age, report, body) => ({ id, state, title, repo: "acme/etl", kind, hold_kind: "captain", hold_reason: reason, hold_until: null, hold_set: set, hold_bucket: "live", hold_age_days: age, captain_actionable: true, since: set.slice(0, 10), pr_url: null, report_path: report, body_lines: body, links: [], completion: { verb: null, date: null } });
+  const snapshot = { schema: "fm-fleet-snapshot.v1", fm_home: delegateHome, tasks: [], backlog: { records: [
+    record("delegate-hold", "queued", "Approve the warehouse index", "task", "The full delegate reason, longer than the ledger keeps: approve the warehouse index before the nightly loader is scheduled", "2026-09-15T08:00:00Z", 1, "data/delegate-hold/report.md", ["Captain hold set: 2026-09-15T08:00:00Z", "Index plan attached in the report."]),
+    record("child-held", "in_flight", "Cut over the nightly ETL", "ship", "The full child-held reason from the delegate home", "2026-09-14T08:00:00Z", 2, null, []),
+  ] } };
+  fs.writeFileSync(`${delegateHome}/snapshot.json`, JSON.stringify(snapshot));
+' "$FIX/holds.json" "$HOLD_FIX" "$HOLD_HOME" "$HOLD_DELEGATE"
+# shellcheck disable=SC2016 # the fake expands $FM_HOME and $FM_BOARD_TEST_HOLD_LOG at run time, not here
+printf '#!/usr/bin/env bash\n[ -z "${FM_BOARD_TEST_HOLD_LOG:-}" ] || echo "snapshot FM_HOME=$FM_HOME" >> "$FM_BOARD_TEST_HOLD_LOG"\nif [ -n "${FAKE_SNAPSHOT_FAIL:-}" ]; then echo "fm-fleet-snapshot: jq not found" >&2; exit 1; fi\ncat "%s"\n' "$HOLD_DELEGATE/snapshot.json" > "$HOLD_DELEGATE/bin/fm-fleet-snapshot.sh"
+chmod +x "$HOLD_HOME/bin/fm-captain-hold.sh" "$HOLD_DELEGATE/bin/fm-captain-hold.sh" "$HOLD_DELEGATE/bin/fm-fleet-snapshot.sh"
+# render_hold <keys> [flags]: HOLD_FIX with every fake wired and every log reset first; the fake viewer
+# copies the file it is given to HOLD_CARD, since the board removes a card's temp file as soon as the
+# viewer exits.
+render_hold() {
+  local keys=$1
+  shift
+  rm -f "${HOLD_LOG:?}" "${HOLD_CARD:?}" "${VIEWER_LOG:?}" "${OPENER_LOG:?}"
+  FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" FM_BOARD_TEST_VIEWER_COPY="$HOLD_CARD" FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" \
+    "$BOARD" --render-once --fixture "$HOLD_FIX" --no-herdr --keys "$keys" --viewer-cmd "$FAKE_VIEWER" --opener-cmd "$FAKE_OPENER" "$@"
+}
+assert_hold_log() { # <expected content> <label>: the fake hold command (and the delegate snapshot) logged exactly these lines
+  if [ -f "$HOLD_LOG" ] && [ "$(cat "$HOLD_LOG")" = "$1" ]; then pass; else fail "$2: hold log is '$(tr '\n' '|' < "$HOLD_LOG" 2>/dev/null || echo '<absent>')', expected '$(printf '%s' "$1" | tr '\n' '|')'"; fi
+}
+assert_no_hold() { # <label>
+  if [ -e "$HOLD_LOG" ]; then fail "$1: the hold command ran: $(tr '\n' '|' < "$HOLD_LOG")"; else pass; fi
+}
+card() { cat "$HOLD_CARD" 2>/dev/null || echo '<no card copied>'; }
+# The dates the board computes from the wall clock, in the local zone, as the board does (the offset
+# travels in the environment: node would read a `-1` argument as one of its own options).
+# shellcheck disable=SC2016 # the template literal is node's, not the shell's
+local_date() { DAYS="$1" node -e 'const p = (n) => String(n).padStart(2, "0"); const d = new Date(); d.setDate(d.getDate() + Number(process.env.DAYS)); console.log(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`);'; }
+TODAY=$(local_date 0)
+PLUS14=$(local_date 14)
+YESTERDAY=$(local_date -1)
+CLEAR="backspace,backspace,backspace,backspace,backspace,backspace,backspace,backspace,backspace,backspace"
+spell() { printf '%s' "$1" | sed 's/./&,/g; s/,$//'; } # a date as key tokens: 2,0,2,7,-,0,1,-,1,5
+
+# The rows and the footer (falsify: drop mainCard from the hold rows or taskDecisionRows, heldForCaptain
+# from mainTaskRow or landedRows, ledgerCard from decisionRow, or the card branch of boardHints).
+frame_h=$(render "$HOLD_FIX") || fail "holds: render exited non-zero"
+assert_contains "$frame_h" "Needs you (4)" "holds: a decision, two live holds and a review row"
+assert_row "$frame_h" '^│ decide +db-choice +decide-task +Postgres or SQLite for the cache\? +acme/api +main +- │$' "holds: the keyed decision row"
+assert_row "$frame_h" '^│ hold +- +main-hold +Pick the vendor for the address API · Two quotes arrived; pick the vendor for the address API +acme/api +main +3d │$' "holds: the main hold row"
+assert_row "$frame_h" '^│ hold +- +bare-hold +Keep or drop the legacy importer · Decide whether the legacy importer stays +acme/legacy +main +2d │$' "holds: the bare hold row"
+assert_row "$frame_h" '^│ review +#7 +ship-review ' "holds: the review row"
+assert_row "$frame_h" '^│ paused +idle +held-worker +paused: awaiting the captain.s go-ahead +acme/api +main +- │$' "holds: the paused worker whose record is a dated hold lists in In flight as usual"
+assert_row "$frame_h" '^│ answered +09-14 +landed-hold +Rename the widget table +acme/widgets +main +2d │$' "holds: the finished hold lists in Landed as usual"
+assert_row "$frame_h" '^ j/k move  tab pane  enter card  f focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
+assert_row "$(render_hold "j")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
+assert_row "$(render_hold "tab,tab,j,j")" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "holds footer: the held worker in In flight has the card, the focus and both actions"
+assert_row "$(render_hold "j,j,j")" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
+assert_row "$(render_hold "tab,tab,tab,tab,j")" '^ j/k move  tab pane  enter card  x hide ' "holds footer: the finished hold in Landed has its card, no pane and nothing to act on"
+assert_widths "$frame_h" 160 "holds frame lines are 160 columns"
+
+# The card of the main hold: every section, read from the scratch home, shown through the fake viewer
+# from a temp file that is gone once the viewer exits (falsify: drop a section from buildHoldCard, read
+# the report whole in readHoldMaterials, tail the status log by another count, or skip removeTempDir).
+frame_h=$(render_hold "j,enter") || fail "holds card main: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of main-hold (viewer-cmd)" "card main: the footer names the card and the viewer"
+assert_row "$(cat "$VIEWER_LOG")" '/firstmate-tui-[^/]+/main-hold\.md$' "card main: the viewer got a temp file named after the task under a firstmate-tui temp directory"
+if [ -e "$(cat "$VIEWER_LOG")" ]; then fail "card main: the temp file $(cat "$VIEWER_LOG") is still there after the viewer exited"; else pass; fi
+assert_row "$(card)" '^# Pick the vendor for the address API$' "card main: the title line"
+assert_contains "$(card)" "| id | main-hold |" "card main: the id"
+assert_contains "$(card)" "| home | main ($HOLD_HOME) |" "card main: the home label and path"
+assert_contains "$(card)" "| repo | acme/api |" "card main: the repo"
+assert_contains "$(card)" "| state | queued |" "card main: the state"
+assert_contains "$(card)" "| kind | task |" "card main: the kind"
+assert_contains "$(card)" "| hold kind | captain |" "card main: the hold kind"
+assert_contains "$(card)" "| bucket | live |" "card main: the bucket"
+assert_contains "$(card)" "| until | - |" "card main: no until date reads -"
+assert_contains "$(card)" "| set | 2026-09-13T12:00:00Z |" "card main: the hold-set stamp"
+assert_contains "$(card)" "| age | 3 days |" "card main: the age in days"
+assert_row "$(card)" '^Two quotes arrived; pick the vendor for the address API$' "card main: the hold reason verbatim"
+assert_row "$(card)" '^Two vendors quoted; the report compares them\.$' "card main: a body line verbatim"
+assert_row "$(card)" '^Prefer the one with the EU region\.$' "card main: the last body line"
+assert_row "$(card)" '^https://github\.com/acme/api/pull/77$' "card main: the PR URL"
+assert_contains "$(card)" "data/main-hold/report.md (45 lines; the first 40 follow)" "card main: the report path with its line count and the head size"
+assert_contains "$(card)" "# Report line 40" "card main: the 40th report line is inlined"
+assert_not_contains "$(card)" "# Report line 41" "card main: the 41st report line is not"
+assert_contains "$(card)" "5 more lines in the file" "card main: the more-lines line"
+assert_row "$(card)" '^data/main-hold/brief\.md$' "card main: the brief path"
+assert_row "$(card)" '^- data/main-hold/attachments$' "card main: another entry under data/<id>/"
+assert_row "$(card)" '^- data/main-hold/notes\.md$' "card main: the other file"
+assert_no_row "$(card)" '^- data/main-hold/(report|brief)\.md$' "card main: the report and the brief are not listed as other files"
+assert_contains "$(card)" "state/main-hold.status, the last 10 of 13 lines:" "card main: the status log path and counts"
+assert_contains "$(card)" "working: status line 4" "card main: the earliest of the last 10 status lines"
+assert_contains "$(card)" "working: status line 13" "card main: the last status line"
+assert_not_contains "$(card)" "working: status line 3" "card main: the 11th-from-last status line is not inlined"
+assert_count "$(card)" "working: status line" 10 "card main: exactly ten status lines"
+assert_before "$(card)" '^## Hold reason' '^## Backlog body' "card main: the reason precedes the body"
+assert_before "$(card)" '^## Pull request' '^## Report' "card main: the PR precedes the report"
+assert_before "$(card)" '^## Brief' '^## Other files under data/main-hold/' "card main: the brief precedes the other files"
+assert_before "$(card)" '^## Other files' '^## Status log' "card main: the other files precede the status log"
+assert_not_contains "$(card)" "Partial record" "card main: a main-home record is never partial"
+assert_not_opened "card main: the card opens no PR"
+assert_no_hold "card main: the card runs no hold command"
+# The hold with nothing on disk: one line per empty section (falsify: crash on a missing data/<id>/, or
+# leave a section out).
+frame_h=$(render_hold "j,j,enter") || fail "holds card bare: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of bare-hold (viewer-cmd)" "card bare: the footer names the card"
+assert_row "$(card)" '^# Keep or drop the legacy importer$' "card bare: the title"
+assert_contains "$(card)" "| set | - |" "card bare: no hold-set stamp reads -"
+assert_contains "$(card)" "| age | - |" "card bare: no age reads -"
+assert_row "$(card)" '^no body lines$' "card bare: the empty body line"
+assert_row "$(card)" '^no PR recorded$' "card bare: the empty PR line"
+assert_row "$(card)" '^no report at data/bare-hold/report\.md$' "card bare: the empty report line"
+assert_row "$(card)" '^no brief at data/bare-hold/brief\.md$' "card bare: the empty brief line"
+assert_row "$(card)" '^no data/bare-hold/ directory$' "card bare: the missing directory line"
+assert_row "$(card)" '^no status log at state/bare-hold\.status$' "card bare: the empty status line"
+# The other card rows: the decision row's card is its task's record without a hold, the paused worker's
+# card in In flight, the finished hold's card in Landed with its done state, and a Landed row without a
+# hold keeps enter = open its PR (falsify: route Landed's enter through the card for every row).
+frame_h=$(render_hold "enter") || fail "holds card decision: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of decide-task (viewer-cmd)" "card decision: enter on the keyed decision row shows its task's card"
+assert_contains "$(card)" "| hold kind | - |" "card decision: a task without a hold reads - for the hold kind"
+assert_row "$(card)" '^no hold reason recorded$' "card decision: the empty reason line"
+assert_row "$(card)" '^Cache the widget lookups; the vendor question gates the design\.$' "card decision: the body comes from the backlog record"
+frame_h=$(render_hold "tab,tab,j,j,enter") || fail "holds card worker: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of held-worker (viewer-cmd)" "card worker: enter on the In flight row whose record is a dated hold shows the card, not a focus"
+assert_contains "$(card)" "| bucket | dated |" "card worker: the dated bucket"
+assert_contains "$(card)" "| until | 2026-10-01 |" "card worker: the until date"
+frame_h=$(render_hold "tab,tab,tab,tab,j,enter") || fail "holds card landed: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of landed-hold (viewer-cmd)" "card landed: enter on the finished hold in Landed shows its card"
+assert_contains "$(card)" "| state | done |" "card landed: the done state"
+assert_row "$(card)" '^Answered: keep the old name$' "card landed: the recorded reason"
+frame_h=$(render_hold "tab,tab,tab,tab,enter") || fail "holds landed PR: render exited non-zero"
+assert_opened "https://github.com/acme/etl/pull/12" "a Landed row without a hold still opens its PR on enter"
+assert_not_viewed "a Landed row without a hold runs no viewer"
+# The delegate home's card: the full record read through that home's own fm-fleet-snapshot.sh (the log
+# names the home), the home on the card, the report head from that home's files (falsify: build a
+# delegate card from the ledger alone, or run the main home's snapshot instead).
+frame_h=$(render_hold "j,j,j,enter" --all-homes-needs) || fail "holds card delegate: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of delegate-hold (viewer-cmd)" "card delegate: the footer names the card, not partial"
+assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "card delegate: the delegate home's snapshot script ran once, with FM_HOME set to that home, and no hold command"
+assert_row "$(card)" '^# Approve the warehouse index$' "card delegate: the title"
+assert_contains "$(card)" "| home | delegate ($HOLD_DELEGATE) |" "card delegate: the delegate home's label and path"
+assert_row "$(card)" '^The full delegate reason, longer than the ledger keeps: approve the warehouse index before the nightly loader is scheduled$' "card delegate: the full reason from the home's record, not the ledger's cut"
+assert_not_contains "$(card)" "Ledger copy of the reason" "card delegate: the ledger's truncated reason is not on the card"
+assert_contains "$(card)" "data/delegate-hold/report.md (3 lines; the first 3 follow)" "card delegate: the report head from the delegate home's files"
+assert_not_contains "$(card)" "more line" "card delegate: a report shorter than the head has no more-lines line"
+assert_not_contains "$(card)" "Partial record" "card delegate: a record the home answered is not partial"
+# The same card when the delegate's snapshot fails: the ledger's fields under a partial notice that
+# names the failure, the files still read (falsify: refuse the card, or drop the partial line).
+frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "j,j,j,enter" --all-homes-needs) || fail "holds card delegate fail: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of delegate-hold (partial record) (viewer-cmd)" "card delegate fail: the footer says partial"
+assert_row "$(card)" "^> Partial record: delegate's fm-fleet-snapshot.sh gave no record for delegate-hold \(exit 1: fm-fleet-snapshot: jq not found\); the title, the reason \(cut at 160 characters\) and the hold fields come from its ledger\.$" "card delegate fail: the first line says why the record is partial"
+assert_row "$(card)" '^Ledger copy of the reason, cut at 160 characters$' "card delegate fail: the ledger's reason stands in"
+assert_contains "$(card)" "data/delegate-hold/report.md (3 lines; the first 3 follow)" "card delegate fail: the home's files are still read"
+# A remote home's hold: the card from the ledger, marked partial, with no file read (falsify: try to
+# read a remote home's files).
+frame_h=$(render_hold "j,j,j,j,j,enter" --all-homes-needs) || fail "holds card remote: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of remote-hold (partial record) (viewer-cmd)" "card remote: the footer says partial"
+assert_row "$(card)" '^> Partial record: remote-sm is a remote home whose files are not readable here; the title, the reason \(cut at 160 characters\) and the hold fields come from its ledger\.$' "card remote: the first line names the remote home"
+assert_row "$(card)" '^Remote ledger reason$' "card remote: the ledger's reason"
+assert_row "$(card)" '^data/remote-hold/report\.md: not readable from here$' "card remote: no file is read"
+assert_no_hold "card remote: no snapshot and no command runs for a remote home"
+# A held child under an expanded delegate group carries the same card (falsify: drop ledgerCard from
+# ledgerChildRows).
+frame_h=$(render_hold "tab,tab,j,j,enter" --expand all) || fail "holds card child: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of child-held (viewer-cmd)" "card child: enter on the held child of an expanded group shows its card"
+assert_row "$(card)" '^# Cut over the nightly ETL$' "card child: the title from the delegate's record"
+assert_row "$(card)" '^The full child-held reason from the delegate home$' "card child: the full reason"
+# Review and Findings rows keep their enter (falsify: give reviewRow a card, or route Findings through it).
+frame_h=$(render_hold "j,j,j,enter") || fail "holds review enter: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/7" "enter on the review row still opens its PR"
+assert_not_viewed "enter on the review row runs no viewer"
+frame_h=$(render_hold "tab,tab,tab,enter") || fail "holds findings enter: render exited non-zero"
+assert_viewed "$HOLD_HOME/data/scout-x/report.md" "enter on a Findings row still views its report"
+assert_no_hold "neither enter runs a hold command"
+# f (falsify: drop the f case from keyAction).
+frame_h=$(render_hold "f") || fail "holds f: render exited non-zero"
+assert_contains "$frame_h" "herdr is off (--no-herdr); cannot focus" "f on the decision row asks for its pane, refused under --no-herdr"
+frame_h=$(fake_herdr_env "$BOARD" --render-once --fixture "$HOLD_FIX" --keys "f") || fail "holds f herdr: render exited non-zero"
+assert_contains "$frame_h" "would focus w1A:p1 (decide-task); --render-once never runs herdr agent focus" "f on the decision row focuses its worker's pane through the fixture overlay"
+if [ -e "$HERDR_LOG" ]; then fail "holds f: a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
+frame_h=$(render_hold "j,f") || fail "holds f hold row: render exited non-zero"
+assert_contains "$frame_h" "main-hold: no herdr pane to focus" "f on a hold row without a pane says so"
+
+# d: the prompt, the confirmation, the cancel paths and the refusals (falsify: drop the prompt branch
+# from handleKey, let x act while the prompt is up, run the command before y, or drop holdActionProblem).
+frame_h=$(render_hold "j,d") || fail "holds d: render exited non-zero"
+assert_row "$frame_h" '^ discard main-hold\? y to discard, esc to cancel +$' "d on a hold row puts the prompt in the footer"
+assert_no_hold "d alone runs nothing"
+frame_h=$(render_hold "j,d,y") || fail "holds d,y: render exited non-zero"
+assert_hold_log "FM_HOME=$HOLD_HOME
+cwd=$HOLD_HOME_REAL
+argv=answer main-hold --decision-file $(grep -o -- '--decision-file .*' "$HOLD_LOG" 2>/dev/null | cut -d' ' -f2)
+decision=Discarded by captain from firstmate-tui on $TODAY: no action; closed as not wanted." "d,y runs fm-captain-hold.sh answer once in the hold's home, FM_HOME and cwd that home, with the fixed decision text naming the fixture's login and today"
+assert_row "$(cat "$HOLD_LOG")" '^argv=answer main-hold --decision-file /.*/firstmate-tui-[^/]+/decision\.txt$' "d,y: the decision file lives in a firstmate-tui temp directory"
+if [ -e "$(grep -o -- '--decision-file .*' "$HOLD_LOG" | cut -d' ' -f2)" ]; then fail "d,y: the decision file is still there after the command exited"; else pass; fi
+assert_contains "$frame_h" "discarded main-hold · answered: main-hold" "d,y: the footer names the discard and the command's first output line"
+assert_not_contains "$frame_h" "y to discard" "d,y: the prompt is gone from the footer"
+frame_h=$(render_hold "j,d,escape") || fail "holds d,escape: render exited non-zero"
+assert_no_hold "d,escape runs nothing"
+assert_contains "$frame_h" "cancelled; main-hold is unchanged" "d,escape: the footer says cancelled"
+frame_h=$(render_hold "j,d,x,escape") || fail "holds d,x,escape: render exited non-zero"
+assert_no_hold "d,x,escape runs nothing"
+assert_contains "$frame_h" "Needs you (4)" "d,x,escape: x is ignored while the prompt is up, so the row is not hidden"
+assert_not_contains "$frame_h" "hidden main-hold" "d,x,escape: no hide notice"
+frame_h=$(render_hold "j,d,q,j,k") || fail "holds d,q: render exited non-zero"
+assert_row "$frame_h" '^ discard main-hold\? y to discard, esc to cancel +$' "d then other keys: the prompt stays up and q does not quit"
+assert_no_hold "d then other keys runs nothing"
+frame_h=$(FAKE_HOLD_FAIL=1 render_hold "j,d,y") || fail "holds d fail: render exited non-zero"
+assert_contains "$frame_h" "fm-captain-hold: task main-hold is not held for the captain; hold it first or name the right task" "a refusing command's stderr line is the footer, verbatim"
+assert_not_contains "$frame_h" "discarded" "a refused discard is not reported as done"
+assert_file_contains "$HOLD_LOG" "argv=answer main-hold --decision-file" "the refused command did run once"
+tags_h=$(FAKE_HOLD_FAIL=1 FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$HOLD_FIX" --no-herdr --keys "j,d,y" --tags) || fail "holds d fail --tags: render exited non-zero"
+assert_row "$tags_h" '\{red-fg\}[^{]*fm-captain-hold: task main-hold is not held for the captain' "the refusal is red (falsify: pass bad=false on a failed run)"
+frame_h=$(render_hold "j,j,j,d") || fail "holds d review: render exited non-zero"
+assert_contains "$frame_h" "ship-review: no captain hold to discard" "d on a review row is refused with a notice"
+assert_no_hold "d on a review row runs nothing"
+frame_h=$(render_hold "d") || fail "holds d decision: render exited non-zero"
+assert_contains "$frame_h" "decide-task: no captain hold to discard" "d on a decision row whose task has no hold is refused"
+frame_h=$(render_hold "j,j,j,j,j,d" --all-homes-needs) || fail "holds d remote: render exited non-zero"
+assert_contains "$frame_h" "remote-hold: hold lives on another host (remote-sm (remote)); cannot discard from here" "d on a remote home's hold is refused with the host reason"
+assert_no_hold "d on a remote hold runs nothing"
+frame_h=$(render_hold "tab,tab,tab,tab,j,d") || fail "holds d landed: render exited non-zero"
+assert_contains "$frame_h" "landed-hold: no captain hold to discard" "d on a finished hold in Landed is refused: the task is done"
+# The login: with the identity unknown the OS user signs the decision and the footer says so (falsify:
+# fall back to `captain` or an empty login).
+node -e '
+  const fs = require("fs");
+  const [src, dst] = process.argv.slice(1);
+  const fx = JSON.parse(fs.readFileSync(src, "utf8"));
+  fx.prs = { candidate_prs: [], identity: { login: null, source: "unknown", reason: "fixture" } };
+  fs.writeFileSync(dst, JSON.stringify(fx));
+' "$HOLD_FIX" "$SCRATCH/holds-noid.json"
+rm -f "${HOLD_LOG:?}"
+frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-noid.json" --no-herdr --keys "j,d,y") || fail "holds d no identity: render exited non-zero"
+assert_file_contains "$HOLD_LOG" "decision=Discarded by $(id -un) from firstmate-tui on $TODAY: no action; closed as not wanted." "with the identity unknown the decision names the OS user"
+assert_contains "$frame_h" "discarded main-hold as OS user $(id -un) (GitHub login unknown)" "with the identity unknown the footer says who signed"
+
+# D: the date prompt, the default, typed dates, the refusals and the delegate's full reason (falsify:
+# change DEFER_DEFAULT_DAYS, let checkDeferDate accept a bad or past date, pass the ledger's truncated
+# reason, or drop the delegate record read).
+frame_h=$(render_hold "j,D") || fail "holds D: render exited non-zero"
+assert_row "$frame_h" "^ defer main-hold until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "D on a hold row puts the date prompt in the footer, prefilled with today plus 14 days"
+assert_no_hold "D alone runs nothing"
+frame_h=$(render_hold "j,D,enter") || fail "holds D,enter: render exited non-zero"
+assert_hold_log "FM_HOME=$HOLD_HOME
+cwd=$HOLD_HOME_REAL
+argv=hold main-hold --reason Two quotes arrived; pick the vendor for the address API --until $PLUS14" "D,enter runs fm-captain-hold.sh hold once in the hold's home with the record's full reason and the default date"
+assert_contains "$frame_h" "deferred main-hold until $PLUS14 · main-hold" "D,enter: the footer names the deferral and the command's output"
+frame_h=$(render_hold "j,D,$CLEAR,$(spell 2027-01-15),enter") || fail "holds D typed: render exited non-zero"
+assert_hold_log "FM_HOME=$HOLD_HOME
+cwd=$HOLD_HOME_REAL
+argv=hold main-hold --reason Two quotes arrived; pick the vendor for the address API --until 2027-01-15" "backspaces clear the default and typed digits and dashes make the date the command gets"
+assert_contains "$frame_h" "deferred main-hold until 2027-01-15" "D typed: the footer names the typed date"
+frame_h=$(render_hold "j,D,$CLEAR,$(spell 2026-13-40),enter") || fail "holds D bad date: render exited non-zero"
+assert_no_hold "an impossible date runs nothing"
+assert_contains "$frame_h" "2026-13-40: not a real date" "an impossible date is refused by name"
+assert_row "$frame_h" '^ defer main-hold until \(YYYY-MM-DD\): 2026-13-40  enter defers  esc cancels ' "an impossible date keeps the prompt open with the value to fix"
+frame_h=$(render_hold "j,D,$CLEAR,$(spell "$YESTERDAY"),enter") || fail "holds D yesterday: render exited non-zero"
+assert_no_hold "yesterday runs nothing"
+assert_contains "$frame_h" "$YESTERDAY: not after today ($TODAY)" "a date not after today is refused"
+frame_h=$(render_hold "j,D,$CLEAR,2,0,2,enter") || fail "holds D short: render exited non-zero"
+assert_no_hold "a partial date runs nothing"
+assert_contains "$frame_h" "202: not a YYYY-MM-DD date" "a partial date is refused by shape"
+frame_h=$(render_hold "j,D,escape") || fail "holds D,escape: render exited non-zero"
+assert_no_hold "D,escape runs nothing"
+assert_contains "$frame_h" "cancelled; main-hold is unchanged" "D,escape: the footer says cancelled"
+frame_h=$(FAKE_HOLD_FAIL=1 render_hold "j,D,enter") || fail "holds D fail: render exited non-zero"
+assert_contains "$frame_h" "fm-captain-hold: task main-hold is not held for the captain" "a refused defer shows the command's stderr verbatim"
+assert_not_contains "$frame_h" "deferred" "a refused defer is not reported as done"
+frame_h=$(render_hold "j,j,j,D") || fail "holds D review: render exited non-zero"
+assert_contains "$frame_h" "ship-review: no captain hold to defer" "D on a review row is refused with a notice"
+assert_no_hold "D on a review row runs nothing"
+frame_h=$(render_hold "j,j,j,D,enter" --all-homes-needs) || fail "holds D delegate: render exited non-zero"
+assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE
+FM_HOME=$HOLD_DELEGATE
+cwd=$HOLD_DELEGATE_REAL
+argv=hold delegate-hold --reason The full delegate reason, longer than the ledger keeps: approve the warehouse index before the nightly loader is scheduled --until $PLUS14" "D on a delegate hold reads the full reason from that home's snapshot first, then runs the command there with it"
+assert_contains "$frame_h" "deferred delegate-hold until $PLUS14" "D delegate: the footer names the deferral"
+frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "j,j,j,D" --all-homes-needs) || fail "holds D delegate fail: render exited non-zero"
+assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "D on a delegate hold whose snapshot fails runs no hold command"
+assert_contains "$frame_h" "delegate-hold: the full hold reason is not readable (exit 1: fm-fleet-snapshot: jq not found); defer it from delegate itself" "D delegate fail: the defer is refused rather than passing the ledger's cut reason"
+assert_not_contains "$frame_h" "defer delegate-hold until" "D delegate fail: no prompt opens"
+
+# The pure pieces, straight from lib/card.mjs (falsify: change any of them).
+pure_h=$(node --input-type=module -e "
+  import { checkDeferDate, discardDecision, plusDays, promptKeyAction } from '$ROOT/bin/firstmate-tui/lib/card.mjs';
+  console.log(plusDays('2026-12-25', 14));
+  console.log(checkDeferDate('2026-02-29', '2026-01-01'));
+  console.log(checkDeferDate('2026-09-20', '2026-09-20'));
+  console.log(checkDeferDate('2026-09-21', '2026-09-20'));
+  console.log(discardDecision('zachsibert', '2026-09-19'));
+  const p = { kind: 'defer', row: {}, id: 'x', reason: 'r', value: '2026-10-0' };
+  console.log(promptKeyAction(p, 'x').type, promptKeyAction(p, 'q').type, promptKeyAction(p, '5').value, promptKeyAction(p, 'backspace').value, promptKeyAction(p, 'ctrl-c').type);
+  console.log(promptKeyAction({ ...p, value: '2026-10-03' }, '5').type);
+  console.log(promptKeyAction({ kind: 'discard', row: {}, id: 'x' }, 'Y').type, promptKeyAction({ kind: 'discard', row: {}, id: 'x' }, 'y').type);
+")
+assert_row "$pure_h" '^2027-01-08$' "plusDays crosses the year end"
+assert_row "$pure_h" '^2026-02-29: not a real date$' "checkDeferDate refuses February 29 in a non-leap year"
+assert_row "$pure_h" '^2026-09-20: not after today \(2026-09-20\)$' "checkDeferDate refuses today"
+assert_row "$pure_h" '^null$' "checkDeferDate accepts tomorrow"
+assert_row "$pure_h" '^Discarded by zachsibert from firstmate-tui on 2026-09-19: no action; closed as not wanted\.$' "discardDecision is the fixed sentence"
+assert_row "$pure_h" '^none none 2026-10-05 2026-10- quit$' "the defer prompt ignores letters and q, takes a digit, backspaces, and ctrl-c quits"
+assert_row "$pure_h" '^none$' "the defer prompt takes no more than ten characters"
+assert_row "$pure_h" '^none discard$' "the discard prompt answers only a lower-case y"
 
 # -------------------------------------------------------------------- hide
 vs="$SCRATCH/view-state.json"
@@ -1070,7 +1433,7 @@ assert_not_contains "$frame_p" "[6] Landed" "list mode: the hidden pane's sectio
 assert_contains "$frame_p" "panes hidden: 6" "list mode: the title lists the hidden pane"
 assert_widths "$frame_p" 70 "list mode with a hidden pane: lines are 70 columns"
 
-# ---------------------------------------------------------- o and f are no-ops
+# ---------------------------------------------------------- o is a no-op, f focuses
 # o used to open the selected row's PR in any pane; enter does that now, so
 # the key does nothing, not even a notice (falsify: give 'o' a case in keyAction).
 frame_o=$(render_open populated.json "tab,o") || fail "keys o: render exited non-zero"
@@ -1079,12 +1442,21 @@ frame_o=$(render populated.json --keys "o") || fail "keys o plain: render exited
 if [ "$frame_o" = "$frame" ]; then pass; else fail "o changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_o") | head -n 5)"; fi
 assert_not_contains "$frame_o" "no PR URL" "o leaves no PR notice"
 assert_no_row "$frame" '^ j/k move .* o open' "footer offers no o key"
-# f used to move the firstmate pane beside the board; the captain splits panes
-# himself now, so the key does nothing (falsify: give 'f' a case in keyAction).
+# f used to move the firstmate pane beside the board; the captain splits panes himself, so the key
+# now focuses the selected row's herdr pane in any pane and never moves one (falsify: bring the pane
+# move back, drop the f case from keyAction, or drop `any` from focusProblem). scout-beta, the default
+# selection, has a pane: under --no-herdr the focus is refused with the herdr-off words, with the
+# fixture's herdr overlay it is reported as it would run; a row without a pane is told so.
 frame_f=$(render populated.json --keys "f") || fail "keys f: render exited non-zero"
-if [ "$frame_f" = "$frame" ]; then pass; else fail "f changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_f") | head -n 5)"; fi
+assert_contains "$frame_f" "herdr is off (--no-herdr); cannot focus" "f on a Needs you row with a pane asks for the focus, refused under --no-herdr"
 assert_not_contains "$frame_f" "firstmate pane" "f leaves no firstmate-pane notice"
-assert_not_contains "$frame" " f " "footer offers no f key"
+frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "j,f") || fail "keys f herdr: render exited non-zero"
+assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "f on a Needs you decision row focuses its worker's pane, the pane rule of enter skipped"
+if [ -e "$HERDR_LOG" ]; then fail "a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
+frame_f=$(render populated.json --keys "j,j,f") || fail "keys f no pane: render exited non-zero"
+assert_contains "$frame_f" "decide-vendor: no herdr pane to focus" "f on a hold row, which has no pane, says so"
+frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "tab,tab,tab,tab,tab,f") || fail "keys f landed herdr: render exited non-zero"
+assert_contains "$frame_f" "would focus" "f on a Landed row with a live pane focuses it too"
 if grep -Fq -- "-firstmate" "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
 
 # ------------------------------------------------------------------ PR ages
@@ -3383,10 +3755,10 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   run_pty() { # <term> <name> <actions...>: the interactive board on a pty against the stand-in home, with every fake wired
     local term=$1 name=$2
     shift 2
-    rm -f "${OPENER_LOG:?}" "${PTY_TRACE:?}" "${UPGRADE_LOG:?}" "${CURL_LOG:?}"
+    rm -f "${OPENER_LOG:?}" "${PTY_TRACE:?}" "${UPGRADE_LOG:?}" "${CURL_LOG:?}" "${HOLD_LOG:?}"
     mkdir -p "$SCRATCH/pty-$name"
     FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" PATH="$FAKE_BIN:$PATH" \
-      FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" FM_BOARD_TEST_OPENER_TRACE="$PTY_TRACE" FM_BOARD_TEST_UPGRADE_LOG="$UPGRADE_LOG" \
+      FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" FM_BOARD_TEST_OPENER_TRACE="$PTY_TRACE" FM_BOARD_TEST_UPGRADE_LOG="$UPGRADE_LOG" FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" \
       FAKE_CURL_ROOT="$REL" FAKE_CURL_LOG="$CURL_LOG" \
       python3 "$PTY" --term "$term" --timeout 20 --capture "$SCRATCH/pty-$name.bin" "$@" -- \
       "$BOARD" run --no-herdr --no-prs --opener-cmd "$FAKE_OPENER" --install-root "$INSTALL" --curl-cmd "bash $ROOT/tests/fake-curl.sh" --view-state "$SCRATCH/pty-$name/view-state.json" \
@@ -3423,6 +3795,23 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   run_pty xterm-256color lf "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\n" "sleep:1.2" "send:q" exit
   pty_ok lf "pty: LF alone leaves the board running until q"
   assert_not_opened "pty: LF alone (ctrl-j) opens nothing"
+  # The D prompt on a real terminal: j j selects decide-vendor, the stand-in's live captain hold; D
+  # opens the footer prompt; ten 0x7f bytes (the Backspace key, which the library names 'backspace'
+  # and hands over as the DEL character) clear the default date, and typed digits and dashes fill it
+  # through the library's keypress path, which --keys never exercises; the carriage return runs the
+  # stand-in home's fake fm-captain-hold.sh exactly once with the typed date and the record's reason
+  # (falsify: drop the prompt branch from handleKey, or let normalizeKey return DEL for the Backspace
+  # key: the backspaces then do nothing, the full value refuses every digit and enter defers to the
+  # default date). Only the prompt's `(YYYY-MM-DD):` is waited for on screen: its cells all differ
+  # from the hint they replace, while the letters of a notice drawn over an earlier one of the same
+  # length can reach the driver missing; the log, not the screen, proves the rest.
+  run_pty xterm-256color hold-prompt "wait:$PTY_URL" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:D" "wait:(YYYY-MM-DD):" "send:\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f" "sleep:0.4" "send:2027-01-15" "sleep:0.6" "send:\r" "sleep:1.5" "send:q" exit
+  pty_ok hold-prompt "pty: the D prompt opens on a real terminal and the board exits on q"
+  if [ -f "$HOLD_LOG" ]; then pass; else fail "pty: the D prompt's enter ran no hold command; the driver reported: $(tr '\n' ';' < "$SCRATCH/pty-hold-prompt.out")"; fi
+  assert_hold_log "FM_HOME=$FAKE_HOME
+cwd=$FAKE_HOME_REAL
+argv=hold decide-vendor --reason Two quotes in the report --until 2027-01-15" "pty: the typed date reaches the stand-in home's fm-captain-hold.sh once, with the record's full reason (backspaces and digits both arrived)"
+  assert_not_opened "pty: the D prompt opens no PR"
   # A live start with the PR fetch on, against a stand-in whose snapshot sleeps 2 s and a gh that
   # sleeps 2 s before answering, so each state stays on screen long enough to be told apart. With
   # nothing to name the login (gh not logged in, github.user unset, the example config): both PR

@@ -32,12 +32,28 @@
 // mid-drag ends the drag first.
 //
 // Actions on a row:
-//   enter   group row: expand or collapse; My PRs, Teammates' PRs or Needs
-//           you row with a PR URL: open it; In flight worker or Needs you
-//           worker: herdr focus; Findings row: open its report in the viewer;
-//           Landed row: the first target it has (landedTarget): its PR, else
-//           its report on this host, else its worker pane while herdr lists
-//           it, else a footer notice
+//   enter   group row: expand or collapse; a row with a hold card (row.card,
+//           lib/model.mjs: Needs you's hold, decide and blocked rows, a
+//           delegate's decision rows, and any In flight or Landed row whose
+//           task is a captain hold): show the card in the viewer; My PRs,
+//           Teammates' PRs or Needs you row with a PR URL: open it; In flight
+//           worker or Needs you worker: herdr focus; Findings row: open its
+//           report in the viewer; Landed row: the first target it has
+//           (landedTarget): its PR, else its report on this host, else its
+//           worker pane while herdr lists it, else a footer notice
+//   f       focus the row's herdr pane, whatever the pane (a row without one
+//           gets a notice): the secondary action on a card row, whose enter
+//           shows the card
+//   d       discard the row's captain hold (row.hold): the footer asks
+//           `y to discard, esc to cancel`, then the host runs firstmate's
+//           fm-captain-hold.sh answer in the hold's home (lib/hold.mjs)
+//   D       defer the row's captain hold: the footer takes a YYYY-MM-DD date,
+//           prefilled with today plus 14 days (digits and dashes edit it,
+//           backspace deletes, enter defers, esc cancels), then the host runs
+//           fm-captain-hold.sh hold --until with the hold's full reason
+//           While either prompt is up (view.prompt, lib/card.mjs) every other
+//           key is ignored and the mouse does nothing; ctrl-c still quits.
+//           A row without a captain hold in a readable home gets a notice.
 //   l/right expand the selected group      h/left collapse it (from the group
 //           row or from one of its children; the selection lands on the group)
 //   x       hide the row (view state); on a hidden row shown by H: unhide it
@@ -60,6 +76,7 @@
 import { boundaryAt, hitTest, PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
 import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
+import { checkDeferDate, deferPrompt, discardPrompt, holdActionProblem, localDate, promptKeyAction } from './card.mjs';
 
 const OPEN_PANES = new Set(['mine', 'toreview', 'needs']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
@@ -187,10 +204,12 @@ export function scrollFromSaved(saved) {
 // run. Shared so the app and the --render-once driver report the same reasons.
 // A lost pane is reported before the herdr-off check: the fixture overlay can
 // prove the pane gone even when the live client is off, and "pane lost" is the
-// more useful answer.
-export function focusProblem(pane, row, herdrOn) {
+// more useful answer. `any` is the f key: a row in any pane may be focused,
+// and one without a pane is told so first.
+export function focusProblem(pane, row, herdrOn, { any = false } = {}) {
   if (!row) return 'nothing selected';
-  if (!FOCUS_PANES.has(pane.id) && !(pane.id === LANDED_PANE && row.paneId)) return 'enter focuses a worker: pick a row in In flight';
+  if (any && !row.paneId) return `${row.name}: no herdr pane to focus${row.extra === 'tmux' ? ' (tmux-backed task)' : ''}`;
+  if (!any && !FOCUS_PANES.has(pane.id) && !(pane.id === LANDED_PANE && row.paneId)) return 'enter focuses a worker: pick a row in In flight';
   if (row.lost) return `${row.name}: pane ${row.paneId} is gone from herdr (pane lost); nothing to focus`;
   if (!herdrOn) return 'herdr is off (--no-herdr); cannot focus';
   if (!row.paneId) return `${row.name}: no herdr pane to focus${row.extra === 'tmux' ? ' (tmux-backed task)' : ''}`;
@@ -234,7 +253,7 @@ export function paneForKey(key) {
 // only reminds the captain how to bring a pane back; a key the board does not
 // bind stays the silent no-op it is everywhere else.
 const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', 'r', '.', '?', 'q', 'ctrl-c']);
-const ROW_KEYS = new Set(['enter', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
+const ROW_KEYS = new Set(['enter', 'f', 'd', 'D', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
 
 export function keyAction(model, view, key) {
   const pane = model.panes[view.pane];
@@ -266,6 +285,15 @@ export function keyAction(model, view, key) {
     case 'x':
       if (!row) return { type: 'notice', text: 'nothing selected to hide', bad: true };
       return { type: row.hidden ? 'unhide' : 'hide', row };
+    case 'f':
+      if (!row) return { type: 'notice', text: 'nothing selected to focus', bad: true };
+      return { type: 'focus', row, any: true };
+    case 'd':
+    case 'D': {
+      const problem = holdActionProblem(row, key === 'd' ? 'discard' : 'defer');
+      if (problem) return { type: 'notice', text: problem, bad: true };
+      return { type: key === 'd' ? 'discard-prompt' : 'defer-prompt', row };
+    }
     case 'X':
       return pane ? { type: 'unhide-pane', paneId: pane.id, title: pane.title } : { type: 'none' };
     case 'l':
@@ -280,6 +308,8 @@ export function keyAction(model, view, key) {
     case 'enter':
       if (!row) return { type: 'none' };
       if (row.group) return row.expanded ? { type: 'collapse', key: row.group } : { type: 'expand', key: row.group };
+      // A hold card wins over the pane's own enter; review rows carry none.
+      if (row.card) return { type: 'card', row };
       if (pane.id === LANDED_PANE) {
         const target = landedTarget(row, Boolean(model.herdrOn));
         if (target) return { type: target, row };
@@ -478,12 +508,18 @@ function applySettingsAction(ctx, action) {
   }
 }
 
-// ctx: { view, model, rebuild(), notice(text, bad), open(row), focus(row),
-//        viewReport(row), refresh(), persist(), settingsFetch(),
-//        settingsUpgrade(running), relaunch(), quit() }.
+// ctx: { view, model, rebuild(), notice(text, bad), open(row), focus(row,
+//        { any }), viewReport(row), viewCard(row), holdDiscard(row),
+//        holdDefer(row, { reason, until }), holdReason(row), refresh(),
+//        persist(), settingsFetch(), settingsUpgrade(running), relaunch(),
+//        quit() }.
 // rebuild() must replace ctx.model from the current view (the expanded set,
 // the hidden set and the hidden panes change which rows and panes exist);
-// persist() saves view.hidden, view.hiddenPanes and view.columns.
+// persist() saves view.hidden, view.hiddenPanes and view.columns. The three
+// hold effects run firstmate's command or read a delegate home (lib/hold.mjs)
+// and set view.busy to a short text meanwhile, which the actions here
+// refuse to start over; holdReason(row) reads a delegate hold's full reason
+// and then calls openDeferPrompt itself, or notices why it cannot.
 export function handleKey(ctx, key) {
   const { view } = ctx;
   if (view.help) {
@@ -495,8 +531,20 @@ export function handleKey(ctx, key) {
     applySettingsAction(ctx, settingsKeyAction(view.settings, key));
     return;
   }
+  if (view.prompt) {
+    applyAction(ctx, promptKeyAction(view.prompt, key));
+    return;
+  }
   if (view.drag) applyAction(ctx, { type: 'drag-end' });
   applyAction(ctx, keyAction(ctx.model, view, key));
+}
+
+// The defer prompt on `row` with the hold's full `reason`, prefilled with
+// today plus 14 days (lib/card.mjs deferPrompt). Called by applyAction when
+// the row carries the full reason and by the host once it has read it.
+export function openDeferPrompt(view, row, reason) {
+  view.prompt = deferPrompt(row, reason, localDate());
+  view.lastClick = null;
 }
 
 export function handleMouse(ctx, ev) {
@@ -510,6 +558,8 @@ export function handleMouse(ctx, ev) {
     applySettingsAction(ctx, settingsMouseAction(view.settings, view, ev, { dblclickMs: DBLCLICK_MS }));
     return;
   }
+  // A prompt takes the keyboard alone: a click neither confirms nor cancels it.
+  if (view.prompt) return;
   // A release or a motion report means nothing unless a drag is open.
   if ((ev.type === 'up' || ev.type === 'drag') && !view.drag) return;
   applyAction(ctx, mouseAction(ctx.model, view, ev));
@@ -624,11 +674,70 @@ function applyAction(ctx, action) {
       ctx.open(action.row);
       return;
     case 'focus':
-      ctx.focus(action.row);
+      ctx.focus(action.row, { any: Boolean(action.any) });
       return;
     case 'view':
       ctx.viewReport(action.row);
       return;
+    case 'card':
+      if (view.busy) {
+        ctx.notice(`busy: ${view.busy}`, true);
+        return;
+      }
+      ctx.viewCard(action.row);
+      return;
+    case 'discard-prompt':
+      if (view.busy) {
+        ctx.notice(`busy: ${view.busy}`, true);
+        return;
+      }
+      view.prompt = discardPrompt(action.row);
+      view.lastClick = null;
+      return;
+    case 'defer-prompt': {
+      if (view.busy) {
+        ctx.notice(`busy: ${view.busy}`, true);
+        return;
+      }
+      const { hold } = action.row;
+      if (hold.reason && !hold.truncated) {
+        openDeferPrompt(view, action.row, hold.reason);
+        return;
+      }
+      // A delegate home's hold: the ledger keeps the reason cut at 160
+      // characters, so the host reads the home's own record first and opens
+      // the prompt with the full reason, or refuses rather than shorten it.
+      ctx.holdReason(action.row);
+      return;
+    }
+    case 'prompt-cancel': {
+      const p = view.prompt;
+      view.prompt = null;
+      ctx.notice(`cancelled; ${p ? p.id : 'the hold'} is unchanged`);
+      return;
+    }
+    case 'discard': {
+      const p = view.prompt;
+      view.prompt = null;
+      if (p) ctx.holdDiscard(p.row);
+      return;
+    }
+    case 'defer-edit':
+      if (view.prompt) view.prompt = { ...view.prompt, value: action.value };
+      return;
+    case 'defer-submit': {
+      const p = view.prompt;
+      if (!p) return;
+      const problem = checkDeferDate(p.value, localDate());
+      if (problem) {
+        // The prompt stays open with its value for the captain to fix.
+        ctx.notice(problem, true);
+        return;
+      }
+      view.prompt = null;
+      ctx.holdDefer(p.row, { reason: p.reason, until: p.value });
+      return;
+    }
     case 'notice':
       ctx.notice(action.text, action.bad);
       return;

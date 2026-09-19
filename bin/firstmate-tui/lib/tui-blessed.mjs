@@ -9,10 +9,10 @@
 //                           paused and raw mode is off until resume()
 //   screen.resume()      -> take the terminal back and repaint everything
 //   screen.destroy()     -> restore the terminal
-// Keys are normalized to short names: j k h l o x X H f 0-9 up down left right
-// tab S-tab enter r ? q escape ctrl-c. One key press must reach onKey once:
-// the library reports the Enter key (\r) as two keypress events, and
-// normalizeKey() keeps one of them (see there).
+// Keys are normalized to short names: j k h l x X H f d D 0-9 - up down left
+// right tab S-tab enter backspace r ? q escape ctrl-c. One key press must
+// reach onKey once: the library reports the Enter key (\r) as two keypress
+// events, and normalizeKey() keeps one of them (see there).
 //
 // Mouse: with `mouse` true the screen listens for the library's mouse events,
 // which is what turns the terminal's mouse reporting on (and off again on
@@ -93,16 +93,20 @@ export function toTags(lines) {
 // Only the 'enter' event counts here; 'return' is dropped, or every Enter
 // would act twice (on the Settings page the second one cancelled the
 // confirmation the first had just opened). A \n keypress (ctrl-j) is named
-// 'linefeed' by the library and stays unbound.
+// 'linefeed' by the library and stays unbound. The Backspace key arrives as
+// the one-character DEL (0x7f) with the name 'backspace': the name is what
+// the defer prompt (lib/card.mjs) listens for, so it is answered before the
+// printable-character rule, which DEL would otherwise pass.
 export function normalizeKey(ch, key) {
   const name = key && key.name;
   if (key && key.ctrl && name === 'c') return 'ctrl-c';
   if (name === 'tab') return key.shift ? 'S-tab' : 'tab';
   if (name === 'enter') return 'enter';
   if (name === 'return') return null;
+  if (name === 'backspace') return 'backspace';
   if (name === 'up' || name === 'down' || name === 'left' || name === 'right' || name === 'escape' || name === 'pageup' || name === 'pagedown') return name;
   if (name === 'backtab') return 'S-tab';
-  if (ch && ch.length === 1 && ch >= ' ') return ch;
+  if (ch && ch.length === 1 && ch >= ' ' && ch !== '\x7f') return ch;
   return name || null;
 }
 

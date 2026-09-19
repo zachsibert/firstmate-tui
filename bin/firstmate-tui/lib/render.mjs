@@ -5,6 +5,7 @@
 
 import { columns, GUTTER, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights } from './layout.mjs';
 import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, settingsInfo, upgradeOffer } from './settings.mjs';
+import { promptText } from './card.mjs';
 import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
 const H = '─';
@@ -16,10 +17,15 @@ export const HELP_LINES = [
   '  j / down     next row            k / up       previous row',
   '  tab          next pane           shift-tab    previous pane',
   "  enter        My PRs, Teammates' PRs, Landed or Needs-you PR row: open it in the browser",
+  '               Needs-you hold, decision or blocked row, or a held task in In flight or Landed:',
+  '               show its hold card in the viewer (facts, reason, body, PR, report, files, status)',
   '               Landed row without a PR: view its report, else focus its worker pane',
   '               In flight group row: expand or collapse it',
   '               In flight worker or Needs-you worker: focus its herdr pane',
   '               Findings row: open the report in the viewer (glow, $EDITOR, vim, less)',
+  "  f            focus the selected row's herdr pane, in any pane",
+  '  d            discard the selected hold: asks y first, then runs fm-captain-hold.sh answer',
+  '  D            defer the selected hold to a date (default today + 14 days): fm-captain-hold.sh hold',
   '  l / right    expand the selected In flight group',
   '  h / left     collapse the group (from the group row or one of its children)',
   '  x            hide the selected row from view (x on a shown hidden row unhides it)',
@@ -41,8 +47,9 @@ export const HELP_LINES = [
   '  drag         a column boundary in a pane\'s header row resizes that column; the',
   '               width is kept across restarts. double-click the boundary to reset it',
   '',
-  'The board is read-only: it never answers, merges or dispatches. Hidden rows and',
-  'panes are view state in the board\'s own file, never in a firstmate home.',
+  'The board never answers a question for you, merges or dispatches. Its two writes, d and D,',
+  "run firstmate's own fm-captain-hold.sh in the hold's home after a confirmation; nothing else",
+  'in a firstmate home is touched. Hidden rows and panes are view state in the board\'s own file.',
   'HERDR "pane lost" (red): the worker pane is gone from herdr. "unknown" (grey):',
   'herdr is disconnected, so absence cannot be proved.',
 ];
@@ -152,6 +159,22 @@ const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  l/h expand  x h
 const FOOTER_KEYS_SHORT = ' j/k  tab  enter  l/h  x hide  H  1-6 panes  r  . settings  ? help  q quit';
 const FOOTER_KEYS_MIN = ' ? help';
 const BOARD_FOOTER_HINTS = [FOOTER_KEYS, FOOTER_KEYS_SHORT, FOOTER_KEYS_MIN];
+
+// The footer's key hints for the board: the prompt alone while one is up
+// (lib/card.mjs promptText); on a row with a hold card the enter, f, d and D
+// words that apply to it (`enter card  f focus  d discard  D defer`) in place
+// of `enter open/focus/view`, f only with a pane and the two hold actions
+// only with a hold in a readable home, and without `l/h expand`, which a
+// card row (never a group) has no use for and which would push the full
+// hint past its room at 160 columns; the standard hints otherwise.
+function boardHints(model, view) {
+  if (view.prompt) return [promptText(view.prompt)];
+  const pane = model.panes[view.pane];
+  const row = pane && !pane.hidden ? pane.rows[view.row] || null : null;
+  if (!row || !row.card) return BOARD_FOOTER_HINTS;
+  const acts = ['enter card', row.paneId ? 'f focus' : null, row.hold && !row.hold.remote ? 'd discard  D defer' : null].filter(Boolean).join('  ');
+  return [` j/k move  tab pane  ${acts}  x hide  H hidden  1-6 panes  r refresh  . settings  ? help  q quit`, ` ${acts}  x hide  H  1-6 panes  r  . settings  ? help  q quit`, FOOTER_KEYS_MIN];
+}
 
 // The key hint and the transient notice share the footer; the notice wins.
 // `hints` runs from the full hint to the minimal one: the full hint needs its
@@ -274,7 +297,7 @@ function renderPanes(model, cols, rows, view) {
     lines.push(line([], cols));
     zones.push(null);
   }
-  lines.push(footerLine(model, cols, view));
+  lines.push(footerLine(model, cols, view, boardHints(model, view)));
   zones.push(null);
   return { lines: lines.slice(0, rows), zones: zones.slice(0, rows) };
 }
@@ -332,7 +355,7 @@ function renderList(model, cols, rows, view) {
     lines.push(line([], cols));
     zones.push(null);
   }
-  lines.push(footerLine(model, cols, view));
+  lines.push(footerLine(model, cols, view, boardHints(model, view)));
   zones.push(null);
   return { lines, zones };
 }
@@ -526,12 +549,13 @@ function overlayHelp(lines, cols) {
 }
 
 // view: { pane, row, scroll[], help, notice, noticeBad, page, settings,
-// columns, drag } (the app's view also carries `expanded`, `hidden`,
+// columns, drag, prompt } (the app's view also carries `expanded`, `hidden`,
 // `hiddenPanes` and `showHidden`, which only buildModel reads). page is
 // 'board' or 'settings'; with 'settings' the frame is the Settings page over
 // view.settings. columns is the captain's column widths by pane id and column
 // key (view state) and drag the boundary being dragged, { paneId, index, ... }
-// (lib/controller.mjs), whose bar the pane draws.
+// (lib/controller.mjs), whose bar the pane draws. prompt is the discard or
+// defer prompt the footer shows (lib/card.mjs), or null.
 // Returns { lines, cols, rows, mode, scroll, zones } where scroll holds the
 // start offsets actually used so the app can keep them for the next frame and
 // zones maps each line to what it shows (lib/layout.mjs hitTest). mode is
@@ -552,6 +576,7 @@ export function renderFrame(model, size, view = {}) {
     settings: view.settings || null,
     columns: view.columns && typeof view.columns === 'object' ? view.columns : {},
     drag: view.drag || null,
+    prompt: view.prompt || null,
   };
   const mode = v.page === 'settings' ? 'settings' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
   let drawn;

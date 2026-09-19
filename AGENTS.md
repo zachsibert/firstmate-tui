@@ -39,14 +39,19 @@ section 1 table is the pane-to-data mapping that `bin/firstmate-tui/lib/model.mj
 implements row for row (since 0.4.0 its Ready for review row is two panes, My
 PRs and Teammates' PRs, both over the identity in the board's config file; the
 README's Using the board section is the current mapping), and its section 7 table is
-the milestone plan. Check the plan before widening scope: answering
-decisions, opening PRs, toasts and the findings watermark belong to later
-milestones.
+the milestone plan. Check the plan before widening scope: of its M2 actions,
+discarding and deferring a hold are here since 0.6.0 (`d` and `D`, through
+`fm-captain-hold.sh`); free-text answers, `fm-send --resolve-key` routing,
+notes through `fm-inbox`, opening PRs, toasts and the findings watermark
+belong to later milestones.
 
 ## Hard rules
 
-- The board reads firstmate homes and never writes into `FM_HOME`, a project
-  or a `state/` directory. Its files are the pane record under
+- The board reads firstmate homes and never edits a file under `FM_HOME`, a
+  project or a `state/` directory; its two writes are `fm-captain-hold.sh
+  answer` (`d`) and `hold` (`D`), run in the home that owns the hold
+  (`lib/hold.mjs`), so firstmate's own guards decide and the board never
+  touches `backlog.md` or a status file. Its files are the pane record under
   `${XDG_STATE_HOME:-~/.local/state}/fm-board/` (or `HERDR_PLUGIN_STATE_DIR`),
   `view-state.json` (hidden rows and panes, and since 0.5.0 the selection:
   focused pane, row by hide key with its index as the fallback, expanded
@@ -74,6 +79,25 @@ milestones.
   PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
   `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
   report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended),
+  showing a hold card (enter on a Needs you hold, decide or blocked row, on a
+  delegate's decision row, or on an In flight or Landed row whose task is a
+  captain hold; `lib/card.mjs` builds it, pure, from the backlog record and
+  the files `lib/sources.mjs` reads under `data/<id>/` and `state/<id>.status`,
+  and `lib/hold.mjs` writes it to a mkdtemp directory the same viewer path
+  shows and then removes; a delegate home's record comes from that home's own
+  `fm-fleet-snapshot.sh --json`, never from a backlog parser of the board's,
+  and a remote or unreadable home gets the ledger's fields under a partial
+  notice), discarding a hold (`d`, after `y`: `fm-captain-hold.sh answer <id>
+  --decision-file <tmp>` in the owning home, the decision text fixed in
+  `lib/card.mjs` with the resolved GitHub login or else the OS user) and
+  deferring one (`D`, a footer date prompt prefilled with today plus 14 days:
+  `fm-captain-hold.sh hold <id> --reason <the record's full hold_reason>
+  --until <date>`; a delegate hold's full reason is read from its home first
+  and the defer is refused rather than passing the ledger's 160-character
+  cut), both argv spawns of `bash <home>/bin/fm-captain-hold.sh` with
+  `FM_HOME=<home>` and cwd there, a success starting a refresh and a failure
+  showing the command's stderr verbatim in red and changing nothing;
+  a remote home's hold gets a notice and no prompt;
   refreshing its own data (`r`: the snapshot, then the live PR fetch
   unless `--no-prs`; that fetch is the board's own read-only GitHub search
   through `gh api graphql` in `lib/sources.mjs`: at most four searches per
@@ -94,10 +118,12 @@ milestones.
   and the swap stay in `bin/firstmate-tui.sh` and `bin/install.sh`; the relaunch is
   exit 75, which `run_board` in the launcher answers by starting the same path
   again. It never moves or closes a herdr
-  pane; the captain splits panes himself, so do not bring back an `f` toggle
-  or a `pane move` action. `enter` is the one key that opens a PR; do not
+  pane; the captain splits panes himself, so do not bring back an `f` pane
+  toggle or a `pane move` action (since 0.6.0 `f` focuses the selected row's
+  herdr pane in any pane, `focusProblem` with `any`, and nothing more).
+  `enter` is the one key that opens a PR; do not
   bring back the separate `o` key the scout report's M2 row still lists.
-  Answers, merges and dispatch stay with firstmate's own owners.
+  Free-text answers, merges and dispatch stay with firstmate's own owners.
 - In flight groups secondmate work by home, not by delegated item, because
   the ledger carries no per-child parent field (the comment above
   `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it
@@ -112,13 +138,21 @@ milestones.
 
 ## Working on the code
 
-- Pure modules (`text`, `layout`, `model`, `render`, `settings`, `identity`)
-  take data and return data; keep them that way so `--render-once --fixture`
-  stays the test surface. I/O lives in `sources.mjs` (firstmate, the GitHub
-  searches and the identity rungs, and the GitHub releases fetch through
-  `--curl-cmd`), `herdr.mjs` (herdr), `upgrade.mjs` (the install record and
-  the upgrade child), `viewstate.mjs` and `config.mjs` (the board's two
-  files; both hold their pure parse beside the read and write).
+- Pure modules (`text`, `layout`, `model`, `render`, `settings`, `identity`,
+  `card`) take data and return data; keep them that way so `--render-once
+  --fixture` stays the test surface. I/O lives in `sources.mjs` (firstmate,
+  the GitHub searches and the identity rungs, the GitHub releases fetch
+  through `--curl-cmd`, and the reads behind a hold card: `readHoldMaterials`
+  and a delegate home's record through `readHoldRecord`), `herdr.mjs`
+  (herdr), `upgrade.mjs` (the install record and the upgrade child),
+  `hold.mjs` (the card's temp file and the two `fm-captain-hold.sh` runs),
+  `viewstate.mjs` and `config.mjs` (the board's two files; both hold their
+  pure parse beside the read and write). A row's `card` and `hold` fields
+  (`lib/model.mjs` header) say what enter, `d` and `D` may do with it; the
+  prompt state is `view.prompt` (`lib/card.mjs`), the busy guard `view.busy`,
+  so `--render-once --keys d,y` and `D,enter` drive both through the
+  controller, and the one-shot driver waits for a hold effect before the
+  next key while `view.busy` is set.
 - The two PR panes share one candidate list; a row's `pane` (`mine` or
   `toreview`, absent means `mine`) says where it draws, and `facts.prs.mine`
   and `facts.prs.toreview` carry each pane's own fetch state so one pane can
@@ -226,6 +260,18 @@ milestones.
   every other call to the real one, because `candidateRepos` runs git too.
   `populated.json` and `pr-status.json` are 160x44, not 40: six panes need
   the room, and the mouse and line-number checks name lines on that frame.
+  The hold checks render `holds.json` after rewriting its two placeholder
+  homes to scratch directories the suite fills (the card's files under
+  `data/<id>/` and `state/<id>.status`, a fake `fm-fleet-snapshot.sh` that
+  prints the delegate's record and `tests/fake-captain-hold.sh` as
+  `bin/fm-captain-hold.sh`, which logs `FM_HOME`, its cwd, its argv and the
+  decision file to `FM_BOARD_TEST_HOLD_LOG` and refuses with a fixed stderr
+  line under `FAKE_HOLD_FAIL`); the card's text is read back through the fake
+  viewer's `FM_BOARD_TEST_VIEWER_COPY`, since the board removes the temp file
+  as soon as the viewer exits. `d,y` and `D,enter` in a one-shot render run
+  the home's script for real, so a fixture's homes must never be real ones;
+  the pty section types the `D` prompt (digits, backspace, enter) against the
+  stand-in home's copy of the fake.
   The pane order is `PANES` in `lib/layout.mjs` (Needs you, My PRs,
   Teammates' PRs, In flight, Findings, Landed); the 1-6 keys follow it by
   position, the height priorities name panes by id, and view state is keyed
