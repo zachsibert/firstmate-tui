@@ -31,8 +31,20 @@
 // keeps its own click and text selection.
 //
 // A segment style is one or more space-separated names from STYLE_TAGS
-// ("selected lost" is an inverse row whose cell is also red); toTags() opens
-// them in order and closes them in reverse.
+// ("selected lost" is a cell on the cursor bar whose text is also red);
+// toTags() opens them in order and closes them in reverse. The cursor bar
+// (`selected`) is an explicit amber background with black text, never
+// {inverse}, so it does not take the terminal's foreground colour (which read
+// green on the captain's theme). The amber is palette colour 214 (#ffaf00),
+// named by its index: neo-blessed 0.2.0 turns a hex tag such as {#ffaf00-bg}
+// into a basic colour (its colors.match returns 3, yellow, for that exact
+// palette value), while {214-bg} reaches the terminal as `48;5;214` when its
+// terminfo reports 256 colours. With fewer colours the library would reduce
+// 214 to red, so createScreen switches the bar to the terminal's own yellow
+// there (barStyle). --render-once --tags never opens a screen and prints the
+// 214 form. On the bar the black text wins over the names in BAR_TEXT (a grey
+// or yellow cell would not read on amber), while `lost` and `bad` keep their
+// red text, which does.
 
 const STYLE_TAGS = {
   title: ['{bold}{black-fg}{white-bg}', '{/white-bg}{/black-fg}{/bold}'],
@@ -41,7 +53,7 @@ const STYLE_TAGS = {
   colhead: ['{bold}{underline}', '{/underline}{/bold}'],
   badge: ['{grey-fg}', '{/grey-fg}'], // the [n] toggle key before a pane title
   heading: ['{bold}', '{/bold}'], // the landing page's one heading line
-  selected: ['{inverse}', '{/inverse}'],
+  selected: ['{214-bg}{black-fg}', '{/black-fg}{/214-bg}'],
   bad: ['{red-fg}', '{/red-fg}'],
   lost: ['{red-fg}', '{/red-fg}'],
   grey: ['{grey-fg}', '{/grey-fg}'],
@@ -58,10 +70,21 @@ function escapeTags(text) {
   return String(text).replace(/\{/g, '{open}').replace(/\}/g, '{close}');
 }
 
+// Foreground names the cursor bar's black text replaces (see the header).
+const BAR_TEXT = new Set(['flag', 'grey']);
+
+// The cursor bar for a terminal with `colors` colours (its terminfo count):
+// palette 214 from 256 up, the terminal's yellow below that (see the header).
+export function barStyle(colors) {
+  const bg = Number.isFinite(colors) && colors >= 256 ? '214' : 'yellow';
+  return [`{${bg}-bg}{black-fg}`, `{/black-fg}{/${bg}-bg}`];
+}
+
 function tagsFor(style) {
-  const names = String(style || 'row')
+  let names = String(style || 'row')
     .split(/\s+/)
     .filter((n) => STYLE_TAGS[n]);
+  if (names.includes('selected')) names = names.filter((n) => !BAR_TEXT.has(n));
   if (!names.length) return STYLE_TAGS.row;
   const open = names.map((n) => STYLE_TAGS[n][0]).join('');
   const close = names
@@ -176,6 +199,9 @@ export async function createScreen({ onKey, onMouse, onResize, mouse = false, ti
     // guess badly; xterm-256color is what those hosts emulate.
     terminal: process.env.TERM && process.env.TERM !== 'dumb' ? process.env.TERM : 'xterm-256color',
   });
+  // The bar's amber needs 256 colours; on a terminal with fewer the library
+  // would reduce it to red, so the bar takes the terminal's yellow there.
+  STYLE_TAGS.selected = barStyle(screen.tput && screen.tput.colors);
   const box = blessed.box({ parent: screen, top: 0, left: 0, width: '100%', height: '100%', tags: true, wrap: false, scrollable: false });
   let suspended = false;
   let resumeProgram = null;

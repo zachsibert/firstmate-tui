@@ -233,6 +233,13 @@ assert_count() {
   n=$(printf '%s\n' "$1" | grep -Fc -- "$2")
   if [ "$n" -eq "$3" ]; then pass; else fail "$4: expected $3 lines with '$2', got $n"; fi
 }
+# The cursor bar's tags (lib/tui-blessed.mjs `selected`): palette colour 214, amber, behind black
+# text, never {inverse}, named by its index because neo-blessed 0.2.0 turns a hex tag into a basic
+# colour (the pty section checks the bytes a terminal gets). SEL and SEL_END are the ERE-escaped open
+# and close for assert_row, SEL_TAG the plain open for a fixed-string count.
+SEL='\{214-bg\}\{black-fg\}'
+SEL_END='\{/black-fg\}\{/214-bg\}'
+SEL_TAG='{214-bg}{black-fg}'
 # assert_lines <frame> <n> <label>
 assert_lines() {
   local n
@@ -335,24 +342,44 @@ assert_contains "$frame" "My PRs (3)" "populated review count (two recorded PRs 
 assert_contains "$frame" "In flight (7)" "populated in-flight count (five main rows, two home groups)"
 assert_contains "$frame" "Findings (3)" "populated findings count"
 assert_contains "$frame" "Landed (4)" "populated landed count"
-assert_before "$frame" "Needs you \(4\)" "My PRs \(3\)" "pane order 1"
-assert_before "$frame" "My PRs \(3\)" "In flight \(7\)" "pane order 2"
-assert_before "$frame" "In flight \(7\)" "Findings \(3\)" "pane order 3"
+assert_before "$frame" "In flight \(7\)" "Needs you \(4\)" "pane order 1: In flight leads (falsify: put needs first in PANES)"
+assert_before "$frame" "Needs you \(4\)" "My PRs \(3\)" "pane order 2"
+assert_before "$frame" "My PRs \(3\)" "Findings \(3\)" "pane order 3"
 assert_before "$frame" "Findings \(3\)" "Landed \(4\)" "pane order 4"
 
 # Every pane title leads with its toggle key, btop-style (falsify: drop the badge segment from the
 # top border in renderPanes, or change paneBadge).
-assert_contains "$frame" "┌─ [1] Needs you (4) ─" "badge on Needs you"
-assert_contains "$frame" "┌─ [2] My PRs (3) ─" "badge on My PRs"
-assert_contains "$frame" "┌─ [4] In flight (7) ─" "badge on In flight"
+assert_contains "$frame" "┌─ [2] Needs you (4) ─" "badge on Needs you"
+assert_contains "$frame" "┌─ [3] My PRs (3) ─" "badge on My PRs"
+assert_contains "$frame" "┌─ [1] In flight (7) ─" "badge on In flight"
 assert_contains "$frame" "┌─ [5] Findings (3) ─" "badge on Findings"
 assert_contains "$frame" "┌─ [6] Landed (4) ─" "badge on Landed"
 assert_count "$frame" "┌─ [" 6 "exactly six badges, one per pane"
 # With --tags the badge is its own grey segment between the border segments (falsify: give the badge the
 # border style, or drop `badge` from STYLE_TAGS).
 tags=$(render populated.json --tags) || fail "populated --tags: render exited non-zero"
-assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[2\]\{/grey-fg\}\{blue-fg\} My PRs \(3\)' "--tags: the badge is grey and the title keeps the border color"
+assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[3\]\{/grey-fg\}\{blue-fg\} My PRs \(3\)' "--tags: the badge is grey and the title keeps the border color"
 assert_count "$tags" "{grey-fg}[" 6 "--tags: six grey badges"
+# The cursor bar is amber 214 behind black text and never the terminal's inverse, on every cell of the
+# selected row, and the panes' own foreground colours give way to it where they would not read on
+# amber: a selected decide row's yellow flag text turns black, a selected unknown HERDR cell's grey
+# too, while a selected pane-lost cell keeps its red; the unselected rows keep their colours (falsify:
+# put {inverse} back in STYLE_TAGS.selected, or drop flag or grey from BAR_TEXT in tagsFor).
+assert_row "$tags" "^.*${SEL}working +${SEL_END}.*${SEL}ship-alpha +${SEL_END}.*${SEL} 5m${SEL_END}" "--tags: the selected In flight row is drawn on the amber bar in black, first cell to last"
+assert_count "$tags" "$SEL_TAG" 1 "--tags: one row carries the bar"
+assert_not_contains "$tags" "{inverse}" "--tags: nothing is drawn inverse (falsify: keep the inverse cursor)"
+assert_row "$tags" '\{yellow-fg\}decide +\{/yellow-fg\}' "--tags: an unselected decide row keeps its yellow flag text"
+tags_sel=$(render populated.json --tags --keys "tab,j") || fail "populated --tags tab,j: render exited non-zero"
+assert_row "$tags_sel" "${SEL}decide +${SEL_END}.*${SEL}db-choice *${SEL_END}" "--tags: the selected decide row is black on the bar, not yellow"
+assert_no_row "$tags_sel" "${SEL}\{yellow-fg\}" "--tags: no yellow text inside the bar"
+assert_row "$tags_sel" '\{yellow-fg\}decide +\{/yellow-fg\}' "--tags: In flight's decide group row, unselected, is still yellow"
+tags_sel=$(render populated.json --tags --keys "j,j,j,j,j,j") || fail "populated --tags lost row: render exited non-zero"
+assert_row "$tags_sel" "${SEL}\{red-fg\}pane lost\{/red-fg\}${SEL_END}" "--tags: a selected row's pane-lost cell keeps its red text inside the bar"
+assert_row "$tags_sel" "${SEL}done +${SEL_END}" "--tags: the rest of that row is black on the bar"
+tags_sel=$(render lost-disconnected.json --tags --keys "j") || fail "lost-disconnected --tags j: render exited non-zero"
+assert_row "$tags_sel" "${SEL}unknown *${SEL_END}" "--tags: a selected row's unknown HERDR cell is black on the bar, not grey"
+assert_no_row "$tags_sel" "${SEL}\{grey-fg\}" "--tags: no grey text inside the bar"
+assert_row "$(render lost-disconnected.json --tags)" '\{grey-fg\}unknown *\{/grey-fg\}' "--tags: the same cell unselected is still grey"
 
 # Pane headers are `[n] Name (count)` and nothing else: the snapshot and checks ages, and the herdr
 # state, are gone from them (falsify: put snapshotLabel or herdrLabel back into paneHeader in
@@ -386,7 +413,7 @@ assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ review ' "--all-hom
 # --no-prs case in parseArgs, or the !prs.enabled branch in unlistedChecks).
 frame_noprs=$(render populated.json --no-prs) || fail "populated --no-prs: render exited non-zero"
 assert_contains "$frame_noprs" "My PRs (2)" "--no-prs lists the two recorded PRs only"
-assert_contains "$frame_noprs" "┌─ [2] My PRs (2) ─" "--no-prs: the review header is bare; the rows say checks: off (falsify: put checksLabel back into paneHeader)"
+assert_contains "$frame_noprs" "┌─ [3] My PRs (2) ─" "--no-prs: the review header is bare; the rows say checks: off (falsify: put checksLabel back into paneHeader)"
 assert_row "$frame_noprs" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: off[^│]* - +5m~ │$' "recorded PR 41 row: with the fetch off STATUS and BASE are unknown (-) and the AGE is the status-log age marked ~ (falsify: keep the PR age without the fetch)"
 assert_row "$frame_noprs" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: off \(--no-prs\) +- +1m~ │$' "recorded PR 7 row names the flag"
 assert_not_contains "$frame_noprs" "passing" "no live check state with --no-prs"
@@ -459,51 +486,52 @@ assert_widths "$frame" 160 "populated frame lines are 160 columns"
 # Teammates' PRs sits between My PRs and In flight, so the two PR panes read side by side, with the
 # empty text of a pane whose scope has PRs but no request (falsify: reorder PANES in lib/layout.mjs,
 # or change the toreview empty text).
-assert_before "$frame" "My PRs \(3\)" "Teammates' PRs \(0\)" "pane order 5: Teammates' PRs is the third pane, below My PRs"
-assert_before "$frame" "Teammates' PRs \(0\)" "In flight \(7\)" "pane order 6: In flight follows Teammates' PRs"
-assert_contains "$frame" "┌─ [3] Teammates' PRs (0) ─" "badge on Teammates' PRs"
+assert_before "$frame" "My PRs \(3\)" "Teammates' PRs \(0\)" "pane order 5: Teammates' PRs is the fourth pane, below My PRs"
+assert_before "$frame" "Teammates' PRs \(0\)" "Findings \(3\)" "pane order 6: Findings follows Teammates' PRs"
+assert_contains "$frame" "┌─ [4] Teammates' PRs (0) ─" "badge on Teammates' PRs"
 assert_row "$frame" '^│ no pull requests waiting for your review +│$' "populated: Teammates' PRs is empty (no toreview rows in the fixture)"
 assert_row "$frame" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' "populated: the empty Teammates' PRs pane still heads its AUTHOR column (falsify: size the column set by the rows present)"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
-# The default selection, scout-beta's blocked row, carries a hold card and a pane, so the footer names
-# enter card and f focus in place of enter open/focus/view and, with no captain hold on that task, no d
-# or D (falsify: drop . settings from FOOTER_KEYS, or the card branch from boardHints).
-assert_row "$frame" '^ j/k move  tab pane  enter card  f focus  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group)"
-assert_row "$(render populated.json --keys "tab")" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a PR row (falsify: drop . settings from FOOTER_KEYS)"
+# Needs you's first row (tab from the In flight row the board starts on), scout-beta's blocked row, carries
+# a hold card and a pane, so the footer names enter card and f focus in place of enter open/focus/view and,
+# with no captain hold on that task, no d or D (falsify: drop . settings from FOOTER_KEYS, or the card branch from boardHints).
+assert_row "$(render populated.json --keys "tab")" '^ j/k move  tab pane  enter card  f focus  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group)"
+assert_row "$(render populated.json --keys "tab,tab")" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a PR row (falsify: drop . settings from FOOTER_KEYS)"
 
-# Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs).
-frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l") || fail "keys l: render exited non-zero"
+# Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs). The board starts
+# on In flight's first row, so its rows need no tab.
+frame_k=$(render populated.json --keys "j,j,j,j,l") || fail "keys l: render exited non-zero"
 assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "l on the fifth In flight row expands the hyperion group"
 assert_contains "$frame_k" "↳ child-one" "expanded by key: child rows appear"
 assert_contains "$frame_k" "In flight (12)" "expanded by key: only hyperion's rows are added"
 assert_not_contains "$frame_k" "▾ remote-sm" "expanded by key: the other group stays collapsed"
-frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,l,j,h") || fail "keys h: render exited non-zero"
+frame_k=$(render populated.json --keys "j,j,j,j,l,j,h") || fail "keys h: render exited non-zero"
 assert_not_contains "$frame_k" "▾" "h from a child row collapses its group"
 assert_contains "$frame_k" "In flight (7)" "collapsed again by key"
-frame_k=$(render populated.json --keys "tab,tab,j,j,j,j,enter") || fail "keys enter group: render exited non-zero"
+frame_k=$(render populated.json --keys "j,j,j,j,enter") || fail "keys enter group: render exited non-zero"
 assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "enter on a group row expands it"
-frame_k=$(render populated.json --keys "tab,tab,enter") || fail "keys enter worker: render exited non-zero"
+frame_k=$(render populated.json --keys "enter") || fail "keys enter worker: render exited non-zero"
 assert_contains "$frame_k" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus"
 frame_k=$(render populated.json --keys "?") || fail "keys ?: render exited non-zero"
 assert_contains "$frame_k" "enter        My PRs, Teammates' PRs, Landed or Needs-you PR row: open it in the browser" "help overlay documents enter on Landed and names the two PR panes"
 assert_not_contains "$frame_k" "open the PR of the selected row" "help overlay no longer documents o"
 assert_contains "$frame_k" "l / right    expand the selected In flight group" "help overlay documents l/right"
 # The help lists the pane keys the way the badges show them (falsify: change the 1 - 5 lines in HELP_LINES).
-assert_contains "$frame_k" "each pane title carries its key: [1] Needs you" "help overlay ties the 1-5 keys to the title badges"
-assert_contains "$frame_k" "[2] My PRs  [3] Teammates' PRs  [4] In flight  [5] Findings  [6] Landed" "help overlay lists every badge in screen order (falsify: leave the old order in HELP_LINES)"
+assert_contains "$frame_k" "each pane title carries its key: [1] In flight" "help overlay ties the 1-6 keys to the title badges"
+assert_contains "$frame_k" "[2] Needs you  [3] My PRs  [4] Teammates' PRs  [5] Findings  [6] Landed" "help overlay lists every badge in screen order (falsify: leave the old order in HELP_LINES)"
 assert_contains "$frame_k" "0            show every pane (with all six hidden the board lists these keys)" "help overlay documents 0 and the landing page"
 
 # Opening a PR: enter in My PRs, on a Needs-you PR row and on a Landed row with a PR,
 # through the injected opener only (falsify: drop the url field from fetchedPrRow, reviewRow or
 # landedRows, drop the PR rung from landedTarget, or drop the 'open' case in keyAction). The opener
 # receives the exact URL as its only argument.
-frame_o=$(render_open populated.json "tab,enter") || fail "open review: render exited non-zero"
+frame_o=$(render_open populated.json "tab,tab,enter") || fail "open review: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "enter on the first My PRs row (the newest IN REVIEW PR, joined to its task) opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "footer notice names the task, not the candidate"
-frame_o=$(render_open populated.json "tab,j,enter") || fail "open review second row: render exited non-zero"
+frame_o=$(render_open populated.json "tab,tab,j,enter") || fail "open review second row: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "enter on the second My PRs row (the failing live candidate nobody recorded) opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/api/pull/8 (api#8)" "footer notice names the opened URL"
-frame_o=$(render_open populated.json "j,j,j,enter") || fail "open needs enter: render exited non-zero"
+frame_o=$(render_open populated.json "tab,j,j,j,enter") || fail "open needs enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on the Needs-you review row opens its PR"
 frame_o=$(render_open populated.json "tab,tab,tab,tab,enter") || fail "open landed enter: render exited non-zero"
 assert_opened "https://github.com/acme/etl/pull/12" "enter on the first Landed row opens its PR"
@@ -511,10 +539,10 @@ assert_contains "$frame_o" "opened https://github.com/acme/etl/pull/12 (etl-inde
 frame_o=$(render_open populated.json "tab,tab,tab,tab,j,j,j,enter") || fail "open landed no url: render exited non-zero"
 assert_not_opened "enter on a Landed row without a PR URL calls no opener"
 assert_not_contains "$frame_o" "no PR URL on this row" "a Landed row without a PR is no longer an error: enter falls back to its report (the landed targets section below)"
-frame_o=$(render_open populated.json "tab,tab,enter") || fail "enter inflight: render exited non-zero"
+frame_o=$(render_open populated.json "enter") || fail "enter inflight: render exited non-zero"
 assert_not_opened "enter on an In flight worker calls no opener"
 rm -f "$OPENER_LOG"
-frame_o=$(render populated.json --keys "tab,enter") || fail "open without opener: render exited non-zero"
+frame_o=$(render populated.json --keys "tab,tab,enter") || fail "open without opener: render exited non-zero"
 assert_contains "$frame_o" "would open https://github.com/acme/widgets/pull/41" "without --opener-cmd, --render-once only reports the open"
 assert_not_opened "without --opener-cmd nothing is launched"
 
@@ -544,8 +572,8 @@ assert_row "$frame_med" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "medium: My P
 assert_no_row "$frame_med" ' TITLE +BASE' "medium: no BASE column"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$frame_med" '^ enter card  f focus  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer (the card form: the default selection is scout-beta's card row with a pane)"
-assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab")" '^ j/k  tab  enter  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer on a PR row"
+assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab")" '^ enter card  f focus  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer (the card form: tab to scout-beta's card row with a pane)"
+assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab,tab")" '^ j/k  tab  enter  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer on a PR row"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -575,10 +603,10 @@ assert_lines "$frame_empty" 40 "empty frame is 40 lines"
 frame_narrow=$(render narrow.json) || fail "narrow: render exited non-zero"
 # Section headers carry the same key badge as the pane titles (falsify: drop `badge` from the section
 # entry in flattenRows, or the badge segment in renderList).
-assert_row "$frame_narrow" '^── \[1\] Needs you \(1\) ─+$' "narrow: section header with its badge and count only, padded with dashes"
-assert_contains "$frame_narrow" "── [2] My PRs (0)" "narrow: My PRs section badge"
-assert_contains "$frame_narrow" "── [3] Teammates' PRs (0)" "narrow: Teammates' PRs section badge, third in screen order"
-assert_contains "$frame_narrow" "── [4] In flight (2)" "narrow: in-flight section badge"
+assert_row "$frame_narrow" '^── \[2\] Needs you \(1\) ─+$' "narrow: section header with its badge and count only, padded with dashes"
+assert_contains "$frame_narrow" "── [3] My PRs (0)" "narrow: My PRs section badge"
+assert_contains "$frame_narrow" "── [4] Teammates' PRs (0)" "narrow: Teammates' PRs section badge, fourth in screen order"
+assert_contains "$frame_narrow" "── [1] In flight (2)" "narrow: in-flight section badge, first in screen order"
 assert_contains "$frame_narrow" "── [5] Findings (0)" "narrow: findings section badge"
 assert_contains "$frame_narrow" "── [6] Landed (1)" "narrow: landed section badge"
 assert_count "$frame_narrow" "── [" 6 "narrow: six badges, one per section"
@@ -599,7 +627,7 @@ frame_g=$(render grouped.json) || fail "grouped: render exited non-zero"
 # No prs block in the fixture is the state before the first fetch of a session lands: the recorded
 # PR row says fetching, never "not fetched", and the header stays bare (falsify: drop the fetching
 # branch in unlistedChecks).
-assert_contains "$frame_g" "┌─ [2] My PRs (1) ─" "grouped: the review header is bare before the first fetch"
+assert_contains "$frame_g" "┌─ [3] My PRs (1) ─" "grouped: the review header is bare before the first fetch"
 assert_row "$frame_g" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "grouped: recorded PR row says checks fetching before the first fetch, STATUS unknown, AGE marked as the fallback"
 assert_not_contains "$frame_g" "not fetched" "grouped: nothing reads not fetched before the first fetch"
 
@@ -693,8 +721,8 @@ assert_viewed "-p
 frame_v=$(render_view populated.json "tab,tab,tab,j,enter") || fail "viewer remote: render exited non-zero"
 assert_not_viewed "a remote home's report is never opened"
 assert_contains "$frame_v" "mobile-fix: report lives on another host (remote-sm (remote)); not reachable from here" "remote report: red notice instead (falsify: drop reportRemote)"
-frame_v=$(render_view lost.json "tab,enter") || fail "viewer wrong pane: render exited non-zero"
-assert_not_viewed "enter on a PR row never runs the viewer (a Needs you row would show its hold card through it; the hold section covers that)"
+frame_v=$(render_view lost.json "enter") || fail "viewer wrong pane: render exited non-zero"
+assert_not_viewed "enter on an In flight worker row never runs the viewer (a Needs you row would show its hold card through it; the hold section covers that)"
 frame_v=$(render lost.json --keys "?") || fail "help: render exited non-zero"
 assert_contains "$frame_v" "Findings row: open the report in the viewer (glow, \$EDITOR, vim, less)" "help overlay documents the viewer"
 assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
@@ -723,9 +751,9 @@ assert_count "$tags_l" "{red-fg}pane lost{/red-fg}" 2 "--tags: both lost HERDR c
 assert_row "$tags_l" '\{red-fg\}decide.*\{red-fg\}ship-lost' "Needs you row of the lost worker is red"
 assert_no_row "$tags_l" '\{red-fg\}decide.*ship-alpha' "Needs you row of the live worker is not red"
 # Enter on a lost row: a footer notice, never a focus (falsify: drop the lost check in focusProblem).
-frame_k=$(render lost.json --keys "tab,j,enter") || fail "lost enter inflight: render exited non-zero"
+frame_k=$(render lost.json --keys "j,enter") || fail "lost enter inflight: render exited non-zero"
 assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "enter on the lost In flight row says pane lost"
-frame_k=$(render lost.json --keys "j,f") || fail "lost f needs: render exited non-zero"
+frame_k=$(render lost.json --keys "tab,j,f") || fail "lost f needs: render exited non-zero"
 assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "f on the lost Needs you row says pane lost (enter there shows the hold card since 0.6.0)"
 # Disconnected herdr: absence is unproved, so the cell reads unknown in grey and nothing is red (falsify: drop
 # the unknown branch in herdrColumn, or the grey style in rowSegments).
@@ -845,7 +873,7 @@ assert_contains "$frame_t" "viewed /fixture/homes/hyperion/data/etl-report/repor
 # viewProblem / focusProblem beyond Landed): a Findings row views, an In flight worker asks herdr.
 frame_t=$(render_targets "tab,tab,tab,enter" --no-herdr) || fail "landed fixture findings enter: render exited non-zero"
 assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "enter on a Findings row still views the report"
-frame_t=$(render_targets "tab,tab,enter" --no-herdr) || fail "landed fixture inflight enter: render exited non-zero"
+frame_t=$(render_targets "enter" --no-herdr) || fail "landed fixture inflight enter: render exited non-zero"
 assert_contains "$frame_t" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus, refused under --no-herdr"
 assert_not_opened "enter on an In flight worker calls no opener"
 assert_not_viewed "enter on an In flight worker runs no viewer"
@@ -959,17 +987,17 @@ assert_row "$frame_h" '^│ hold +- +bare-hold +Keep or drop the legacy importer
 assert_row "$frame_h" '^│ review +#7 +ship-review ' "holds: the review row"
 assert_row "$frame_h" '^│ paused +idle +held-worker +paused: awaiting the captain.s go-ahead +acme/api +main +- │$' "holds: the paused worker whose record is a dated hold lists in In flight as usual"
 assert_row "$frame_h" '^│ answered +09-14 +landed-hold +Rename the widget table +acme/widgets +main +2d │$' "holds: the finished hold lists in Landed as usual"
-assert_row "$frame_h" '^ j/k move  tab pane  enter card  f focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
-assert_row "$(render_hold "j")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
-assert_row "$(render_hold "tab,tab,j,j")" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "holds footer: the held worker in In flight has the card, the focus and both actions"
-assert_row "$(render_hold "j,j,j")" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
+assert_row "$(render_hold "tab")" '^ j/k move  tab pane  enter card  f focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
+assert_row "$(render_hold "tab,j")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
+assert_row "$(render_hold "j,j")" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "holds footer: the held worker in In flight has the card, the focus and both actions"
+assert_row "$(render_hold "tab,j,j,j")" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
 assert_row "$(render_hold "tab,tab,tab,tab,j")" '^ j/k move  tab pane  enter card  x hide ' "holds footer: the finished hold in Landed has its card, no pane and nothing to act on"
 assert_widths "$frame_h" 160 "holds frame lines are 160 columns"
 
 # The card of the main hold: every section, read from the scratch home, shown through the fake viewer
 # from a temp file that is gone once the viewer exits (falsify: drop a section from buildHoldCard, read
 # the report whole in readHoldMaterials, tail the status log by another count, or skip removeTempDir).
-frame_h=$(render_hold "j,enter") || fail "holds card main: render exited non-zero"
+frame_h=$(render_hold "tab,j,enter") || fail "holds card main: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of main-hold (viewer-cmd)" "card main: the footer names the card and the viewer"
 assert_row "$(cat "$VIEWER_LOG")" '/firstmate-tui-[^/]+/main-hold\.md$' "card main: the viewer got a temp file named after the task under a firstmate-tui temp directory"
 if [ -e "$(cat "$VIEWER_LOG")" ]; then fail "card main: the temp file $(cat "$VIEWER_LOG") is still there after the viewer exited"; else pass; fi
@@ -1010,7 +1038,7 @@ assert_not_opened "card main: the card opens no PR"
 assert_no_hold "card main: the card runs no hold command"
 # The hold with nothing on disk: one line per empty section (falsify: crash on a missing data/<id>/, or
 # leave a section out).
-frame_h=$(render_hold "j,j,enter") || fail "holds card bare: render exited non-zero"
+frame_h=$(render_hold "tab,j,j,enter") || fail "holds card bare: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of bare-hold (viewer-cmd)" "card bare: the footer names the card"
 assert_row "$(card)" '^# Keep or drop the legacy importer$' "card bare: the title"
 assert_contains "$(card)" "| set | - |" "card bare: no hold-set stamp reads -"
@@ -1024,12 +1052,12 @@ assert_row "$(card)" '^no status log at state/bare-hold\.status$' "card bare: th
 # The other card rows: the decision row's card is its task's record without a hold, the paused worker's
 # card in In flight, the finished hold's card in Landed with its done state, and a Landed row without a
 # hold keeps enter = open its PR (falsify: route Landed's enter through the card for every row).
-frame_h=$(render_hold "enter") || fail "holds card decision: render exited non-zero"
+frame_h=$(render_hold "tab,enter") || fail "holds card decision: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of decide-task (viewer-cmd)" "card decision: enter on the keyed decision row shows its task's card"
 assert_contains "$(card)" "| hold kind | - |" "card decision: a task without a hold reads - for the hold kind"
 assert_row "$(card)" '^no hold reason recorded$' "card decision: the empty reason line"
 assert_row "$(card)" '^Cache the widget lookups; the vendor question gates the design\.$' "card decision: the body comes from the backlog record"
-frame_h=$(render_hold "tab,tab,j,j,enter") || fail "holds card worker: render exited non-zero"
+frame_h=$(render_hold "j,j,enter") || fail "holds card worker: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of held-worker (viewer-cmd)" "card worker: enter on the In flight row whose record is a dated hold shows the card, not a focus"
 assert_contains "$(card)" "| bucket | dated |" "card worker: the dated bucket"
 assert_contains "$(card)" "| until | 2026-10-01 |" "card worker: the until date"
@@ -1043,7 +1071,7 @@ assert_not_viewed "a Landed row without a hold runs no viewer"
 # The delegate home's card: the full record read through that home's own fm-fleet-snapshot.sh (the log
 # names the home), the home on the card, the report head from that home's files (falsify: build a
 # delegate card from the ledger alone, or run the main home's snapshot instead).
-frame_h=$(render_hold "j,j,j,enter" --all-homes-needs) || fail "holds card delegate: render exited non-zero"
+frame_h=$(render_hold "tab,j,j,j,enter" --all-homes-needs) || fail "holds card delegate: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of delegate-hold (viewer-cmd)" "card delegate: the footer names the card, not partial"
 assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "card delegate: the delegate home's snapshot script ran once, with FM_HOME set to that home, and no hold command"
 assert_row "$(card)" '^# Approve the warehouse index$' "card delegate: the title"
@@ -1055,14 +1083,14 @@ assert_not_contains "$(card)" "more line" "card delegate: a report shorter than 
 assert_not_contains "$(card)" "Partial record" "card delegate: a record the home answered is not partial"
 # The same card when the delegate's snapshot fails: the ledger's fields under a partial notice that
 # names the failure, the files still read (falsify: refuse the card, or drop the partial line).
-frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "j,j,j,enter" --all-homes-needs) || fail "holds card delegate fail: render exited non-zero"
+frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "tab,j,j,j,enter" --all-homes-needs) || fail "holds card delegate fail: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of delegate-hold (partial record) (viewer-cmd)" "card delegate fail: the footer says partial"
 assert_row "$(card)" "^> Partial record: delegate's fm-fleet-snapshot.sh gave no record for delegate-hold \(exit 1: fm-fleet-snapshot: jq not found\); the title, the reason \(cut at 160 characters\) and the hold fields come from its ledger\.$" "card delegate fail: the first line says why the record is partial"
 assert_row "$(card)" '^Ledger copy of the reason, cut at 160 characters$' "card delegate fail: the ledger's reason stands in"
 assert_contains "$(card)" "data/delegate-hold/report.md (3 lines; the first 3 follow)" "card delegate fail: the home's files are still read"
 # A remote home's hold: the card from the ledger, marked partial, with no file read (falsify: try to
 # read a remote home's files).
-frame_h=$(render_hold "j,j,j,j,j,enter" --all-homes-needs) || fail "holds card remote: render exited non-zero"
+frame_h=$(render_hold "tab,j,j,j,j,j,enter" --all-homes-needs) || fail "holds card remote: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of remote-hold (partial record) (viewer-cmd)" "card remote: the footer says partial"
 assert_row "$(card)" '^> Partial record: remote-sm is a remote home whose files are not readable here; the title, the reason \(cut at 160 characters\) and the hold fields come from its ledger\.$' "card remote: the first line names the remote home"
 assert_row "$(card)" '^Remote ledger reason$' "card remote: the ledger's reason"
@@ -1070,32 +1098,32 @@ assert_row "$(card)" '^data/remote-hold/report\.md: not readable from here$' "ca
 assert_no_hold "card remote: no snapshot and no command runs for a remote home"
 # A held child under an expanded delegate group carries the same card (falsify: drop ledgerCard from
 # ledgerChildRows).
-frame_h=$(render_hold "tab,tab,j,j,enter" --expand all) || fail "holds card child: render exited non-zero"
+frame_h=$(render_hold "j,j,enter" --expand all) || fail "holds card child: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of child-held (viewer-cmd)" "card child: enter on the held child of an expanded group shows its card"
 assert_row "$(card)" '^# Cut over the nightly ETL$' "card child: the title from the delegate's record"
 assert_row "$(card)" '^The full child-held reason from the delegate home$' "card child: the full reason"
 # Review and Findings rows keep their enter (falsify: give reviewRow a card, or route Findings through it).
-frame_h=$(render_hold "j,j,j,enter") || fail "holds review enter: render exited non-zero"
+frame_h=$(render_hold "tab,j,j,j,enter") || fail "holds review enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on the review row still opens its PR"
 assert_not_viewed "enter on the review row runs no viewer"
 frame_h=$(render_hold "tab,tab,tab,enter") || fail "holds findings enter: render exited non-zero"
 assert_viewed "$HOLD_HOME/data/scout-x/report.md" "enter on a Findings row still views its report"
 assert_no_hold "neither enter runs a hold command"
 # f (falsify: drop the f case from keyAction).
-frame_h=$(render_hold "f") || fail "holds f: render exited non-zero"
+frame_h=$(render_hold "tab,f") || fail "holds f: render exited non-zero"
 assert_contains "$frame_h" "herdr is off (--no-herdr); cannot focus" "f on the decision row asks for its pane, refused under --no-herdr"
 frame_h=$(fake_herdr_env "$BOARD" --render-once --fixture "$HOLD_FIX" --keys "f") || fail "holds f herdr: render exited non-zero"
 assert_contains "$frame_h" "would focus w1A:p1 (decide-task); --render-once never runs herdr agent focus" "f on the decision row focuses its worker's pane through the fixture overlay"
 if [ -e "$HERDR_LOG" ]; then fail "holds f: a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
-frame_h=$(render_hold "j,f") || fail "holds f hold row: render exited non-zero"
+frame_h=$(render_hold "tab,j,f") || fail "holds f hold row: render exited non-zero"
 assert_contains "$frame_h" "main-hold: no herdr pane to focus" "f on a hold row without a pane says so"
 
 # d: the prompt, the confirmation, the cancel paths and the refusals (falsify: drop the prompt branch
 # from handleKey, let x act while the prompt is up, run the command before y, or drop holdActionProblem).
-frame_h=$(render_hold "j,d") || fail "holds d: render exited non-zero"
+frame_h=$(render_hold "tab,j,d") || fail "holds d: render exited non-zero"
 assert_row "$frame_h" '^ discard main-hold\? y to discard, esc to cancel +$' "d on a hold row puts the prompt in the footer"
 assert_no_hold "d alone runs nothing"
-frame_h=$(render_hold "j,d,y") || fail "holds d,y: render exited non-zero"
+frame_h=$(render_hold "tab,j,d,y") || fail "holds d,y: render exited non-zero"
 assert_hold_log "FM_HOME=$HOLD_HOME
 cwd=$HOLD_HOME_REAL
 argv=answer main-hold --decision-file $(grep -o -- '--decision-file .*' "$HOLD_LOG" 2>/dev/null | cut -d' ' -f2)
@@ -1104,28 +1132,28 @@ assert_row "$(cat "$HOLD_LOG")" '^argv=answer main-hold --decision-file /.*/firs
 if [ -e "$(grep -o -- '--decision-file .*' "$HOLD_LOG" | cut -d' ' -f2)" ]; then fail "d,y: the decision file is still there after the command exited"; else pass; fi
 assert_contains "$frame_h" "discarded main-hold · answered: main-hold" "d,y: the footer names the discard and the command's first output line"
 assert_not_contains "$frame_h" "y to discard" "d,y: the prompt is gone from the footer"
-frame_h=$(render_hold "j,d,escape") || fail "holds d,escape: render exited non-zero"
+frame_h=$(render_hold "tab,j,d,escape") || fail "holds d,escape: render exited non-zero"
 assert_no_hold "d,escape runs nothing"
 assert_contains "$frame_h" "cancelled; main-hold is unchanged" "d,escape: the footer says cancelled"
-frame_h=$(render_hold "j,d,x,escape") || fail "holds d,x,escape: render exited non-zero"
+frame_h=$(render_hold "tab,j,d,x,escape") || fail "holds d,x,escape: render exited non-zero"
 assert_no_hold "d,x,escape runs nothing"
 assert_contains "$frame_h" "Needs you (4)" "d,x,escape: x is ignored while the prompt is up, so the row is not hidden"
 assert_not_contains "$frame_h" "hidden main-hold" "d,x,escape: no hide notice"
-frame_h=$(render_hold "j,d,q,j,k") || fail "holds d,q: render exited non-zero"
+frame_h=$(render_hold "tab,j,d,q,j,k") || fail "holds d,q: render exited non-zero"
 assert_row "$frame_h" '^ discard main-hold\? y to discard, esc to cancel +$' "d then other keys: the prompt stays up and q does not quit"
 assert_no_hold "d then other keys runs nothing"
-frame_h=$(FAKE_HOLD_FAIL=1 render_hold "j,d,y") || fail "holds d fail: render exited non-zero"
+frame_h=$(FAKE_HOLD_FAIL=1 render_hold "tab,j,d,y") || fail "holds d fail: render exited non-zero"
 assert_contains "$frame_h" "fm-captain-hold: task main-hold is not held for the captain; hold it first or name the right task" "a refusing command's stderr line is the footer, verbatim"
 assert_not_contains "$frame_h" "discarded" "a refused discard is not reported as done"
 assert_file_contains "$HOLD_LOG" "argv=answer main-hold --decision-file" "the refused command did run once"
-tags_h=$(FAKE_HOLD_FAIL=1 FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$HOLD_FIX" --no-herdr --keys "j,d,y" --tags) || fail "holds d fail --tags: render exited non-zero"
+tags_h=$(FAKE_HOLD_FAIL=1 FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$HOLD_FIX" --no-herdr --keys "tab,j,d,y" --tags) || fail "holds d fail --tags: render exited non-zero"
 assert_row "$tags_h" '\{red-fg\}[^{]*fm-captain-hold: task main-hold is not held for the captain' "the refusal is red (falsify: pass bad=false on a failed run)"
-frame_h=$(render_hold "j,j,j,d") || fail "holds d review: render exited non-zero"
+frame_h=$(render_hold "tab,j,j,j,d") || fail "holds d review: render exited non-zero"
 assert_contains "$frame_h" "ship-review: no captain hold to discard" "d on a review row is refused with a notice"
 assert_no_hold "d on a review row runs nothing"
-frame_h=$(render_hold "d") || fail "holds d decision: render exited non-zero"
+frame_h=$(render_hold "tab,d") || fail "holds d decision: render exited non-zero"
 assert_contains "$frame_h" "decide-task: no captain hold to discard" "d on a decision row whose task has no hold is refused"
-frame_h=$(render_hold "j,j,j,j,j,d" --all-homes-needs) || fail "holds d remote: render exited non-zero"
+frame_h=$(render_hold "tab,j,j,j,j,j,d" --all-homes-needs) || fail "holds d remote: render exited non-zero"
 assert_contains "$frame_h" "remote-hold: hold lives on another host (remote-sm (remote)); cannot discard from here" "d on a remote home's hold is refused with the host reason"
 assert_no_hold "d on a remote hold runs nothing"
 frame_h=$(render_hold "tab,tab,tab,tab,j,d") || fail "holds d landed: render exited non-zero"
@@ -1140,52 +1168,52 @@ node -e '
   fs.writeFileSync(dst, JSON.stringify(fx));
 ' "$HOLD_FIX" "$SCRATCH/holds-noid.json"
 rm -f "${HOLD_LOG:?}"
-frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-noid.json" --no-herdr --keys "j,d,y") || fail "holds d no identity: render exited non-zero"
+frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-noid.json" --no-herdr --keys "tab,j,d,y") || fail "holds d no identity: render exited non-zero"
 assert_file_contains "$HOLD_LOG" "decision=Discarded by $(id -un) from firstmate-tui on $TODAY: no action; closed as not wanted." "with the identity unknown the decision names the OS user"
 assert_contains "$frame_h" "discarded main-hold as OS user $(id -un) (GitHub login unknown)" "with the identity unknown the footer says who signed"
 
 # D: the date prompt, the default, typed dates, the refusals and the delegate's full reason (falsify:
 # change DEFER_DEFAULT_DAYS, let checkDeferDate accept a bad or past date, pass the ledger's truncated
 # reason, or drop the delegate record read).
-frame_h=$(render_hold "j,D") || fail "holds D: render exited non-zero"
+frame_h=$(render_hold "tab,j,D") || fail "holds D: render exited non-zero"
 assert_row "$frame_h" "^ defer main-hold until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "D on a hold row puts the date prompt in the footer, prefilled with today plus 14 days"
 assert_no_hold "D alone runs nothing"
-frame_h=$(render_hold "j,D,enter") || fail "holds D,enter: render exited non-zero"
+frame_h=$(render_hold "tab,j,D,enter") || fail "holds D,enter: render exited non-zero"
 assert_hold_log "FM_HOME=$HOLD_HOME
 cwd=$HOLD_HOME_REAL
 argv=hold main-hold --reason Two quotes arrived; pick the vendor for the address API --until $PLUS14" "D,enter runs fm-captain-hold.sh hold once in the hold's home with the record's full reason and the default date"
 assert_contains "$frame_h" "deferred main-hold until $PLUS14 · main-hold" "D,enter: the footer names the deferral and the command's output"
-frame_h=$(render_hold "j,D,$CLEAR,$(spell 2027-01-15),enter") || fail "holds D typed: render exited non-zero"
+frame_h=$(render_hold "tab,j,D,$CLEAR,$(spell 2027-01-15),enter") || fail "holds D typed: render exited non-zero"
 assert_hold_log "FM_HOME=$HOLD_HOME
 cwd=$HOLD_HOME_REAL
 argv=hold main-hold --reason Two quotes arrived; pick the vendor for the address API --until 2027-01-15" "backspaces clear the default and typed digits and dashes make the date the command gets"
 assert_contains "$frame_h" "deferred main-hold until 2027-01-15" "D typed: the footer names the typed date"
-frame_h=$(render_hold "j,D,$CLEAR,$(spell 2026-13-40),enter") || fail "holds D bad date: render exited non-zero"
+frame_h=$(render_hold "tab,j,D,$CLEAR,$(spell 2026-13-40),enter") || fail "holds D bad date: render exited non-zero"
 assert_no_hold "an impossible date runs nothing"
 assert_contains "$frame_h" "2026-13-40: not a real date" "an impossible date is refused by name"
 assert_row "$frame_h" '^ defer main-hold until \(YYYY-MM-DD\): 2026-13-40  enter defers  esc cancels ' "an impossible date keeps the prompt open with the value to fix"
-frame_h=$(render_hold "j,D,$CLEAR,$(spell "$YESTERDAY"),enter") || fail "holds D yesterday: render exited non-zero"
+frame_h=$(render_hold "tab,j,D,$CLEAR,$(spell "$YESTERDAY"),enter") || fail "holds D yesterday: render exited non-zero"
 assert_no_hold "yesterday runs nothing"
 assert_contains "$frame_h" "$YESTERDAY: not after today ($TODAY)" "a date not after today is refused"
-frame_h=$(render_hold "j,D,$CLEAR,2,0,2,enter") || fail "holds D short: render exited non-zero"
+frame_h=$(render_hold "tab,j,D,$CLEAR,2,0,2,enter") || fail "holds D short: render exited non-zero"
 assert_no_hold "a partial date runs nothing"
 assert_contains "$frame_h" "202: not a YYYY-MM-DD date" "a partial date is refused by shape"
-frame_h=$(render_hold "j,D,escape") || fail "holds D,escape: render exited non-zero"
+frame_h=$(render_hold "tab,j,D,escape") || fail "holds D,escape: render exited non-zero"
 assert_no_hold "D,escape runs nothing"
 assert_contains "$frame_h" "cancelled; main-hold is unchanged" "D,escape: the footer says cancelled"
-frame_h=$(FAKE_HOLD_FAIL=1 render_hold "j,D,enter") || fail "holds D fail: render exited non-zero"
+frame_h=$(FAKE_HOLD_FAIL=1 render_hold "tab,j,D,enter") || fail "holds D fail: render exited non-zero"
 assert_contains "$frame_h" "fm-captain-hold: task main-hold is not held for the captain" "a refused defer shows the command's stderr verbatim"
 assert_not_contains "$frame_h" "deferred" "a refused defer is not reported as done"
-frame_h=$(render_hold "j,j,j,D") || fail "holds D review: render exited non-zero"
+frame_h=$(render_hold "tab,j,j,j,D") || fail "holds D review: render exited non-zero"
 assert_contains "$frame_h" "ship-review: no captain hold to defer" "D on a review row is refused with a notice"
 assert_no_hold "D on a review row runs nothing"
-frame_h=$(render_hold "j,j,j,D,enter" --all-homes-needs) || fail "holds D delegate: render exited non-zero"
+frame_h=$(render_hold "tab,j,j,j,D,enter" --all-homes-needs) || fail "holds D delegate: render exited non-zero"
 assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE
 FM_HOME=$HOLD_DELEGATE
 cwd=$HOLD_DELEGATE_REAL
 argv=hold delegate-hold --reason The full delegate reason, longer than the ledger keeps: approve the warehouse index before the nightly loader is scheduled --until $PLUS14" "D on a delegate hold reads the full reason from that home's snapshot first, then runs the command there with it"
 assert_contains "$frame_h" "deferred delegate-hold until $PLUS14" "D delegate: the footer names the deferral"
-frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "j,j,j,D" --all-homes-needs) || fail "holds D delegate fail: render exited non-zero"
+frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "tab,j,j,j,D" --all-homes-needs) || fail "holds D delegate fail: render exited non-zero"
 assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "D on a delegate hold whose snapshot fails runs no hold command"
 assert_contains "$frame_h" "delegate-hold: the full hold reason is not readable (exit 1: fm-fleet-snapshot: jq not found); defer it from delegate itself" "D delegate fail: the defer is refused rather than passing the ledger's cut reason"
 assert_not_contains "$frame_h" "defer delegate-hold until" "D delegate fail: no prompt opens"
@@ -1245,7 +1273,7 @@ assert_contains "$frame_h" "unhidden 2 rows in Landed" "X unhides every hidden r
 assert_contains "$frame_h" "Landed (4)" "X: all four Landed rows are back"
 assert_file_contains "$vs" '"hidden": []' "X empties the hidden list in the file"
 # A hidden group takes its children with it (falsify: drop the parent lookup in applyHidden).
-frame_h=$(render populated.json --rows 48 --keys "tab,tab,j,j,j,j,l,x") || fail "hide group: render exited non-zero"
+frame_h=$(render populated.json --rows 48 --keys "j,j,j,j,l,x") || fail "hide group: render exited non-zero"
 assert_contains "$frame_h" "In flight (6, 6 hidden)" "hiding the expanded hyperion group hides its five children too"
 assert_not_contains "$frame_h" "↳ child-one" "hidden group: children are out of view"
 # A fixture render without --view-state loads and saves nothing (falsify: drop the fixture guard in viewStateFor).
@@ -1275,18 +1303,30 @@ assert_contains "$frame_p" "pane hidden: Landed · 6 or 0 shows it again" "6 lea
 assert_file_contains "$vs" '"landed"' "the hidden pane is persisted"
 frame_p=$(render populated.json --view-state "$vs") || fail "panes reload: render exited non-zero"
 assert_count "$frame_p" "┌─" 5 "after a restart the pane stays hidden (falsify: drop hidden_panes from loadViewState)"
-# 3 hides Teammates' PRs, the third pane (falsify: drop the '3' case from keyAction, or move toreview in PANES).
-frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "panes 3: render exited non-zero"
-assert_contains "$frame_p" "· panes hidden: 3,6" "3 hides Teammates' PRs and the title lists it"
+# 4 hides Teammates' PRs, the fourth pane (falsify: drop the '4' case from keyAction, or move toreview in PANES).
+frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "panes 4: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 4,6" "4 hides Teammates' PRs and the title lists it"
 assert_not_contains "$frame_p" "Teammates' PRs (" "the hidden Teammates' PRs pane draws nothing"
-assert_contains "$frame_p" "pane hidden: Teammates' PRs · 3 or 0 shows it again" "3 leaves a notice naming its key"
+assert_contains "$frame_p" "pane hidden: Teammates' PRs · 4 or 0 shows it again" "4 leaves a notice naming its key"
 assert_file_contains "$vs" '"toreview"' "the hidden Teammates' PRs pane is persisted under its id, never its key"
-frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "panes 3 again: render exited non-zero"
-assert_contains "$frame_p" "┌─ [3] Teammates' PRs (0)" "3 again brings Teammates' PRs back"
-assert_contains "$frame_p" "pane shown: Teammates' PRs" "3 again leaves the shown notice"
+frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "panes 4 again: render exited non-zero"
+assert_contains "$frame_p" "┌─ [4] Teammates' PRs (0)" "4 again brings Teammates' PRs back"
+assert_contains "$frame_p" "pane shown: Teammates' PRs" "4 again leaves the shown notice"
 assert_file_not_contains "$vs" '"toreview"' "the shown pane leaves the persisted list"
-frame_p=$(render populated.json --view-state "$vs" --keys "1,2,3,5") || fail "panes 1,2,3,5: render exited non-zero"
-assert_contains "$frame_p" "· panes hidden: 1,2,3,5,6" "five panes hidden: the title lists all five"
+# 1 hides In flight, the first pane, and 2 Needs you, the second (falsify: put needs back first in PANES).
+frame_p=$(render populated.json --view-state "$vs" --keys "1") || fail "panes 1: render exited non-zero"
+assert_not_contains "$frame_p" "In flight (" "1 hides In flight"
+assert_contains "$frame_p" "pane hidden: In flight · 1 or 0 shows it again" "1 leaves a notice naming its key"
+assert_contains "$frame_p" "┌─ [2] Needs you (4)" "with In flight hidden Needs you is still drawn under key 2"
+frame_p=$(render populated.json --view-state "$vs" --keys "1,2") || fail "panes 1 back, 2: render exited non-zero"
+assert_contains "$frame_p" "┌─ [1] In flight (7)" "1 again brings In flight back at the top"
+assert_not_contains "$frame_p" "Needs you (" "2 hides Needs you"
+assert_contains "$frame_p" "pane hidden: Needs you · 2 or 0 shows it again" "2 leaves a notice naming its key"
+assert_file_contains "$vs" '"needs"' "the hidden Needs you pane is persisted under its id"
+frame_p=$(render populated.json --view-state "$vs" --keys "2") || fail "panes 2 again: render exited non-zero"
+assert_contains "$frame_p" "┌─ [2] Needs you (4)" "2 again brings Needs you back"
+frame_p=$(render populated.json --view-state "$vs" --keys "2,3,4,5") || fail "panes 2,3,4,5: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 2,3,4,5,6" "five panes hidden: the title lists all five"
 assert_count "$frame_p" "┌─" 1 "five panes hidden: one frame"
 assert_contains "$frame_p" "In flight (7)" "five panes hidden: In flight remains"
 assert_lines "$frame_p" 44 "five panes hidden: still 44 lines"
@@ -1295,27 +1335,31 @@ assert_row "$frame_p" '^│ decide +1 live +!▸ hyperion ' "five panes hidden: 
 # The last pane goes too: with every pane hidden the grid gives way to the landing page, a centered key
 # list between the title line and the footer (falsify: bring back a shown <= 1 guard in toggle-pane, or
 # drop the landing branch from renderFrame).
-frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "panes last: render exited non-zero"
+frame_p=$(render populated.json --view-state "$vs" --keys "1") || fail "panes last: render exited non-zero"
 assert_count "$frame_p" "┌─" 0 "all panes hidden: no pane frame is drawn"
 assert_not_contains "$frame_p" "Needs you (" "all panes hidden: no pane header"
 assert_not_contains "$frame_p" "In flight (" "all panes hidden: no pane header for the last one hidden"
 assert_row "$frame_p" '^ +all panes hidden +$' "landing page heading"
 assert_row "$frame_p" '^ firstmate-tui · /fixture/firstmate · 3 homes · all panes hidden ' "landing page: the title line leads with firstmate-tui (falsify: put fm-board back in titleLine)"
-assert_row "$frame_p" '^ +1  Needs you +$' "landing page: 1 brings Needs you back"
-assert_row "$frame_p" '^ +2  My PRs +$' "landing page: 2 brings My PRs back"
-assert_row "$frame_p" "^ +3  Teammates' PRs +\$" "landing page: 3 brings Teammates' PRs back (falsify: drop the third pane from landingEntries)"
-assert_row "$frame_p" '^ +4  In flight +$' "landing page: 4 brings In flight back"
+assert_row "$frame_p" '^ +1  In flight +$' "landing page: 1 brings In flight back"
+assert_row "$frame_p" '^ +2  Needs you +$' "landing page: 2 brings Needs you back"
+assert_row "$frame_p" '^ +3  My PRs +$' "landing page: 3 brings My PRs back"
+assert_row "$frame_p" "^ +4  Teammates' PRs +\$" "landing page: 4 brings Teammates' PRs back (falsify: drop the fourth pane from landingEntries)"
 assert_row "$frame_p" '^ +5  Findings +$' "landing page: 5 brings Findings back"
 assert_row "$frame_p" '^ +6  Landed +$' "landing page: 6 brings Landed back"
 assert_row "$frame_p" '^ +0  show all +$' "landing page: 0 shows all"
 assert_row "$frame_p" '^ +r  refresh +$' "landing page: r"
+assert_row "$frame_p" '^ +\.  settings +$' "landing page: . settings (falsify: drop the settings entry from landingEntries)"
 assert_row "$frame_p" '^ +\?  help +$' "landing page: ?"
 assert_row "$frame_p" '^ +q  quit +$' "landing page: q"
-assert_before "$frame_p" '^ +all panes hidden +$' '^ +1  Needs you +$' "landing page: heading first"
-assert_before "$frame_p" '^ +2  My PRs +$' "^ +3  Teammates' PRs +\$" "landing page: Teammates' PRs after My PRs"
-assert_before "$frame_p" "^ +3  Teammates' PRs +\$" '^ +4  In flight +$' "landing page: In flight after Teammates' PRs"
+assert_before "$frame_p" '^ +all panes hidden +$' '^ +1  In flight +$' "landing page: heading first"
+assert_before "$frame_p" '^ +1  In flight +$' '^ +2  Needs you +$' "landing page: Needs you after In flight"
+assert_before "$frame_p" '^ +3  My PRs +$' "^ +4  Teammates' PRs +\$" "landing page: Teammates' PRs after My PRs"
+assert_before "$frame_p" "^ +4  Teammates' PRs +\$" '^ +5  Findings +$' "landing page: Findings after Teammates' PRs"
 assert_before "$frame_p" '^ +6  Landed +$' '^ +0  show all +$' "landing page: 0 after the six panes"
 assert_before "$frame_p" '^ +0  show all +$' '^ +r  refresh +$' "landing page: r after 0"
+assert_before "$frame_p" '^ +r  refresh +$' '^ +\.  settings +$' "landing page: . after r, the footer's order"
+assert_before "$frame_p" '^ +\.  settings +$' '^ +\?  help +$' "landing page: ? after ."
 assert_contains "$frame_p" "3 homes · all panes hidden " "all panes hidden: the title says so instead of listing six numbers (falsify: drop allHidden from titleLine)"
 assert_not_contains "$frame_p" "panes hidden: 1,2,3,4,5,6" "all panes hidden: the title does not list the six numbers"
 assert_contains "$frame_p" "pane hidden: In flight · every pane hidden; 1-6 or 0 shows them" "hiding the last pane leaves a notice naming the way back"
@@ -1347,16 +1391,16 @@ assert_contains "$frame_p" "all panes hidden · 1-6 shows a pane, 0 shows all" "
 assert_file_contains "$vs" '"hidden": []' "x on the landing page hides no row"
 frame_p=$(render populated.json --view-state "$vs" --keys "?") || fail "landing ?: render exited non-zero"
 assert_contains "$frame_p" "firstmate-tui keys" "? opens the help over the landing page"
-frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "landing 4: render exited non-zero"
-assert_count "$frame_p" "┌─" 1 "4 on the landing page brings In flight back alone"
-assert_contains "$frame_p" "┌─ [4] In flight (7)" "the returned pane carries its badge"
-assert_contains "$frame_p" "pane shown: In flight" "4 on the landing page leaves the usual notice"
-assert_contains "$frame_p" "· panes hidden: 1,2,3,5,6" "one pane back: the title lists the five still hidden"
+frame_p=$(render populated.json --view-state "$vs" --keys "1") || fail "landing 1: render exited non-zero"
+assert_count "$frame_p" "┌─" 1 "1 on the landing page brings In flight back alone"
+assert_contains "$frame_p" "┌─ [1] In flight (7)" "the returned pane carries its badge"
+assert_contains "$frame_p" "pane shown: In flight" "1 on the landing page leaves the usual notice"
+assert_contains "$frame_p" "· panes hidden: 2,3,4,5,6" "one pane back: the title lists the five still hidden"
 assert_file_contains "$vs" '"hidden_panes": [' "the returned pane is persisted"
-frame_p=$(render populated.json --view-state "$vs" --keys "3") || fail "landing then 3: render exited non-zero"
-assert_count "$frame_p" "┌─" 2 "3 after the landing page brings Teammates' PRs back beside In flight"
-assert_contains "$frame_p" "┌─ [3] Teammates' PRs (0)" "Teammates' PRs carries its badge when it returns"
-assert_before "$frame_p" "Teammates' PRs \(0\)" "In flight \(7\)" "the returned pane draws above In flight, in its screen position"
+frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "landing then 4: render exited non-zero"
+assert_count "$frame_p" "┌─" 2 "4 after the landing page brings Teammates' PRs back beside In flight"
+assert_contains "$frame_p" "┌─ [4] Teammates' PRs (0)" "Teammates' PRs carries its badge when it returns"
+assert_before "$frame_p" "In flight \(7\)" "Teammates' PRs \(0\)" "the returned pane draws below In flight, in its screen position"
 frame_p=$(render populated.json --view-state "$vs" --keys "0") || fail "panes 0: render exited non-zero"
 assert_count "$frame_p" "┌─" 6 "0 shows every pane again"
 assert_contains "$frame_p" "all panes shown" "0 leaves a notice"
@@ -1386,37 +1430,67 @@ assert_count "$frame_p" "┌─" 0 "hand-written all-hidden file: no pane drawn"
 vs_old="$SCRATCH/view-state-old.json"
 printf '{"schema":"fm-board-view-state.v1","hidden":["review:main:api#8"],"hidden_panes":["review"],"columns":{"review":{"id":20}}}\n' > "$vs_old"
 frame_p=$(render populated.json --view-state "$vs_old") || fail "panes old id: render exited non-zero"
-assert_contains "$frame_p" "· panes hidden: 2" "an old file's hidden pane review hides My PRs"
-frame_p=$(render populated.json --view-state "$vs_old" --keys "2") || fail "panes old id shown: render exited non-zero"
+assert_contains "$frame_p" "· panes hidden: 3" "an old file's hidden pane review hides My PRs"
+frame_p=$(render populated.json --view-state "$vs_old" --keys "3") || fail "panes old id shown: render exited non-zero"
 assert_contains "$frame_p" "My PRs (2, 1 hidden)" "an old file's review:... hidden row key hides the same My PRs row"
 assert_row "$frame_p" '^│ CHECKS    STATUS     ID {20}TITLE ' "an old file's review column width applies to My PRs"
 assert_file_contains "$vs_old" '"mine:main:api#8"' "the next save writes the row key under the new pane id"
 assert_file_not_contains "$vs_old" 'review' "the next save drops the old pane id"
 # A file written while Teammates' PRs was the sixth pane, under key 6, keeps its meaning now that the
-# pane is third under key 3: hidden_panes, the hidden row key and the dragged width are all stored by
-# the pane id toreview, which did not change, so the pane comes back hidden at its new position, 3
+# pane is fourth under key 4: hidden_panes, the hidden row key and the dragged width are all stored by
+# the pane id toreview, which did not change, so the pane comes back hidden at its new position, 4
 # shows it with its row still hidden and its ID column 20 wide, and the next save writes the same ids
 # and never a key number (falsify: key hidden_panes or columns by pane index, or rename the id).
 vs_moved="$SCRATCH/view-state-moved.json"
 printf '{"schema":"fm-board-view-state.v1","hidden":["toreview:main:api#16"],"hidden_panes":["toreview"],"columns":{"toreview":{"id":20}},"updated":"2026-09-17T00:00:00.000Z"}\n' > "$vs_moved"
 frame_p=$(render to-review.json --view-state "$vs_moved") || fail "panes moved id hidden: render exited non-zero"
 assert_not_contains "$frame_p" "Teammates' PRs (" "a file from before the reorder hides Teammates' PRs at its new position"
-assert_contains "$frame_p" "· panes hidden: 3" "the title lists the hidden pane under its new key"
+assert_contains "$frame_p" "· panes hidden: 4" "the title lists the hidden pane under its new key"
 assert_count "$frame_p" "┌─" 5 "five panes are drawn"
-assert_before "$frame_p" "My PRs \(1\)" "In flight \(0\)" "with Teammates' PRs hidden, In flight follows My PRs"
-frame_p=$(render to-review.json --view-state "$vs_moved" --keys "3") || fail "panes moved id shown: render exited non-zero"
-assert_contains "$frame_p" "┌─ [3] Teammates' PRs (6, 1 hidden) ─" "3 shows the pane at its new position with the old file's hidden row still hidden"
+assert_before "$frame_p" "My PRs \(1\)" "Findings \([0-9]" "with Teammates' PRs hidden, Findings follows My PRs"
+frame_p=$(render to-review.json --view-state "$vs_moved" --keys "4") || fail "panes moved id shown: render exited non-zero"
+assert_contains "$frame_p" "┌─ [4] Teammates' PRs (6, 1 hidden) ─" "4 shows the pane at its new position with the old file's hidden row still hidden"
 assert_before "$frame_p" "My PRs \(1\)" "Teammates' PRs \(6, 1 hidden\)" "the shown pane sits below My PRs"
-assert_before "$frame_p" "Teammates' PRs \(6, 1 hidden\)" "In flight \(0\)" "and above In flight"
+assert_before "$frame_p" "Teammates' PRs \(6, 1 hidden\)" "Findings \([0-9]" "and above Findings"
 assert_not_contains "$frame_p" "api#16" "the row hidden under the old key stays hidden"
 assert_row "$frame_p" '^│ CHECKS +STATUS +ID {20}AUTHOR +TITLE ' "the old file's dragged ID width, 20, applies to the pane at its new position"
 assert_file_contains "$vs_moved" '"toreview:main:api#16"' "the next save keeps the row key under the same pane id"
 assert_file_contains "$vs_moved" '"toreview": {' "the next save keeps the column widths under the same pane id"
 assert_file_contains "$vs_moved" '"id": 20' "and the width itself"
 assert_file_contains "$vs_moved" '"hidden_panes": []' "the shown pane leaves hidden_panes"
-frame_p=$(render to-review.json --view-state "$vs_moved" --keys "3") || fail "panes moved id hidden again: render exited non-zero"
+frame_p=$(render to-review.json --view-state "$vs_moved" --keys "4") || fail "panes moved id hidden again: render exited non-zero"
 if grep -Eq '^    "toreview"$' "$vs_moved"; then pass; else fail "hiding it again writes the pane id to hidden_panes"; fi
-assert_file_not_contains "$vs_moved" '"3"' "and never its key number"
+assert_file_not_contains "$vs_moved" '"4"' "and never its key number"
+# The same for In flight, which moved from fourth under key 4 to first under key 1 in 0.6.1: a file from
+# before hides it at the top, 1 shows it with its hidden row still hidden and its dragged ID width applied,
+# and the next save writes the id inflight, never a key number; a file hiding needs hides Needs you at its
+# new position under key 2 (falsify: key hidden_panes, hidden or columns by pane index).
+vs_first="$SCRATCH/view-state-first.json"
+printf '{"schema":"fm-board-view-state.v1","hidden":["inflight:main:ship-alpha"],"hidden_panes":["inflight"],"columns":{"inflight":{"id":20}},"updated":"2026-09-19T00:00:00.000Z"}\n' > "$vs_first"
+frame_p=$(render populated.json --view-state "$vs_first") || fail "panes inflight moved hidden: render exited non-zero"
+assert_not_contains "$frame_p" "In flight (" "a file from before the reorder hides In flight at its new position"
+assert_contains "$frame_p" "· panes hidden: 1" "the title lists In flight under its new key"
+assert_row "$(printf '%s\n' "$frame_p" | sed -n 2p)" '^┌─ \[2\] Needs you \(4\) ─' "with In flight hidden Needs you is the first pane drawn, still under key 2"
+frame_p=$(render populated.json --view-state "$vs_first" --keys "1") || fail "panes inflight moved shown: render exited non-zero"
+assert_contains "$frame_p" "┌─ [1] In flight (6, 1 hidden) ─" "1 shows In flight at the top with the old file's hidden row still hidden"
+assert_row "$(printf '%s\n' "$frame_p" | sed -n 2p)" '^┌─ \[1\] In flight ' "the shown pane is the first drawn"
+assert_no_row "$frame_p" '^│ working +working +ship-alpha ' "the row hidden under the old key stays hidden"
+assert_row "$frame_p" '^│ STATE +HERDR +ID {20}WHAT ' "the old file's dragged ID width, 20, applies to In flight at its new position"
+assert_file_contains "$vs_first" '"inflight:main:ship-alpha"' "the next save keeps the row key under the same pane id"
+assert_file_contains "$vs_first" '"inflight": {' "the next save keeps the column width under the same pane id"
+assert_file_contains "$vs_first" '"hidden_panes": []' "the shown pane leaves hidden_panes"
+frame_p=$(render populated.json --view-state "$vs_first" --keys "1") || fail "panes inflight moved hidden again: render exited non-zero"
+if grep -Eq '^    "inflight"$' "$vs_first"; then pass; else fail "hiding In flight again writes the pane id to hidden_panes"; fi
+assert_file_not_contains "$vs_first" '"1"' "and never its key number"
+vs_needs="$SCRATCH/view-state-needs.json"
+printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":["needs"]}\n' > "$vs_needs"
+frame_p=$(render populated.json --view-state "$vs_needs") || fail "panes needs moved hidden: render exited non-zero"
+assert_not_contains "$frame_p" "Needs you (" "a file hiding needs hides Needs you at its new position"
+assert_contains "$frame_p" "· panes hidden: 2" "the title lists Needs you under its new key, 2"
+assert_before "$frame_p" "In flight \(7\)" "My PRs \(3\)" "with Needs you hidden My PRs follows In flight directly"
+frame_p=$(render populated.json --view-state "$vs_needs" --keys "2") || fail "panes needs moved shown: render exited non-zero"
+assert_contains "$frame_p" "┌─ [2] Needs you (4) ─" "2 shows Needs you again under its new key"
+assert_before "$frame_p" "In flight \(7\)" "Needs you \(4\)" "and it sits below In flight"
 # The landing page replaces the narrow list too (falsify: pick the layout mode before the all-hidden check).
 frame_p=$(render narrow.json --keys "1,2,3,4,5,6") || fail "panes narrow landing: render exited non-zero"
 assert_row "$frame_p" '^ +all panes hidden +$' "narrow: the landing page replaces the list"
@@ -1425,8 +1499,8 @@ assert_not_contains "$frame_p" " STATE " "narrow: no column header on the landin
 assert_widths "$frame_p" 70 "narrow landing page: lines are 70 columns"
 assert_lines "$frame_p" 24 "narrow landing page: 24 lines"
 # Hiding the selected pane moves the selection to the next shown pane (falsify: drop the shown() clamp in
-# moveSelection): 1 hides Needs you, then enter opens the first My PRs PR.
-frame_o=$(render_open populated.json "1,enter") || fail "panes selection: render exited non-zero"
+# moveSelection): tab to Needs you, 2 hides it, then enter opens the first My PRs PR.
+frame_o=$(render_open populated.json "tab,2,enter") || fail "panes selection: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "after hiding the selected pane, enter acts on the next shown pane"
 frame_p=$(render narrow.json --keys "6") || fail "panes narrow: render exited non-zero"
 assert_not_contains "$frame_p" "[6] Landed" "list mode: the hidden pane's section is gone (falsify: drop the hidden skip in flattenRows)"
@@ -1447,13 +1521,13 @@ assert_no_row "$frame" '^ j/k move .* o open' "footer offers no o key"
 # move back, drop the f case from keyAction, or drop `any` from focusProblem). scout-beta, the default
 # selection, has a pane: under --no-herdr the focus is refused with the herdr-off words, with the
 # fixture's herdr overlay it is reported as it would run; a row without a pane is told so.
-frame_f=$(render populated.json --keys "f") || fail "keys f: render exited non-zero"
+frame_f=$(render populated.json --keys "tab,f") || fail "keys f: render exited non-zero"
 assert_contains "$frame_f" "herdr is off (--no-herdr); cannot focus" "f on a Needs you row with a pane asks for the focus, refused under --no-herdr"
 assert_not_contains "$frame_f" "firstmate pane" "f leaves no firstmate-pane notice"
-frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "j,f") || fail "keys f herdr: render exited non-zero"
+frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "tab,j,f") || fail "keys f herdr: render exited non-zero"
 assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "f on a Needs you decision row focuses its worker's pane, the pane rule of enter skipped"
 if [ -e "$HERDR_LOG" ]; then fail "a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
-frame_f=$(render populated.json --keys "j,j,f") || fail "keys f no pane: render exited non-zero"
+frame_f=$(render populated.json --keys "tab,j,j,f") || fail "keys f no pane: render exited non-zero"
 assert_contains "$frame_f" "decide-vendor: no herdr pane to focus" "f on a hold row, which has no pane, says so"
 frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "tab,tab,tab,tab,tab,f") || fail "keys f landed herdr: render exited non-zero"
 assert_contains "$frame_f" "would focus" "f on a Landed row with a live pane focuses it too"
@@ -1645,9 +1719,9 @@ frame_rv_nc=$(render "$(variant review-rows.json prs-no-carry '{"prs": {"candida
 assert_row "$frame_rv_nc" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter +acme/api +main +10m~ │$' "a fetch that does not carry the PR falls back to the task state with ~ (falsify: return null from reviewRow when fetched.get misses)"
 # enter on a review row opens its PR through the injected opener, the child's included
 # (falsify: drop url from reviewRow).
-frame_o=$(render_open review-rows.json "j,j,j,enter") || fail "review-rows open: render exited non-zero"
+frame_o=$(render_open review-rows.json "tab,j,j,j,enter") || fail "review-rows open: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/21" "enter on the first review row opens its PR"
-frame_o=$(render_open review-rows.json "j,j,j,j,j,enter") || fail "review-rows open child: render exited non-zero"
+frame_o=$(render_open review-rows.json "tab,j,j,j,j,j,enter") || fail "review-rows open child: render exited non-zero"
 assert_opened "https://github.com/acme/etl/pull/61" "enter on the secondmate child's review row opens its PR"
 assert_widths "$frame_rv" 160 "review-rows frame lines are 160 columns"
 
@@ -1658,7 +1732,7 @@ assert_widths "$frame_rv" 160 "review-rows frame lines are 160 columns"
 # (falsify: filter My PRs on the candidate repositories, drop paneCandidates' pane test, or list a
 # toreview row in mineRows).
 frame_mp=$(render my-prs.json) || fail "my-prs: render exited non-zero"
-assert_contains "$frame_mp" "┌─ [2] My PRs (5) ─" "my-prs: five rows"
+assert_contains "$frame_mp" "┌─ [3] My PRs (5) ─" "my-prs: five rows"
 assert_row "$frame_mp" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "my-prs: the six columns"
 assert_row "$frame_mp" '^│ passing +IN REVIEW +dotfiles#5 +Tidy the zsh prompt +main +3h │$' "my-prs: the identity's own PR in a repository no task touches, named repo#number"
 assert_row "$frame_mp" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +5h │$' "my-prs: the bot-authored PR recorded on ship-alpha, named by its task"
@@ -1671,7 +1745,7 @@ assert_before "$frame_mp" '^│ passing +IN REVIEW +dotfiles#5' '^│ passing +I
 assert_before "$frame_mp" '^│ passing +IN REVIEW +ship-alpha' '^│ unlisted +- +ship-gamma' "my-prs: the unlisted recorded PR sorts after the open rows"
 assert_before "$frame_mp" '^│ unlisted +- +ship-gamma' '^│ none +CLOSED ' "my-prs: CLOSED sorts after the unlisted row"
 assert_before "$frame_mp" '^│ none +CLOSED ' '^│ passing +MERGED ' "my-prs: MERGED sorts last"
-assert_contains "$frame_mp" "┌─ [3] Teammates' PRs (1) ─" "my-prs: the one toreview row is in Teammates' PRs"
+assert_contains "$frame_mp" "┌─ [4] Teammates' PRs (1) ─" "my-prs: the one toreview row is in Teammates' PRs"
 assert_row "$frame_mp" '^│ failing +IN REVIEW +api#8 +teammate +Retry on 429 +main +2h │$' "my-prs: the toreview row draws in Teammates' PRs with its author between ID and TITLE"
 assert_widths "$frame_mp" 160 "my-prs frame lines are 160 columns"
 assert_lines "$frame_mp" 44 "my-prs frame is 44 lines"
@@ -1687,10 +1761,10 @@ assert_row "$frame_mp" '^ Identity +captain  \(from config\) +$' "my-prs: the fi
 # (falsify: drop toReviewStatus, the author check or the window from toReviewRows, reorder
 # STATUS_ORDER, or drop the author push from columnSpec or the author field from fetchedPrRow).
 frame_tr=$(render to-review.json) || fail "to-review: render exited non-zero"
-assert_contains "$frame_tr" "┌─ [3] Teammates' PRs (7) ─" "to-review: seven rows under key 3"
-assert_contains "$frame_tr" "┌─ [2] My PRs (1) ─" "to-review: the one mine row stays in My PRs"
+assert_contains "$frame_tr" "┌─ [4] Teammates' PRs (7) ─" "to-review: seven rows under key 4"
+assert_contains "$frame_tr" "┌─ [3] My PRs (1) ─" "to-review: the one mine row stays in My PRs"
 assert_before "$frame_tr" "My PRs \(1\)" "Teammates' PRs \(7\)" "to-review: the two PR panes are adjacent, My PRs first"
-assert_before "$frame_tr" "Teammates' PRs \(7\)" "In flight \(0\)" "to-review: In flight follows Teammates' PRs"
+assert_before "$frame_tr" "In flight \(0\)" "My PRs \(1\)" "to-review: In flight, empty here, still leads the two PR panes"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' "to-review: the seven columns, AUTHOR between ID and TITLE"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "to-review: My PRs keeps its six columns and draws no AUTHOR"
 assert_count "$frame_tr" "AUTHOR" 1 "to-review: AUTHOR heads one pane only"
@@ -1729,9 +1803,9 @@ assert_widths "$frame_tr" 70 "70-column to-review frame lines are 70 columns"
 # Keys on Teammates' PRs: 3 hides and shows it, tab reaches it right after My PRs, enter and a
 # double-click open its PR through the fake opener, x hides a row under the toreview id (falsify: drop
 # 'toreview' from OPEN_PANES, or move the pane in PANES).
-frame_tr=$(render to-review.json --keys "3") || fail "to-review 3: render exited non-zero"
-assert_not_contains "$frame_tr" "Teammates' PRs (" "3 hides Teammates' PRs"
-assert_contains "$frame_tr" "· panes hidden: 3" "3: the title lists the third pane"
+frame_tr=$(render to-review.json --keys "4") || fail "to-review 4: render exited non-zero"
+assert_not_contains "$frame_tr" "Teammates' PRs (" "4 hides Teammates' PRs"
+assert_contains "$frame_tr" "· panes hidden: 4" "4: the title lists the fourth pane"
 frame_o=$(render_open to-review.json "tab,tab,enter") || fail "to-review enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/16" "two tabs from Needs you land on Teammates' PRs, the pane after My PRs, and enter opens its first row, the DRAFT PR"
 assert_contains "$frame_o" "opened https://github.com/acme/api/pull/16 (api#16)" "to-review: the footer names the opened PR"
@@ -1743,17 +1817,18 @@ frame_tr=$(render to-review.json --view-state "$vs_tr" --keys "tab,tab,x") || fa
 assert_contains "$frame_tr" "Teammates' PRs (6, 1 hidden)" "x hides a Teammates' PRs row and the header counts it"
 assert_contains "$frame_tr" "hidden api#16" "x names the hidden Teammates' PRs row"
 assert_file_contains "$vs_tr" '"toreview:main:api#16"' "the hidden Teammates' PRs row is keyed under the toreview pane id"
-# Mouse: at 160x44 Needs you (title 1) and My PRs (title 5) are minimal above it, so Teammates' PRs'
-# title is line 9, its column header 10 and its rows 11-17; a double-click on its second row opens the
-# PR as enter does (falsify: drop the row zones for the third pane).
-frame_m=$(render_mouse to-review.json "dblclick:30,12") || fail "to-review dblclick: render exited non-zero"
+# Mouse: at 160x44 In flight (title 1, empty, and it takes the spare rows: lib/layout.mjs
+# SPARE_PRIORITY), Needs you (title 17) and My PRs (title 21) sit above it, so Teammates' PRs' title is
+# line 25, its column header 26 and its rows 27-33; a double-click on its second row opens the PR as
+# enter does (falsify: drop the row zones for the fourth pane).
+frame_m=$(render_mouse to-review.json "dblclick:30,28") || fail "to-review dblclick: render exited non-zero"
 assert_opened "https://github.com/MatthewsREIS/gemini/pull/120" "a double-click on Teammates' PRs' second row opens its PR"
 # The AUTHOR column resizes like any fixed column and its width persists under the author key: on the
-# header line 10 the columns start at x=2 CHECKS (7), 11 STATUS (17), 30 ID (10), 42 AUTHOR (10) and
+# header line 26 the columns start at x=2 CHECKS (7), 11 STATUS (17), 30 ID (10), 42 AUTHOR (10) and
 # 54 TITLE, so the AUTHOR/TITLE gutter is cells 52-53 (falsify: leave author out of COLUMN_KEYS, so
 # sanitizeColumns drops the saved width, or out of the fixed columns boundaries() offers).
 rm -f "${vs_tr:?}"
-frame_tr=$(render to-review.json --view-state "$vs_tr" --mouse "drag:52,10->57") || fail "to-review drag author: render exited non-zero"
+frame_tr=$(render to-review.json --view-state "$vs_tr" --mouse "drag:52,26->57") || fail "to-review drag author: render exited non-zero"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {11}TITLE ' "dragging the AUTHOR/TITLE boundary five cells right makes AUTHOR 15 wide"
 assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +gemini-dev {7}Gemini: index the parcel table ' "the rows follow the AUTHOR width"
 assert_contains "$frame_tr" "AUTHOR 15 wide" "the footer names the column"
@@ -1761,7 +1836,7 @@ assert_file_contains "$vs_tr" '"toreview": {' "the width is saved under the pane
 assert_file_contains "$vs_tr" '"author": 15' "and the author column key"
 frame_tr=$(render to-review.json --view-state "$vs_tr") || fail "to-review author width reload: render exited non-zero"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {11}TITLE ' "a restart reads the AUTHOR width back"
-frame_tr=$(render to-review.json --view-state "$vs_tr" --mouse "dblclick:57,10") || fail "to-review reset author: render exited non-zero"
+frame_tr=$(render to-review.json --view-state "$vs_tr" --mouse "dblclick:57,26") || fail "to-review reset author: render exited non-zero"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {6}TITLE ' "a double-click on the moved boundary puts AUTHOR back to its automatic width"
 assert_file_not_contains "$vs_tr" '"author"' "the reset width leaves the file"
 # The scope text: with no rows and an empty scope the pane says where to add one; with a scope and no
@@ -1776,9 +1851,9 @@ assert_row "$frame_tr" '^│ no pull requests waiting for your review +│$' "a 
 UNKNOWN_IDENTITY='{"login": null, "source": "unknown", "reason": "fixture: no login"}'
 frame_tr=$(render "$(variant to-review.json no-identity "{\"prs\": {\"identity\": $UNKNOWN_IDENTITY}}")") || fail "to-review no identity: render exited non-zero"
 assert_count "$frame_tr" "identity unknown: see Settings (.)" 2 "identity unknown in the fixture: one row in each PR pane"
-assert_contains "$frame_tr" "┌─ [3] Teammates' PRs (1) ─" "identity unknown: Teammates' PRs counts the one row"
+assert_contains "$frame_tr" "┌─ [4] Teammates' PRs (1) ─" "identity unknown: Teammates' PRs counts the one row"
 assert_row "$frame_tr" '^│ - +- +- +- +identity unknown: see Settings \(\.\) +- +- │$' "identity unknown: the Teammates' PRs row reads across its seven columns, - under AUTHOR"
-assert_contains "$frame_tr" "┌─ [2] My PRs (1) ─" "identity unknown: My PRs counts the one row"
+assert_contains "$frame_tr" "┌─ [3] My PRs (1) ─" "identity unknown: My PRs counts the one row"
 assert_not_contains "$frame_tr" "gemini#120" "identity unknown: the fixture's rows are not drawn"
 frame_tr=$(render "$(variant to-review.json no-identity "{\"prs\": {\"identity\": $UNKNOWN_IDENTITY}}")" --install-root "$SCRATCH/nowhere" --keys "." --cols 200) || fail "to-review no identity settings: render exited non-zero"
 assert_contains "$frame_tr" " Identity       identity unknown: set identity.github_login in the config file, or run gh auth login" "identity unknown: the Settings page warns, naming the config file in general when a fixture render read none"
@@ -1800,8 +1875,8 @@ assert_count "$frame_tr" "⠋ resolving GitHub identity…" 2 "identity pending:
 assert_row "$frame_tr" '^│ ⠋ resolving GitHub identity… +│$' "identity pending: the resolving line has the spinner glyph, the verb, the source and the ellipsis, nothing else"
 assert_not_contains "$frame_tr" "identity unknown" "identity pending: the identity row is not drawn before the rungs have answered"
 assert_not_contains "$frame_tr" "loading GitHub" "identity pending: the fetch spinners wait for the login"
-assert_contains "$frame_tr" "┌─ [2] My PRs (0) ─" "identity pending: My PRs counts zero rows"
-assert_contains "$frame_tr" "┌─ [3] Teammates' PRs (0) ─" "identity pending: Teammates' PRs counts zero rows"
+assert_contains "$frame_tr" "┌─ [3] My PRs (0) ─" "identity pending: My PRs counts zero rows"
+assert_contains "$frame_tr" "┌─ [4] Teammates' PRs (0) ─" "identity pending: Teammates' PRs counts zero rows"
 assert_not_contains "$frame_tr" "gemini#120" "identity pending: the fixture's rows are not drawn for nobody"
 # Between the first draw and the first refresh (no refresh block) a pending identity reads the empty
 # text like the other panes, never the row (falsify: fire identityRow on !identityKnown).
@@ -1827,8 +1902,8 @@ frame_tr=$(render "$(variant to-review.json no-gh '{"prs": {"candidate_prs": [],
 assert_row "$frame_tr" "^│ gh not on PATH: Teammates' PRs needs the GitHub CLI +│\$" "without gh Teammates' PRs names the CLI it needs"
 # The help names the sixth pane and its key (falsify: change the 1 - 6 lines in HELP_LINES).
 frame_tr=$(render to-review.json --keys "?") || fail "to-review help: render exited non-zero"
-assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] Needs you" "help overlay documents 1-6"
-assert_contains "$frame_tr" "[3] Teammates' PRs" "help overlay lists the Teammates' PRs badge"
+assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] In flight" "help overlay documents 1-6"
+assert_contains "$frame_tr" "[4] Teammates' PRs" "help overlay lists the Teammates' PRs badge"
 assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes ' "the footer reads 1-6 panes"
 
 # The fetch's pure pieces, straight from lib/sources.mjs, copy fm-bearings-snapshot.sh's rules: the
@@ -2111,7 +2186,7 @@ assert_row "$frame_r" '^│ passing +APPROVED +widgets#45 +teammate +Widget: app
 assert_row "$frame_r" '^│ passing +MERGED +etl#14 +teammate +ETL: merged after review +main +[0-9]+d │$' "live: a reviewed PR merged just now is in Teammates' PRs as MERGED"
 assert_count "$frame_r" "Retry budget: ask the API team" 1 "live: the identity's own PR that asked its team is in My PRs only, never in Teammates' PRs"
 assert_before "$frame_r" "My PRs \(6\)" "Teammates' PRs \(5\)" "live: Teammates' PRs is drawn right below My PRs"
-assert_before "$frame_r" "Teammates' PRs \(5\)" "In flight \(" "live: In flight follows the two PR panes"
+assert_before "$frame_r" "In flight \(" "My PRs \(6\)" "live: In flight leads the two PR panes"
 frame_r=$(render_live --keys "r" --prs --rows 60) || fail "refresh --prs: render exited non-zero"
 assert_fetch_log "$expected_live" "--prs is a no-op: the same calls (falsify: make --prs disable or double the fetch)"
 # --no-prs: no gh call at all, not even for the identity; both panes read the off state (falsify:
@@ -2588,16 +2663,16 @@ assert_no_upgrade "checkout: y with nothing pending runs nothing"
 # tab,j selects the second My PRs row, api#8 (the pane sorts by status, newest first, so
 # ship-alpha's newer PR 41 comes first), a selection enter would not reach from the default one.
 rm -f "$OPENER_LOG"
-frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings esc: render exited non-zero"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,tab,j,.,escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings esc: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "esc closes the page and enter acts on the row selected before it opened"
 assert_count "$frame_o" "┌─" 6 "esc: the grid is back"
 rm -f "$OPENER_LOG"
-frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,.,enter" --opener-cmd "$FAKE_OPENER") || fail "settings dot: render exited non-zero"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,tab,j,.,.,enter" --opener-cmd "$FAKE_OPENER") || fail "settings dot: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" ". closes the page with the selection intact"
 rm -f "$OPENER_LOG"
-frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,.,q,enter" --opener-cmd "$FAKE_OPENER") || fail "settings q: render exited non-zero"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,tab,j,.,q,enter" --opener-cmd "$FAKE_OPENER") || fail "settings q: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "q closes the page like the help overlay, and the board is not quit"
-frame_k=$(render populated.json --install-root "$INSTALL" --keys "tab,tab,j,j,j,j,l,.,escape") || fail "settings expanded: render exited non-zero"
+frame_k=$(render populated.json --install-root "$INSTALL" --keys "j,j,j,j,l,.,escape") || fail "settings expanded: render exited non-zero"
 assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "a group expanded before the page opened is still expanded after it closes"
 # . works from the landing page too and esc returns there (falsify: drop . from LANDING_KEYS).
 frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,6,.") || fail "settings landing: render exited non-zero"
@@ -2654,7 +2729,7 @@ assert_row "$frame_s" '^ Settings +$' "--no-mouse: a double-click opens no subme
 # A click on the page lands on the page, never on the board row that would be under the pointer: the
 # board's selection from before the page opened is what enter acts on afterwards.
 rm -f "$OPENER_LOG"
-frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,j,." --mouse "click:30,33 wheel:down:30,29" --keys "escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings click through: render exited non-zero"
+frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,tab,j,." --mouse "click:30,33 wheel:down:30,29" --keys "escape,enter" --opener-cmd "$FAKE_OPENER") || fail "settings click through: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "a click and a wheel on the page leave the board's selection where it was"
 
 # ------------------------------------------------------------ refresh schedule
@@ -2716,31 +2791,31 @@ frame_f=$(render "$fx_pf") || fail "PR fetch failed: render exited non-zero"
 tags_f=$(render "$fx_pf" --tags) || fail "PR fetch failed --tags: render exited non-zero"
 assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh failed 40s ago, retrying in 20s $' "PR fetch failed: the title line reads refresh failed 40s ago, retrying in 20s"
 assert_contains "$tags_f" "{red-fg}refresh failed 40s ago, retrying in 20s{/red-fg}" "PR fetch failed: the label is red"
-assert_contains "$frame_f" "┌─ [2] My PRs (3) (stale) ─" "PR fetch failed: the review header is marked stale"
+assert_contains "$frame_f" "┌─ [3] My PRs (3) (stale) ─" "PR fetch failed: the review header is marked stale"
 assert_count "$frame_f" "(stale)" 2 "PR fetch failed: a fixture error with no per-pane block marks both PR panes stale and nothing else"
-assert_contains "$frame_f" "┌─ [3] Teammates' PRs (0) (stale) ─" "PR fetch failed: Teammates' PRs is marked stale too"
+assert_contains "$frame_f" "┌─ [4] Teammates' PRs (0) (stale) ─" "PR fetch failed: Teammates' PRs is marked stale too"
 # A failure of one pane's searches alone: that pane is stale, the other PR pane is not (falsify: read
 # the top-level error in paneStale instead of the pane's own).
 frame_f=$(render "$(variant populated.json review-failed '{"prs": {"toreview": {"error": "review searches: exit 1"}}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: review searches: exit 1"}}')") || fail "Teammates' PRs fetch failed: render exited non-zero"
 assert_count "$frame_f" "(stale)" 1 "Teammates' PRs fetch failed: one pane is stale"
-assert_contains "$frame_f" "┌─ [3] Teammates' PRs (0) (stale) ─" "Teammates' PRs fetch failed: Teammates' PRs is the stale pane"
-assert_contains "$frame_f" "┌─ [2] My PRs (3) ─" "Teammates' PRs fetch failed: My PRs, whose searches succeeded, is not stale"
+assert_contains "$frame_f" "┌─ [4] Teammates' PRs (0) (stale) ─" "Teammates' PRs fetch failed: Teammates' PRs is the stale pane"
+assert_contains "$frame_f" "┌─ [3] My PRs (3) ─" "Teammates' PRs fetch failed: My PRs, whose searches succeeded, is not stale"
 frame_f=$(render "$(variant populated.json mine-failed '{"prs": {"mine": {"error": "My PRs: exit 1"}}, "refresh": {"failed_ago": 40, "next_in": 20, "failed": "PR fetch: My PRs: exit 1"}}')") || fail "My PRs fetch failed: render exited non-zero"
 assert_count "$frame_f" "(stale)" 1 "My PRs fetch failed: one pane is stale"
-assert_contains "$frame_f" "┌─ [2] My PRs (3) (stale) ─" "My PRs fetch failed: My PRs is the stale pane and keeps its rows"
-assert_contains "$frame_f" "┌─ [3] Teammates' PRs (0) ─" "My PRs fetch failed: Teammates' PRs is not stale"
+assert_contains "$frame_f" "┌─ [3] My PRs (3) (stale) ─" "My PRs fetch failed: My PRs is the stale pane and keeps its rows"
+assert_contains "$frame_f" "┌─ [4] Teammates' PRs (0) ─" "My PRs fetch failed: Teammates' PRs is not stale"
 assert_row "$frame_f" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "PR fetch failed: the previous PR rows stay on screen"
 # A failed snapshot: the four snapshot panes are marked stale and My PRs is not (falsify:
 # swap the pane test in paneStale).
 frame_f=$(render "$(variant populated.json snap-failed '{"snapshot_error": "exit 1", "refresh": {"failed_ago": 5, "next_in": 25, "failed": "snapshot: exit 1"}}')") || fail "snapshot failed: render exited non-zero"
 assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh failed 5s ago, retrying in 25s $' "snapshot failed: the title line names the failure"
 assert_count "$frame_f" "(stale)" 4 "snapshot failed: four panes are marked stale"
-assert_contains "$frame_f" "┌─ [1] Needs you (4) (stale) ─" "snapshot failed: Needs you is stale"
-assert_contains "$frame_f" "┌─ [4] In flight (7) (stale) ─" "snapshot failed: In flight is stale"
+assert_contains "$frame_f" "┌─ [2] Needs you (4) (stale) ─" "snapshot failed: Needs you is stale"
+assert_contains "$frame_f" "┌─ [1] In flight (7) (stale) ─" "snapshot failed: In flight is stale"
 assert_contains "$frame_f" "┌─ [5] Findings (3) (stale) ─" "snapshot failed: Findings is stale"
 assert_contains "$frame_f" "┌─ [6] Landed (4) (stale) ─" "snapshot failed: Landed is stale"
-assert_contains "$frame_f" "┌─ [2] My PRs (3) ─" "snapshot failed: My PRs, whose fetch succeeded, is not stale"
-assert_contains "$frame_f" "┌─ [3] Teammates' PRs (0) ─" "snapshot failed: Teammates' PRs is not stale either"
+assert_contains "$frame_f" "┌─ [3] My PRs (3) ─" "snapshot failed: My PRs, whose fetch succeeded, is not stale"
+assert_contains "$frame_f" "┌─ [4] Teammates' PRs (0) ─" "snapshot failed: Teammates' PRs is not stale either"
 # The failure text stays in the facts but the label keeps the spec's words: a failure with no age given
 # reads 0s ago (falsify: require failed_ago in refreshFromFixture).
 frame_f=$(render "$(variant populated.json failed-noage '{"refresh": {"failed": "snapshot: exit 1", "next_in": 30}}')") || fail "failed no age: render exited non-zero"
@@ -2798,17 +2873,17 @@ tags_ld=$(render cold-start.json --tags) || fail "cold start --tags: render exit
 assert_row "$frame_ld" '^ firstmate-tui · /fixture/firstmate · 1 home +refreshing… · herdr disconnected \(--no-herdr\) $' "cold start: the title line reads refreshing… (the block that puts the panes into the loading state)"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start: Needs you, In flight, Findings and Landed each spin and name the fleet snapshot"
 assert_count "$frame_ld" "⠋ loading GitHub checks…" 1 "cold start: My PRs alone names the GitHub checks"
-assert_line "$frame_ld" 4 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Needs you's first body line is the spinner"
-assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "cold start: My PRs' first body line is the spinner"
-assert_line "$frame_ld" 16 '^│ ⠋ loading fleet snapshot… +│$' "cold start: In flight's first body line is the spinner"
+assert_line "$frame_ld" 22 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Needs you's first body line is the spinner"
+assert_line "$frame_ld" 26 '^│ ⠋ loading GitHub checks… +│$' "cold start: My PRs' first body line is the spinner"
+assert_line "$frame_ld" 4 '^│ ⠋ loading fleet snapshot… +│$' "cold start: In flight's first body line, at the top of the frame, is the spinner"
 assert_line "$frame_ld" 34 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Findings' first body line is the spinner"
 assert_line "$frame_ld" 38 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Landed's first body line is the spinner"
 assert_count "$frame_ld" "⠋ loading GitHub review requests…" 1 "cold start: Teammates' PRs alone names the GitHub review requests (falsify: name one source for both PR panes)"
-assert_line "$frame_ld" 12 '^│ ⠋ loading GitHub review requests… +│$' "cold start: Teammates' PRs' first body line, right under My PRs, is its own spinner"
+assert_line "$frame_ld" 30 '^│ ⠋ loading GitHub review requests… +│$' "cold start: Teammates' PRs' first body line, right under My PRs, is its own spinner"
 for empty_text in "no captain decisions, holds or blocked workers" "no pull requests of yours" "no workers in flight" "no scout reports" "nothing landed yet" "no pull requests waiting for your review"; do
   assert_not_contains "$frame_ld" "$empty_text" "cold start: the spinner replaces the empty text (falsify: draw the empty text beside the loading line)"
 done
-assert_contains "$frame_ld" "┌─ [4] In flight (0) ─" "cold start: the headers count zero rows and carry no stale marker"
+assert_contains "$frame_ld" "┌─ [1] In flight (0) ─" "cold start: the headers count zero rows and carry no stale marker"
 assert_count "$frame_ld" "(stale)" 0 "cold start: nothing has failed, so nothing is stale"
 assert_widths "$frame_ld" 120 "cold start: every line is still 120 columns"
 assert_contains "$tags_ld" "{blue-fg}⠋ loading fleet snapshot…" "cold start --tags: the spinner line is dimmed like the empty text (falsify: give it the row style)"
@@ -2821,13 +2896,13 @@ assert_contains "$tags_ld" "{blue-fg}⠋ loading fleet snapshot…" "cold start 
 frame_ld=$(render "$(variant cold-start.json identity-pending '{"prs": {"identity": null}}')") || fail "cold start identity pending: render exited non-zero"
 tags_ld=$(render "$(variant cold-start.json identity-pending '{"prs": {"identity": null}}')" --tags) || fail "cold start identity pending --tags: render exited non-zero"
 assert_count "$frame_ld" "⠋ resolving GitHub identity…" 2 "cold start identity pending: both PR panes spin on the identity"
-assert_line "$frame_ld" 8 '^│ ⠋ resolving GitHub identity… +│$' "cold start identity pending: My PRs' first body line is the resolving spinner"
-assert_line "$frame_ld" 12 '^│ ⠋ resolving GitHub identity… +│$' "cold start identity pending: Teammates' PRs' first body line is the resolving spinner"
+assert_line "$frame_ld" 26 '^│ ⠋ resolving GitHub identity… +│$' "cold start identity pending: My PRs' first body line is the resolving spinner"
+assert_line "$frame_ld" 30 '^│ ⠋ resolving GitHub identity… +│$' "cold start identity pending: Teammates' PRs' first body line is the resolving spinner"
 assert_not_contains "$frame_ld" "identity unknown" "cold start identity pending: the identity row is not drawn before the rungs have answered"
 assert_not_contains "$frame_ld" "loading GitHub" "cold start identity pending: the fetch spinners wait for the login"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start identity pending: the four snapshot panes still spin on the snapshot"
-assert_contains "$frame_ld" "┌─ [2] My PRs (0) ─" "cold start identity pending: the header counts zero rows"
-assert_contains "$frame_ld" "┌─ [3] Teammates' PRs (0) ─" "cold start identity pending: Teammates' PRs counts zero rows"
+assert_contains "$frame_ld" "┌─ [3] My PRs (0) ─" "cold start identity pending: the header counts zero rows"
+assert_contains "$frame_ld" "┌─ [4] Teammates' PRs (0) ─" "cold start identity pending: Teammates' PRs counts zero rows"
 assert_widths "$frame_ld" 120 "cold start identity pending: every line is still 120 columns"
 assert_contains "$tags_ld" "{blue-fg}⠋ resolving GitHub identity…" "cold start identity pending --tags: the resolving line is dimmed like the other spinner lines"
 frame_ld=$(render "$(variant cold-start.json identity-pending-frame3 '{"prs": {"identity": null}, "refresh": {"refreshing": true, "loading_frame": 3}}')") || fail "cold start identity pending frame 3: render exited non-zero"
@@ -2836,10 +2911,10 @@ assert_count "$frame_ld" "⠸ loading fleet snapshot…" 4 "cold start identity 
 frame_ld=$(render "$(variant cold-start.json identity-pending '{"prs": {"identity": null}}')" --no-prs) || fail "cold start identity pending --no-prs: render exited non-zero"
 assert_not_contains "$frame_ld" "resolving" "cold start identity pending --no-prs: nothing needs the login, so nothing spins on it"
 assert_not_contains "$frame_ld" "identity unknown" "cold start identity pending --no-prs: no identity row"
-assert_line "$frame_ld" 8 '^│ no pull requests of yours +│$' "cold start identity pending --no-prs: My PRs reads its empty text"
+assert_line "$frame_ld" 26 '^│ no pull requests of yours +│$' "cold start identity pending --no-prs: My PRs reads its empty text"
 frame_ld=$(render "$(variant cold-start.json identity-pending-narrow '{"prs": {"identity": null}, "cols": 70, "rows": 24}')") || fail "narrow cold start identity pending: render exited non-zero"
-assert_line "$frame_ld" 6 '^ ⠋ resolving GitHub identity… +$' "narrow cold start identity pending: My PRs' line spins on the identity"
-assert_line "$frame_ld" 8 '^ ⠋ resolving GitHub identity… +$' "narrow cold start identity pending: Teammates' PRs' line spins on the identity"
+assert_line "$frame_ld" 8 '^ ⠋ resolving GitHub identity… +$' "narrow cold start identity pending: My PRs' line spins on the identity"
+assert_line "$frame_ld" 10 '^ ⠋ resolving GitHub identity… +$' "narrow cold start identity pending: Teammates' PRs' line spins on the identity"
 assert_widths "$frame_ld" 70 "narrow cold start identity pending: every line is 70 columns"
 # The snapshot landed, the PR fetch still running (populated.json with prs null and refreshing):
 # only My PRs spins, above the recorded PR rows it already has from the snapshot, and the
@@ -2848,10 +2923,10 @@ assert_widths "$frame_ld" 70 "narrow cold start identity pending: every line is 
 frame_ld=$(render "$(variant populated.json snap-landed '{"prs": null, "refresh": {"refreshing": true}}')") || fail "snapshot landed: render exited non-zero"
 assert_count "$frame_ld" "loading" 2 "snapshot landed: the two PR panes spin and nothing else"
 assert_row "$frame_ld" '^│ ⠋ loading GitHub review requests… +│$' "snapshot landed: Teammates' PRs spins on its own fetch"
-assert_line "$frame_ld" 11 '^│ ⠋ loading GitHub checks… +│$' "snapshot landed: My PRs' first body line is the spinner"
+assert_line "$frame_ld" 23 '^│ ⠋ loading GitHub checks… +│$' "snapshot landed: My PRs' first body line is the spinner"
 assert_row "$frame_ld" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "snapshot landed: the recorded PR rows stay under the spinner"
-assert_contains "$frame_ld" "┌─ [2] My PRs (2) ─" "snapshot landed: the header counts the recorded rows"
-assert_contains "$frame_ld" "┌─ [1] Needs you (4) ─" "snapshot landed: Needs you has its rows and no spinner"
+assert_contains "$frame_ld" "┌─ [3] My PRs (2) ─" "snapshot landed: the header counts the recorded rows"
+assert_contains "$frame_ld" "┌─ [2] Needs you (4) ─" "snapshot landed: Needs you has its rows and no spinner"
 assert_row "$frame_ld" '^│ working +working +ship-alpha +harness busy \(claude-hook\)' "snapshot landed: In flight's rows are drawn"
 # --no-prs: My PRs is never loading; it shows the off state, and a cold start's empty
 # review pane reads the empty text while the other four spin (falsify: drop the prs.enabled test
@@ -2862,8 +2937,8 @@ assert_row "$frame_ld" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull
 frame_ld=$(render cold-start.json --no-prs) || fail "cold start --no-prs: render exited non-zero"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start --no-prs: the four snapshot panes still spin"
 assert_not_contains "$frame_ld" "GitHub checks" "cold start --no-prs: My PRs does not spin"
-assert_line "$frame_ld" 8 '^│ no pull requests of yours +│$' "cold start --no-prs: My PRs reads its empty text"
-assert_line "$frame_ld" 12 '^│ PR fetch off \(--no-prs\) +│$' "cold start --no-prs: Teammates' PRs reads the off text (falsify: drop PRS_OFF_TEXT from prPaneEmpty)"
+assert_line "$frame_ld" 26 '^│ no pull requests of yours +│$' "cold start --no-prs: My PRs reads its empty text"
+assert_line "$frame_ld" 30 '^│ PR fetch off \(--no-prs\) +│$' "cold start --no-prs: Teammates' PRs reads the off text (falsify: drop PRS_OFF_TEXT from prPaneEmpty)"
 # Data on screen: a refresh over landed data spins nothing, so rows are never covered (falsify:
 # key the loading state on refreshing alone). The populated frame without a running refresh spins
 # nothing either.
@@ -2890,10 +2965,10 @@ if printf '%s\n' "$out" | grep -Fq "refresh.loading_frame is not a whole number:
 # drop the loading entry from flattenRows).
 frame_ld=$(render "$(variant cold-start.json narrow '{"cols": 70, "rows": 24}')") || fail "cold start narrow: render exited non-zero"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "narrow cold start: the four snapshot sections spin"
-assert_line "$frame_ld" 3 '^── \[1\] Needs you \(0\) ─+$' "narrow cold start: the first section header"
+assert_line "$frame_ld" 3 '^── \[1\] In flight \(0\) ─+$' "narrow cold start: the first section header is In flight"
 assert_line "$frame_ld" 4 '^ ⠋ loading fleet snapshot… +$' "narrow cold start: the spinner line follows the section header"
-assert_line "$frame_ld" 6 '^ ⠋ loading GitHub checks… +$' "narrow cold start: My PRs' line names the GitHub checks"
-assert_line "$frame_ld" 8 '^ ⠋ loading GitHub review requests… +$' "narrow cold start: Teammates' PRs' line names the review requests"
+assert_line "$frame_ld" 8 '^ ⠋ loading GitHub checks… +$' "narrow cold start: My PRs' line names the GitHub checks"
+assert_line "$frame_ld" 10 '^ ⠋ loading GitHub review requests… +$' "narrow cold start: Teammates' PRs' line names the review requests"
 assert_not_contains "$frame_ld" "no workers in flight" "narrow cold start: no empty text beside the spinner"
 assert_widths "$frame_ld" 70 "narrow cold start: every line is 70 columns"
 # A failed first fetch shows the failure text, not the spinner: a PR fetch that failed before any
@@ -2903,13 +2978,13 @@ assert_widths "$frame_ld" 70 "narrow cold start: every line is 70 columns"
 # snapshotError test from paneLoadingSource).
 frame_ld=$(render "$(variant populated.json pr-first-failed '{"prs": {"candidate_prs": null, "error": "exit 1"}, "refresh": {"refreshing": true}}')") || fail "PR first fetch failed: render exited non-zero"
 assert_count "$frame_ld" "loading" 0 "PR first fetch failed: no spinner"
-assert_contains "$frame_ld" "┌─ [2] My PRs (2) (stale) ─" "PR first fetch failed: the review header is stale"
+assert_contains "$frame_ld" "┌─ [3] My PRs (2) (stale) ─" "PR first fetch failed: the review header is stale"
 assert_row "$frame_ld" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: fetch failed +- +1m~ │$' "PR first fetch failed: the rows read checks: fetch failed"
 frame_ld=$(render "$(variant cold-start.json snap-first-failed '{"snapshot_error": "exit 1"}')") || fail "snapshot first fetch failed: render exited non-zero"
 assert_count "$frame_ld" "loading fleet snapshot" 0 "snapshot first fetch failed: the snapshot panes do not spin"
 assert_count "$frame_ld" "(stale)" 4 "snapshot first fetch failed: the four snapshot panes are stale"
-assert_line "$frame_ld" 4 '^│ no captain decisions, holds or blocked workers +│$' "snapshot first fetch failed: Needs you reads its empty text"
-assert_line "$frame_ld" 8 '^│ ⠋ loading GitHub checks… +│$' "snapshot first fetch failed: My PRs still spins on its own fetch"
+assert_line "$frame_ld" 22 '^│ no captain decisions, holds or blocked workers +│$' "snapshot first fetch failed: Needs you reads its empty text"
+assert_line "$frame_ld" 26 '^│ ⠋ loading GitHub checks… +│$' "snapshot first fetch failed: My PRs still spins on its own fetch"
 # Herdr: once the snapshot has landed, In flight names herdr while the link is still connecting,
 # above the rows it already has, and only while a refresh runs; on a cold start the snapshot
 # comes first (falsify: drop the herdr branch from paneLoadingSource, or move it above the
@@ -2919,7 +2994,7 @@ assert_count "$frame_ld" "loading" 1 "herdr connecting: one spinner on the board
 assert_row "$frame_ld" '^│ ⠋ loading herdr… +│$' "herdr connecting: In flight names herdr"
 assert_before "$frame_ld" "In flight \(7\)" "⠋ loading herdr…" "herdr connecting: the line is in In flight"
 assert_before "$frame_ld" "⠋ loading herdr…" "working +working +ship-alpha" "herdr connecting: the rows follow the spinner line"
-assert_contains "$frame_ld" "┌─ [4] In flight (7) ─" "herdr connecting: the header still counts the rows"
+assert_contains "$frame_ld" "┌─ [1] In flight (7) ─" "herdr connecting: the header still counts the rows"
 frame_ld=$(render "$(variant populated.json herdr-connecting-idle '{"herdr": {"state": "connecting"}}')") || fail "herdr connecting idle: render exited non-zero"
 assert_count "$frame_ld" "loading" 0 "herdr connecting with no refresh running: no spinner"
 frame_ld=$(render "$(variant cold-start.json cold-connecting '{"herdr": {"state": "connecting", "agents": []}}')") || fail "cold start connecting: render exited non-zero"
@@ -2948,9 +3023,9 @@ fx_cc=$(variant cold-start.json cached '{"now": "2026-09-16T12:12:00Z"}')
 frame_c=$(render "$fx_cc" --cache "$CACHE") || fail "cache cold start: render exited non-zero"
 assert_row "$frame_c" '^ firstmate-tui · /fixture/firstmate · 3 homes +refreshing… · herdr disconnected \(--no-herdr\) $' "cached launch: the title line reads refreshing… over the cached data and counts the cached homes"
 assert_count "$frame_c" "(cached 12m ago)" 6 "cached launch: all six pane titles carry the age of the cached data"
-assert_contains "$frame_c" "┌─ [1] Needs you (4) (cached 12m ago) ─" "cached launch: Needs you counts its cached rows and carries the marker"
-assert_contains "$frame_c" "┌─ [2] My PRs (3) (cached 12m ago) ─" "cached launch: My PRs draws the cached PR rows"
-assert_contains "$frame_c" "┌─ [3] Teammates' PRs (0) (cached 12m ago) ─" "cached launch: an empty cached pane carries the marker too"
+assert_contains "$frame_c" "┌─ [2] Needs you (4) (cached 12m ago) ─" "cached launch: Needs you counts its cached rows and carries the marker"
+assert_contains "$frame_c" "┌─ [3] My PRs (3) (cached 12m ago) ─" "cached launch: My PRs draws the cached PR rows"
+assert_contains "$frame_c" "┌─ [4] Teammates' PRs (0) (cached 12m ago) ─" "cached launch: an empty cached pane carries the marker too"
 assert_count "$frame_c" "loading" 0 "cached launch: no spinner anywhere (falsify: key paneLoadingSource on refreshing alone)"
 assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "cached launch: a cached PR row is on screen with its columns"
 assert_row "$frame_c" '^│ blocked +- +scout-beta +blocked: gh auth expired ' "cached launch: a cached Needs you row is on screen"
@@ -2959,13 +3034,13 @@ assert_widths "$frame_c" 120 "cached launch: every line is still 120 columns"
 # the cached rows, drawn around the login the cache was fetched for, and never spin on the identity
 # (falsify: restore the cache only over a known identity in restoreFromCache).
 frame_c=$(render "$(variant cold-start.json cached-pending '{"prs": {"identity": null}, "now": "2026-09-16T12:12:00Z"}')" --cache "$CACHE") || fail "cache identity pending: render exited non-zero"
-assert_contains "$frame_c" "┌─ [2] My PRs (3) (cached 12m ago) ─" "cached launch, identity pending: My PRs draws the cached PR rows"
+assert_contains "$frame_c" "┌─ [3] My PRs (3) (cached 12m ago) ─" "cached launch, identity pending: My PRs draws the cached PR rows"
 assert_not_contains "$frame_c" "resolving" "cached launch, identity pending: no resolving line over cached rows"
 assert_not_contains "$frame_c" "identity unknown" "cached launch, identity pending: no identity row either"
-# The cached rows are live for the cursor: j selects the second Needs you row (falsify: draw the
+# The cached rows are live for the cursor: tab, j selects the second Needs you row (falsify: draw the
 # cached rows as the empty text).
-tags_c=$(render "$fx_cc" --cache "$CACHE" --tags --keys "j") || fail "cache select: render exited non-zero"
-assert_row "$tags_c" '\{inverse\}decide +\{/inverse\}' "cached launch: j selects the second cached row"
+tags_c=$(render "$fx_cc" --cache "$CACHE" --tags --keys "tab,j") || fail "cache select: render exited non-zero"
+assert_row "$tags_c" "${SEL}decide +${SEL_END}" "cached launch: j selects the second cached row"
 # The marker's age has the AGE column's shape (fmtAge): seconds under a minute, minutes under an
 # hour, hours from there (falsify: format the age by hand in paneCached).
 frame_c=$(render "$(variant cold-start.json cached-s '{"now": "2026-09-16T12:00:40Z"}')" --cache "$CACHE") || fail "cache 40s: render exited non-zero"
@@ -2980,7 +3055,7 @@ frame_c=$(render "$fx_st" --cache "$CACHE") || fail "cache stale: render exited 
 assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "stale cache: the four snapshot panes spin as on a cold start"
 assert_count "$frame_c" "⠋ loading GitHub checks…" 1 "stale cache: My PRs spins on its own fetch"
 assert_count "$frame_c" "cached" 0 "stale cache: no cached marker and no notice"
-assert_line "$frame_c" 4 '^│ ⠋ loading fleet snapshot… +│$' "stale cache: Needs you's first body line is the spinner"
+assert_line "$frame_c" 22 '^│ ⠋ loading fleet snapshot… +│$' "stale cache: Needs you's first body line is the spinner"
 frame_c=$(render "$fx_st" --cache "$CACHE" --cache-max-age 3602) || fail "cache max-age: render exited non-zero"
 assert_count "$frame_c" "(cached 1h ago)" 6 "--cache-max-age 3602 keeps the same cache"
 # --no-cache: a fresh cache is not read (falsify: drop the opts.cache check in driveOnce).
@@ -3012,14 +3087,14 @@ assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "another home's cache 
 # flag in paneCached, or clear the snapshot flag with the PR fetch).
 frame_c=$(render "$(variant populated.json snap-live '{"prs": null, "refresh": {"refreshing": true}, "now": "2026-09-16T12:05:00Z"}')" --cache "$CACHE") || fail "cache pane by pane: render exited non-zero"
 assert_count "$frame_c" "(cached 5m ago)" 2 "snapshot landed: two panes still carry the marker"
-assert_contains "$frame_c" "┌─ [2] My PRs (3) (cached 5m ago) ─" "snapshot landed: My PRs is cached and draws the cached rows"
-assert_contains "$frame_c" "┌─ [3] Teammates' PRs (0) (cached 5m ago) ─" "snapshot landed: Teammates' PRs is cached"
-assert_contains "$frame_c" "┌─ [1] Needs you (4) ─" "snapshot landed: Needs you draws live data and carries no marker"
+assert_contains "$frame_c" "┌─ [3] My PRs (3) (cached 5m ago) ─" "snapshot landed: My PRs is cached and draws the cached rows"
+assert_contains "$frame_c" "┌─ [4] Teammates' PRs (0) (cached 5m ago) ─" "snapshot landed: Teammates' PRs is cached"
+assert_contains "$frame_c" "┌─ [2] Needs you (4) ─" "snapshot landed: Needs you draws live data and carries no marker"
 assert_count "$frame_c" "loading" 0 "snapshot landed: the PR panes draw the cache instead of spinning"
 frame_c=$(render "$(variant cold-start.json prs-live '{"prs": {"candidate_prs": []}, "now": "2026-09-16T12:05:00Z"}')" --cache "$CACHE") || fail "cache prs live: render exited non-zero"
 assert_count "$frame_c" "(cached 5m ago)" 4 "PR fetch landed: the four snapshot panes still carry the marker"
-assert_contains "$frame_c" "┌─ [2] My PRs (2) ─" "PR fetch landed: My PRs draws the live (empty) fetch over the cached snapshot's recorded PRs, no marker"
-assert_contains "$frame_c" "┌─ [4] In flight (7) (cached 5m ago) ─" "PR fetch landed: In flight is still cached"
+assert_contains "$frame_c" "┌─ [3] My PRs (2) ─" "PR fetch landed: My PRs draws the live (empty) fetch over the cached snapshot's recorded PRs, no marker"
+assert_contains "$frame_c" "┌─ [1] In flight (7) (cached 5m ago) ─" "PR fetch landed: In flight is still cached"
 # The launch refresh failed over a cached board: the rows stay, each pane is stale and cached at
 # once, and the title line names the failure (falsify: drop the cached snapshot when
 # snapshot_error is set, or the fixture's errors, in restoreFromCache).
@@ -3032,16 +3107,16 @@ assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha ' "failed launch refr
 # carries no age, and a Needs you review row read from the cached snapshot carries it (falsify:
 # drop the cached suffix from ctx.open, wait for a confirmation, or read one flag for every pane).
 rm -f "${OPENER_LOG:?}"
-frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "tab,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open: render exited non-zero"
+frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "tab,tab,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "enter on a cached My PRs row opens the PR through the opener"
 assert_contains "$frame_c" "opened https://github.com/acme/widgets/pull/41 (ship-alpha) · data cached 12m ago" "the footer names the age of the cached data the row came from"
 rm -f "${OPENER_LOG:?}"
-frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$(variant cold-start.json prs-live-41 '{"prs": {"candidate_prs": [{"num": "41", "repo": "acme/widgets", "task": "ship-alpha", "url": "https://github.com/acme/widgets/pull/41", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing"}]}, "now": "2026-09-16T12:12:00Z"}')" --cache "$CACHE" --keys "tab,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open live: render exited non-zero"
+frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$(variant cold-start.json prs-live-41 '{"prs": {"candidate_prs": [{"num": "41", "repo": "acme/widgets", "task": "ship-alpha", "url": "https://github.com/acme/widgets/pull/41", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing"}]}, "now": "2026-09-16T12:12:00Z"}')" --cache "$CACHE" --keys "tab,tab,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open live: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "enter on the live PR row opens it"
 assert_contains "$frame_c" "opened https://github.com/acme/widgets/pull/41 (ship-alpha) " "a live PR row opens with the plain notice"
 assert_not_contains "$frame_c" "data cached" "a live PR row names no cached age although the snapshot panes are still cached"
 rm -f "${OPENER_LOG:?}"
-frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "j,j,j,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open review: render exited non-zero"
+frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "tab,j,j,j,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open review: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on a cached Needs you review row opens its PR"
 assert_contains "$frame_c" "opened https://github.com/acme/api/pull/7 (ship-gamma) · data cached 12m ago" "a Needs you row from the cached snapshot names the age too"
 # Without --cache a render reads and writes no cache: a fresh one beside the --view-state file is
@@ -3081,34 +3156,34 @@ vs_f="$SCRATCH/view-restore.json"
 write_vs() { printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":[],"columns":{},%s}\n' "$1" > "$vs_f"; }
 write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":0},"expanded":[],"scroll":{}'
 tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}failing \{/inverse\}.*\{inverse\}api#8' "the saved row is selected by its hide key, whatever its saved index says (falsify: read the index first)"
-assert_count "$tags_v" "{inverse}" 1 "one row is selected"
+assert_row "$tags_v" "${SEL}failing ${SEL_END}.*${SEL}api#8" "the saved row is selected by its hide key, whatever its saved index says (falsify: read the index first)"
+assert_count "$tags_v" "$SEL_TAG" 1 "one row is selected"
 tags_v=$(render populated.json --view-state "$vs_f" --tags --keys "j") || fail "view restore j: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}unlisted\{/inverse\}.*\{inverse\}ship-gamma' "keys move on from the restored row"
+assert_row "$tags_v" "${SEL}unlisted${SEL_END}.*${SEL}ship-gamma" "keys move on from the restored row"
 # The row is gone: the saved index, clamped to the pane (falsify: fall back to row 0).
 fx_gone=$(variant populated.json api8-gone '{"prs": {"candidate_prs": []}}')
 write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":1},"expanded":[],"scroll":{}'
 tags_v=$(render "$fx_gone" --view-state "$vs_f" --tags) || fail "view restore index: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}unlisted\{/inverse\}.*\{inverse\}ship-alpha' "with the row gone the saved index picks the pane's second row"
+assert_row "$tags_v" "${SEL}unlisted${SEL_END}.*${SEL}ship-alpha" "with the row gone the saved index picks the pane's second row"
 write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":9},"expanded":[],"scroll":{}'
 tags_v=$(render "$fx_gone" --view-state "$vs_f" --tags) || fail "view restore clamp: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}unlisted\{/inverse\}.*\{inverse\}ship-alpha' "an index past the pane's rows is clamped to its last row"
+assert_row "$tags_v" "${SEL}unlisted${SEL_END}.*${SEL}ship-alpha" "an index past the pane's rows is clamped to its last row"
 # The focused pane alone (no row: the pane was empty when saved) focuses that pane; a pane the
 # board does not know, or one hidden in the same file, leaves the default selection in force
 # (falsify: drop the PANE_IDS check from sanitizeFocus, or the clamp after focusFromSaved).
 write_vs '"focus":{"pane":"landed","row":null,"index":0},"expanded":[],"scroll":{}'
 tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore pane: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}merged +\{/inverse\}.*\{inverse\}etl-index' "a saved pane with no row selects its first row"
+assert_row "$tags_v" "${SEL}merged +${SEL_END}.*${SEL}etl-index" "a saved pane with no row selects its first row"
 write_vs '"focus":{"pane":"nope","row":"x","index":0},"expanded":[],"scroll":{}'
 tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore unknown pane: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}blocked\{/inverse\}.*\{inverse\}scout-beta' "an unknown pane id leaves the selection on the first pane"
+assert_row "$tags_v" "${SEL}working +${SEL_END}.*${SEL}ship-alpha" "an unknown pane id leaves the selection on the first pane, In flight"
 write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":1},"expanded":[],"scroll":{}'
-frame_v=$(render populated.json --view-state "$vs_f" --keys "2") || fail "view restore hidden pane: render exited non-zero"
+frame_v=$(render populated.json --view-state "$vs_f" --keys "3") || fail "view restore hidden pane: render exited non-zero"
 assert_contains "$frame_v" "pane hidden: My PRs" "hiding the restored pane moves the selection on without an error"
 # A pre-0.4.0 file naming the pane review restores onto My PRs (falsify: skip paneIdOf in sanitizeFocus).
 write_vs '"focus":{"pane":"review","row":"review:main:api#8","index":0},"expanded":[],"scroll":{}'
 tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore old id: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}failing \{/inverse\}.*\{inverse\}api#8' "an old file's review pane and row key restore onto My PRs"
+assert_row "$tags_v" "${SEL}failing ${SEL_END}.*${SEL}api#8" "an old file's review pane and row key restore onto My PRs"
 # Expanded groups and scroll: the hyperion group comes back open with the cursor on it, and the
 # In flight pane, three rows tall in this frame, starts three rows down as saved (falsify: drop
 # expanded from the view init in driveOnce, or scrollFromSaved).
@@ -3119,7 +3194,7 @@ assert_row "$frame_v" '^│ working +working +↳ child-one ' "the expanded grou
 frame_v=$(render populated.json --view-state "$vs_f" --rows 30) || fail "view restore scroll: render exited non-zero"
 assert_row "$frame_v" '3 above, \+[0-9]+ more ──┘$' "the saved scroll offset starts the two-row In flight pane three rows down, the cursor on its last shown row"
 tags_v=$(render populated.json --view-state "$vs_f" --rows 30 --tags) || fail "view restore expanded --tags: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}decide +\{/inverse\}.*\{inverse\}!▾ hyperion' "the cursor is on the group row"
+assert_row "$tags_v" "${SEL}decide +${SEL_END}.*${SEL}!▾ hyperion" "the cursor is on the group row"
 # The restore waits for the rows: on a cold start the saved pane is loading and the default
 # selection stands; over a fresh cache the same file puts the cursor on the cached row (falsify:
 # apply focusFromSaved to a loading pane).
@@ -3127,7 +3202,7 @@ write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":1},"expanded":[
 frame_v=$(render cold-start.json --view-state "$vs_f") || fail "view restore cold: render exited non-zero"
 assert_count "$frame_v" "⠋ loading fleet snapshot…" 4 "a saved selection on a loading pane leaves the cold start as it is"
 tags_v=$(render "$fx_cc" --view-state "$vs_f" --cache "$CACHE" --tags) || fail "view restore cached: render exited non-zero"
-assert_row "$tags_v" '\{inverse\}failing \{/inverse\}.*\{inverse\}api#8' "over a fresh cache the saved row is selected among the cached rows"
+assert_row "$tags_v" "${SEL}failing ${SEL_END}.*${SEL}api#8" "over a fresh cache the saved row is selected among the cached rows"
 # A one-shot render writes the selection back as it read it: x hides a row, and the file keeps
 # the hand-written focus rather than the scripted cursor (falsify: save savedFocus from
 # the driver's persist).
@@ -3169,8 +3244,8 @@ tick_saved=$(printf '%s\n' "$tick_cache" | grep -o '"saved_at": "[^"]*"')
 quit_saved=$(grep -o '"saved_at": "[^"]*"' "$cache_h")
 if [ -n "$tick_fetched" ] && [ "$tick_fetched" = "$quit_fetched" ]; then pass; else fail "headless quit: fetched_at stays the tick's ($tick_fetched, then $quit_fetched)"; fi
 if [ -n "$quit_saved" ] && [ "$tick_saved" != "$quit_saved" ]; then pass; else fail "headless quit: the cache is written again on quit, saved_at moving on ($tick_saved, then $quit_saved)"; fi
-assert_file_contains "$vs_h" '"pane": "needs"' "headless quit: the focused pane is saved"
-assert_file_contains "$vs_h" '"row": "needs:main:scout-beta"' "headless quit: the selected row is saved by its hide key"
+assert_file_contains "$vs_h" '"pane": "inflight"' "headless quit: the focused pane, In flight where the board starts, is saved"
+assert_file_contains "$vs_h" '"row": "inflight:main:ship-alpha"' "headless quit: the selected row is saved by its hide key"
 if [ -s "$HL/out.log" ]; then fail "headless cache run wrote to the terminal: $(head -c 300 "$HL/out.log")"; else pass; fi
 FAIL_HOME="$SCRATCH/firstmate-fail"
 mkdir -p "$FAIL_HOME/bin"
@@ -3187,26 +3262,27 @@ kill -TERM "$hl_pid" 2>/dev/null
 wait "$hl_pid" 2>/dev/null
 if grep -q '^snapshot-fail$' "$FETCH_LOG" 2>/dev/null; then pass; else fail "headless failing home: the failing snapshot ran ($(cat "$FETCH_LOG" 2>/dev/null))"; fi
 if cmp -s "$HL/before-fail.json" "$cache_h"; then pass; else fail "headless failing home: a failed refresh (and the quit after it) left the cache untouched"; fi
-assert_file_contains "$vs_h" '"row": "needs:main:scout-beta"' "headless failing home: the saved selection survives a run that never had data"
+assert_file_contains "$vs_h" '"row": "inflight:main:ship-alpha"' "headless failing home: the saved selection survives a run that never had data"
 if [ -s "$HL/out-fail.log" ]; then fail "headless failing run wrote to the terminal: $(head -c 300 "$HL/out-fail.log")"; else pass; fi
 
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x44 the lines are: 0 title,
-# 1 Needs you title, 3-6 its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 8 My PRs
-# title, 10-12 its rows (ship-alpha #41, api#8, ship-gamma #7), 14 Teammates' PRs title, 15 its
-# column header, 16 its empty text, 18 In flight title, 19 its column header, 20-26 its rows
-# (ship-alpha, tmux-task, remote-sm group, scout-beta, hyperion group, ship-gamma, ship-old),
-# 30 Findings title, 32-34 its rows (scout-beta, mobile-fix, old-scout), 36 Landed title, 38-41 its
-# rows (etl-index, ship-old, mobile-fix, old-scout), 43 footer.
+# 1 In flight title, 2 its column header, 3-9 its rows (ship-alpha, tmux-task, remote-sm group,
+# scout-beta, hyperion group, ship-gamma, ship-old), 13 Needs you title, 14 its column header, 15-18
+# its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 20 My PRs title, 22-24 its rows
+# (ship-alpha #41, api#8, ship-gamma #7), 26 Teammates' PRs title, 27 its column header, 28 its empty
+# text, 30 Findings title, 32-34 its rows (scout-beta, mobile-fix, old-scout), 36 Landed title, 38-41
+# its rows (etl-index, ship-old, mobile-fix, old-scout), 43 footer. The board starts focused on In
+# flight's first row.
 #
-# A left click selects: the pane gets the focus border and the row the inverse style, the same as
+# A left click selects: the pane gets the focus border and the row the cursor bar, the same as
 # tab/j/k would leave them (falsify: drop the 'select' case from applyAction, or the row zones from
 # renderPanes).
 tags_m=$(render populated.json --mouse "click:30,33" --tags) || fail "mouse click: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}report *\{/inverse\}.*mobile-fix' "click on the second Findings row selects it"
+assert_row "$tags_m" "${SEL}report *${SEL_END}.*mobile-fix" "click on the second Findings row selects it"
 assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[5\].*Findings \(3\)' "click on a Findings row focuses the Findings pane"
-assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[1\]' "click: Needs you lost the focus border"
-assert_no_row "$tags_m" '\{inverse\}blocked' "click: the old selection is no longer inverse"
+assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[1\]' "click: In flight lost the focus border"
+assert_no_row "$tags_m" "${SEL}working" "click: the old selection is no longer on the bar"
 # The selection a click leaves is what the keys then act on (falsify: set view.row without view.pane in 'select').
 frame_m=$(render populated.json --mouse "click:30,33" --keys "x") || fail "mouse click then x: render exited non-zero"
 assert_contains "$frame_m" "Findings (2, 1 hidden)" "x after a click hides the clicked row"
@@ -3215,41 +3291,41 @@ assert_contains "$frame_m" "hidden mobile-fix" "x after a click names the clicke
 # 'none' for a non-row hit in mouseAction).
 tags_m=$(render populated.json --mouse "click:5,30" --tags) || fail "mouse title click: render exited non-zero"
 assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[5\].*Findings \(3\)' "click on the Findings title focuses Findings"
-assert_row "$tags_m" '\{inverse\}scout +\{/inverse\}.*scout-beta' "click on the Findings title puts the cursor on its first row"
+assert_row "$tags_m" "${SEL}scout +${SEL_END}.*scout-beta" "click on the Findings title puts the cursor on its first row"
 frame_m=$(render populated.json --mouse "click:5,30" --keys "enter") || fail "mouse title click then enter: render exited non-zero"
 assert_contains "$frame_m" "would view /fixture/firstmate/data/scout-beta/report.md" "enter after a title click acts on that pane's first row"
 # A click on a pane's empty space (its column header) focuses the pane too (falsify: drop the pane zone).
-tags_m=$(render populated.json --mouse "click:30,19" --tags) || fail "mouse empty click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[4\].*In flight \(7\)' "click on In flight's column header focuses In flight"
+tags_m=$(render populated.json --mouse "click:30,14" --tags) || fail "mouse empty click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[2\].*Needs you \(4\)' "click on Needs you's column header focuses Needs you"
 # A click on the title line or the footer changes nothing (falsify: give those lines a zone).
 frame_m=$(render populated.json --mouse "click:30,0 click:30,43") || fail "mouse chrome click: render exited non-zero"
 if [ "$frame_m" = "$frame" ]; then pass; else fail "a click on the title line or footer changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # The narrow list has zones too (falsify: drop the zones from renderList).
 tags_m=$(render narrow.json --mouse "click:10,14" --tags) || fail "mouse narrow click: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}merged +\{/inverse\}.*ship-old' "list mode: a click on the Landed row selects it"
+assert_row "$tags_m" "${SEL}merged +${SEL_END}.*ship-old" "list mode: a click on the Landed row selects it"
 assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[6\].*Landed \(1\)' "list mode: the Landed section header takes the focus style"
-tags_m=$(render narrow.json --mouse "click:10,2" --tags) || fail "mouse narrow title click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[1\].*Needs you \(1\)' "list mode: a click on a section header focuses that section"
+tags_m=$(render narrow.json --mouse "click:10,5" --tags) || fail "mouse narrow title click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[2\].*Needs you \(1\)' "list mode: a click on a section header focuses that section"
 
 # A double-click is enter on that row: two left clicks on one row within 400 ms, recognized in
 # lib/controller.mjs, not by the terminal library (falsify: drop the lastClick check from mouseAction, or
 # stamp the two dblclick events with different times in driveOnce).
-frame_m=$(render_mouse populated.json "dblclick:30,10") || fail "mouse dblclick review: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,22") || fail "mouse dblclick review: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "double-click on the first My PRs row opens its PR, as enter does"
 assert_contains "$frame_m" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "double-click: the footer names the opened PR"
-frame_m=$(render_mouse populated.json "click:30,11 click:30,11") || fail "mouse two clicks: render exited non-zero"
+frame_m=$(render_mouse populated.json "click:30,23 click:30,23") || fail "mouse two clicks: render exited non-zero"
 assert_not_opened "two single clicks a second apart on one row open nothing"
-frame_m=$(render_mouse populated.json "click:30,10 click:30,11 click:30,11 click:30,10") || fail "mouse clicks on different rows: render exited non-zero"
+frame_m=$(render_mouse populated.json "click:30,22 click:30,23 click:30,23 click:30,22") || fail "mouse clicks on different rows: render exited non-zero"
 assert_not_opened "clicks alternating between rows never make a double-click"
-frame_m=$(render_mouse populated.json "dblclick:30,24") || fail "mouse dblclick group: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,7") || fail "mouse dblclick group: render exited non-zero"
 assert_row "$frame_m" '^│ decide +1 live +!▾ hyperion ' "double-click on the hyperion group row expands it"
 assert_contains "$frame_m" "In flight (12)" "double-click on a group: only that group's rows are added"
 assert_not_opened "double-click on a group row opens no PR"
-frame_m=$(render_mouse populated.json "dblclick:30,24 dblclick:30,24") || fail "mouse dblclick group twice: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,7 dblclick:30,7") || fail "mouse dblclick group twice: render exited non-zero"
 assert_row "$frame_m" '^│ decide +1 live +!▸ hyperion ' "a second double-click on the group row collapses it again"
 frame_m=$(render_mouse populated.json "dblclick:60,32") || fail "mouse dblclick findings: render exited non-zero"
 assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "double-click on a Findings row views its report through --viewer-cmd"
-frame_m=$(render_mouse populated.json "dblclick:30,20") || fail "mouse dblclick worker: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,3") || fail "mouse dblclick worker: render exited non-zero"
 assert_contains "$frame_m" "herdr is off (--no-herdr); cannot focus" "double-click on an In flight worker means herdr focus, refused here as enter is"
 assert_not_opened "double-click on a worker opens no PR"
 assert_not_viewed "double-click on a worker views no report"
@@ -3262,20 +3338,20 @@ assert_viewed "/fixture/firstmate/data/old-scout/report.md" "double-click on a L
 # delivers shaped as a press, opens the PR once and the opener log has exactly one line; assert_opened
 # compares the whole log (falsify: drop the lastActivate check from mouseAction, or stop applyAction
 # recording lastActivate on activate).
-frame_m=$(render_mouse populated.json "dblclick:30,10") || fail "mouse dblclick once: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,22") || fail "mouse dblclick once: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "a double-click opens the PR exactly once: one opener line"
-frame_m=$(render_mouse populated.json "tripleclick:30,10") || fail "mouse tripleclick: render exited non-zero"
+frame_m=$(render_mouse populated.json "tripleclick:30,22") || fail "mouse tripleclick: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "a third press inside the window opens nothing more: one opener line"
 assert_contains "$frame_m" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "triple-click: the footer names the one open"
 # The guard covers one window only: a click a second later is a fresh single click, a double-click a
 # second later opens again (falsify: make the guard ignore the time, or never clear it).
-frame_m=$(render_mouse populated.json "dblclick:30,10 click:30,10") || fail "mouse dblclick then click: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,22 click:30,22") || fail "mouse dblclick then click: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "a click a second after a double-click only selects: still one opener line"
-frame_m=$(render_mouse populated.json "dblclick:30,10 dblclick:30,10") || fail "mouse dblclick twice: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,22 dblclick:30,22") || fail "mouse dblclick twice: render exited non-zero"
 assert_opened "$(printf 'https://github.com/acme/widgets/pull/41\nhttps://github.com/acme/widgets/pull/41')" "a second double-click a second later opens again"
 # enter is never guarded: one press opens once (checked above with tab,enter) and it still opens right
 # after a double-click on the row (falsify: apply the lastActivate guard in keyAction).
-frame_m=$(render_mouse populated.json "dblclick:30,10" --keys enter) || fail "mouse dblclick then enter: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,22" --keys enter) || fail "mouse dblclick then enter: render exited non-zero"
 assert_opened "$(printf 'https://github.com/acme/widgets/pull/41\nhttps://github.com/acme/widgets/pull/41')" "enter after a double-click opens the row again: two opener lines, one each"
 
 # What the terminal library hands the adapter for the mouse, checked without a terminal
@@ -3341,31 +3417,32 @@ assert_row "$buttons" '^right none$' "a right-button press on a row is a no-op i
 assert_row "$buttons" '^middle none$' "a middle-button press on a row is a no-op in the controller"
 assert_row "$buttons" '^left select$' "the same left-button press selects the row"
 
-# The wheel moves the selection three rows in the focused pane, whichever pane the pointer is over, and
-# clamps at the ends (falsify: change WHEEL_ROWS, or hit-test the wheel's pointer).
-frame_m=$(render_mouse populated.json "wheel:down:30,39" --keys "enter") || fail "mouse wheel: render exited non-zero"
+# The wheel moves the selection three rows in the focused pane (Needs you after a tab, the pointer
+# over Landed), whichever pane the pointer is over, and clamps at the ends (falsify: change
+# WHEEL_ROWS, or hit-test the wheel's pointer).
+frame_m=$(render_mouse populated.json "tab wheel:down:30,39" --keys "enter") || fail "mouse wheel: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "wheel down over Landed moves the focused Needs you selection three rows to the review row, which enter opens"
-tags_m=$(render populated.json --mouse "wheel:down:30,39" --tags) || fail "mouse wheel --tags: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}review ' "wheel down: the fourth Needs you row is selected"
+tags_m=$(render populated.json --mouse "tab wheel:down:30,39" --tags) || fail "mouse wheel --tags: render exited non-zero"
+assert_row "$tags_m" "${SEL}review " "wheel down: the fourth Needs you row is selected"
 assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[6\]' "wheel: the pane under the pointer is not focused"
-tags_m=$(render populated.json --mouse "wheel:up:30,39 wheel:down:30,39 wheel:down:30,39" --tags) || fail "mouse wheel clamp: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}review ' "wheel up at the top stays, two wheel downs clamp at the last row"
-tags_m=$(render populated.json --mouse "wheel:down:30,39 wheel:up:30,39" --tags) || fail "mouse wheel back: render exited non-zero"
-assert_row "$tags_m" '\{inverse\}blocked\{/inverse\}' "wheel down then up is back on the first row"
+tags_m=$(render populated.json --mouse "tab wheel:up:30,39 wheel:down:30,39 wheel:down:30,39" --tags) || fail "mouse wheel clamp: render exited non-zero"
+assert_row "$tags_m" "${SEL}review " "wheel up at the top stays, two wheel downs clamp at the last row"
+tags_m=$(render populated.json --mouse "tab wheel:down:30,39 wheel:up:30,39" --tags) || fail "mouse wheel back: render exited non-zero"
+assert_row "$tags_m" "${SEL}blocked${SEL_END}" "wheel down then up is back on the first row"
 # A wheel move breaks a double-click: click, wheel, click on the same row is two singles (falsify: keep
 # lastClick across a wheel action).
-frame_m=$(render_mouse populated.json "click:30,11 wheel:down:30,11 wheel:up:30,11 click:30,11") || fail "mouse click wheel click: render exited non-zero"
+frame_m=$(render_mouse populated.json "click:30,23 wheel:down:30,23 wheel:up:30,23 click:30,23") || fail "mouse click wheel click: render exited non-zero"
 assert_not_opened "click, wheel and click on one row are two single clicks"
 
 # --no-mouse: every gesture is ignored and the frame is the plain one (falsify: drop the opts.mouse guard
 # in driveOnce, or make --no-mouse set anything but opts.mouse).
-frame_m=$(render populated.json --no-mouse --mouse "click:30,33 dblclick:30,11 wheel:down:30,39") || fail "--no-mouse: render exited non-zero"
+frame_m=$(render populated.json --no-mouse --mouse "click:30,33 dblclick:30,23 wheel:down:30,39") || fail "--no-mouse: render exited non-zero"
 if [ "$frame_m" = "$frame" ]; then pass; else fail "--no-mouse changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
-frame_m=$(render_mouse populated.json "dblclick:30,11" --no-mouse) || fail "--no-mouse dblclick: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,23" --no-mouse) || fail "--no-mouse dblclick: render exited non-zero"
 assert_not_opened "--no-mouse: a double-click opens nothing"
 frame_m=$(render populated.json --no-mouse --mouse "click:30,33 x") || fail "--no-mouse keys in list: render exited non-zero"
-assert_contains "$frame_m" "Needs you (3, 1 hidden)" "--no-mouse: the key tokens of the list still apply (x hid the row the keyboard selection was on)"
-assert_contains "$frame_m" "hidden scout-beta" "--no-mouse: the click was ignored, so x acted on the first Needs you row, not the clicked Findings row"
+assert_contains "$frame_m" "In flight (6, 1 hidden)" "--no-mouse: the key tokens of the list still apply (x hid the row the keyboard selection was on)"
+assert_contains "$frame_m" "hidden ship-alpha" "--no-mouse: the click was ignored, so x acted on the first In flight row, not the clicked Findings row"
 # The landing page has no mouse targets (falsify: give renderLanding zones).
 frame_l=$(render populated.json --keys "1,2,3,4,5,6")
 frame_m=$(render populated.json --keys "1,2,3,4,5,6" --mouse "click:30,20 dblclick:30,24 wheel:down:30,20") || fail "mouse on landing: render exited non-zero"
@@ -3417,17 +3494,18 @@ assert_row "$frame_cw" '^│ STATE  KEY       ID {24}WHAT ' "column widths: STAT
 assert_widths "$frame_cw" 160 "column widths: lines are 160 columns"
 assert_lines "$frame_cw" 40 "column widths: 40 lines"
 
-# Dragging a boundary. populated.json at 160x44: Needs you's column header is line 2 and its columns
-# start at x=2 STATE (7 wide), 11 KEY (9), 22 ID (13), 37 WHAT (96), 135 REPO (12), 149 HOME (4),
-# 155 AGE (3), two blank cells between neighbours, so the ID/WHAT gutter is cells 35-36 and a left press
-# on cells 34 to 37 takes that boundary. My PRs' header is line 9 with CHECKS (8), STATUS
-# (9), ID (10) and its ID/TITLE gutter at 33-34. In the header line a column W cells wide reads as its
+# Dragging a boundary. populated.json at 160x44: Needs you's column header is line 14 (In flight's
+# twelve lines stand above it) and its columns start at x=2 STATE (7 wide), 11 KEY (9), 22 ID (13),
+# 37 WHAT (96), 135 REPO (12), 149 HOME (4), 155 AGE (3), two blank cells between neighbours, so the
+# ID/WHAT gutter is cells 35-36 and a left press on cells 34 to 37 takes that boundary. My PRs' header
+# is line 21 with CHECKS (8), STATUS (9), ID (10) and its ID/TITLE gutter at 33-34. In the header
+# line a column W cells wide reads as its
 # label followed by W blank cells (its padding plus the gutter) before the next label.
 # A drag from 35 to 45 widens ID by ten cells and WHAT gives up exactly those ten: the columns right of
 # WHAT keep their place and the line is still 160 cells (falsify: drop drag-move from applyAction, or
 # size the flexible column before the overrides are applied).
 assert_row "$frame" '^│ STATE    KEY        ID {13}WHAT {94}REPO' "before any drag ID is 13 wide, as wide as decide-vendor, and WHAT 96"
-frame_d=$(render populated.json --mouse "drag:35,2->45") || fail "drag ID/WHAT: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:35,14->45") || fail "drag ID/WHAT: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT {84}REPO +HOME  AGE │$' "drag: ID is 23 wide, WHAT 86, and REPO, HOME and AGE are where they were"
 assert_row "$frame_d" '^│ decide   db-choice  ship-alpha {15}Postgres or SQLite for the cache\? +acme/widgets  main   5m │$' "drag: the rows follow the header's widths"
 assert_widths "$frame_d" 160 "drag: lines are still 160 columns"
@@ -3435,48 +3513,50 @@ assert_contains "$frame_d" "ID 23 wide · double-click the boundary resets it, =
 # The boundary is taken from one cell either side of its gutter and nowhere else (falsify: change
 # BOUNDARY_REACH); only the header line has boundaries, a drag started on a row is a click on that row
 # (falsify: put header geometry on row zones).
-frame_d=$(render populated.json --mouse "drag:34,2->44") || fail "drag from ID's last cell: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:34,14->44") || fail "drag from ID's last cell: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT ' "a press on the last cell of ID, one cell before the gutter, drags the same boundary"
-frame_d=$(render populated.json --mouse "drag:37,2->47") || fail "drag from WHAT's first cell: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:37,14->47") || fail "drag from WHAT's first cell: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT ' "a press on the first cell of WHAT, one cell after the gutter, drags the same boundary"
-frame_d=$(render populated.json --mouse "drag:33,2->43") || fail "drag from two cells before the gutter: render exited non-zero"
-if [ "$frame_d" = "$frame" ]; then pass; else fail "a press two cells before the gutter is a plain header click and resizes nothing: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
-frame_d=$(render populated.json --mouse "drag:35,3->45") || fail "drag on a row: render exited non-zero"
-frame_c=$(render populated.json --mouse "click:35,3") || fail "click on a row: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:33,14->43") || fail "drag from two cells before the gutter: render exited non-zero"
+frame_c=$(render populated.json --mouse "click:33,14") || fail "click two cells before the gutter: render exited non-zero"
+if [ "$frame_d" = "$frame_c" ]; then pass; else fail "a press two cells before the gutter is a plain header click (the frame a click there leaves) and resizes nothing: $(diff <(printf '%s\n' "$frame_c") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
+assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "and ID keeps its automatic width"
+frame_d=$(render populated.json --mouse "drag:35,15->45") || fail "drag on a row: render exited non-zero"
+frame_c=$(render populated.json --mouse "click:35,15") || fail "click on a row: render exited non-zero"
 if [ "$frame_d" = "$frame_c" ]; then pass; else fail "a drag started on a row line selects the row and resizes nothing: $(diff <(printf '%s\n' "$frame_c") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
 # Clamps: a column never goes under its label width plus one, and never takes more than the flexible
 # column can spare (falsify: drop min or max from boundaryAt, or the clamp from drag-move).
-frame_d=$(render populated.json --mouse "drag:35,2->20") || fail "drag left past the minimum: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:35,14->20") || fail "drag left past the minimum: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {3}WHAT ' "dragged 15 cells left, ID stops at 3, its label width plus one"
 assert_row "$frame_d" '^│ blocked  -          sc…  blocked: gh auth expired' "the rows truncate to the three-cell ID"
 assert_contains "$frame_d" "ID 3 wide" "the footer names the clamped width"
-frame_d=$(render populated.json --mouse "drag:35,2->158") || fail "drag right past the maximum: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:35,14->158") || fail "drag right past the maximum: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {104}WHAT   REPO' "dragged to the frame's edge, ID stops at 104 and WHAT keeps its five-cell minimum"
 assert_row "$frame_d" '^│ hold     - +decide-vendor +Pick…  acme/api +main +3d │$' "the flexible column at its minimum shows four characters and the ellipsis"
 assert_widths "$frame_d" 160 "clamped drag: lines are still 160 columns"
 # The boundary beside the flexible column moves the fixed column on its other side, so the boundary
 # still follows the pointer: WHAT/REPO dragged right narrows REPO (falsify: return null in boundaries()
 # for a boundary whose left column is flexible, or drop sign).
-frame_d=$(render populated.json --mouse "drag:133,2->143") || fail "drag WHAT/REPO: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:133,14->143") || fail "drag WHAT/REPO: render exited non-zero"
 assert_row "$frame_d" '^│ blocked  - +scout-beta +blocked: gh auth expired +acme…  main   2h │$' "dragging the WHAT/REPO boundary ten cells right narrows REPO to its five-cell minimum"
 assert_contains "$frame_d" "REPO 5 wide" "the footer names REPO, the column that moved"
 # Mid-drag, before the release, the boundary's first gutter cell draws a bar on the header and on
 # every row of that pane, bold yellow with --tags, and nowhere else (falsify: drop the drag branch
 # from gutterSegments, or the drag style from STYLE_TAGS).
-frame_d=$(render populated.json --mouse "click:35,2 move:40,2") || fail "mid-drag: render exited non-zero"
+frame_d=$(render populated.json --mouse "click:35,14 move:40,14") || fail "mid-drag: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {16}│ WHAT ' "mid-drag: the bar stands in the header's gutter at the pointer, ID 18 wide"
 assert_row "$frame_d" '^│ blocked  -          scout-beta {8}│ blocked: gh auth expired' "mid-drag: the rows draw the bar in the same cell"
-tags_d=$(render populated.json --mouse "click:35,2 move:40,2" --tags) || fail "mid-drag --tags: render exited non-zero"
+tags_d=$(render populated.json --mouse "click:35,14 move:40,14" --tags) || fail "mid-drag --tags: render exited non-zero"
 assert_count "$tags_d" '{bold}{yellow-fg}│{/yellow-fg}{/bold}' 5 "mid-drag --tags: the bar is bold yellow on the header and the four rows of Needs you only"
-frame_d=$(render populated.json --mouse "click:35,2 move:40,2 release:40,2") || fail "drag then release: render exited non-zero"
+frame_d=$(render populated.json --mouse "click:35,14 move:40,14 release:40,14") || fail "drag then release: render exited non-zero"
 assert_not_contains "$frame_d" "│ WHAT" "after the release the bar is gone"
 assert_row "$frame_d" '^│ STATE    KEY        ID {18}WHAT ' "after the release ID keeps its 18 cells"
-frame_d=$(render populated.json --mouse "click:35,2 move:40,2" --keys "j") || fail "key mid-drag: render exited non-zero"
+frame_d=$(render populated.json --mouse "click:35,14 move:40,14" --keys "j") || fail "key mid-drag: render exited non-zero"
 assert_not_contains "$frame_d" "│ WHAT" "a key pressed mid-drag ends the drag"
 assert_row "$frame_d" '^│ STATE    KEY        ID {18}WHAT ' "a key pressed mid-drag keeps the width reached"
 # A drag that comes back to where it started leaves no custom width behind (falsify: persist on every
 # drag-end).
-frame_d=$(render populated.json --mouse "click:35,2 move:45,2 move:35,2 release:35,2") || fail "drag back: render exited non-zero"
+frame_d=$(render populated.json --mouse "click:35,2 move:45,14 move:35,14 release:35,14") || fail "drag back: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "dragged out and back, ID is automatic again"
 assert_not_contains "$frame_d" "wide" "dragged out and back, no width is announced"
 
@@ -3485,7 +3565,7 @@ assert_not_contains "$frame_d" "wide" "dragged out and back, no width is announc
 # loadViewState, or from persist in index.mjs).
 vs_cols="$SCRATCH/view-state-columns.json"
 rm -f "${vs_cols:?}"
-frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,2->45") || fail "drag with view state: render exited non-zero"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,14->45") || fail "drag with view state: render exited non-zero"
 assert_file_contains "$vs_cols" '"needs": {' "the view-state file records the pane"
 assert_file_contains "$vs_cols" '"id": 23' "the view-state file records the column and its width"
 assert_file_contains "$vs_cols" '"hidden_panes": []' "the other view state is written beside it"
@@ -3495,17 +3575,17 @@ frame_d=$(render column-widths.json --view-state "$vs_cols") || fail "drag reloa
 assert_row "$frame_d" '^│ STATE  KEY       ID {23}WHAT ' "the saved width pins ID at 23 where the data alone would size it 24"
 # A double-click on the boundary resets that column and drops it from the file (falsify: drop
 # reset-column from mouseAction, or the persist from its case).
-frame_d=$(render populated.json --view-state "$vs_cols" --mouse "dblclick:45,2") || fail "dblclick boundary: render exited non-zero"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "dblclick:45,14") || fail "dblclick boundary: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "a double-click on the moved boundary puts ID back to its automatic width"
 assert_contains "$frame_d" "ID back to its automatic width" "the footer says so"
 assert_file_not_contains "$vs_cols" '"id"' "the reset column is gone from the file"
-frame_d=$(render populated.json --mouse "dblclick:35,2") || fail "dblclick automatic boundary: render exited non-zero"
+frame_d=$(render populated.json --mouse "dblclick:35,14") || fail "dblclick automatic boundary: render exited non-zero"
 assert_contains "$frame_d" "ID already has its automatic width" "a double-click on an automatic column says there is nothing to reset"
 assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "and changes nothing"
 # = resets every pane, from the board and from the Settings page, and says how many widths it
 # dropped; the review pane's own column set resizes and resets the same way (falsify: drop the = case
 # from keyAction, the reset-columns entry from settingsEntries, or the review pane's header geometry).
-frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,2->45 drag:33,9->43") || fail "two drags: render exited non-zero"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,14->45 drag:33,21->43") || fail "two drags: render exited non-zero"
 assert_row "$frame_d" '^│ CHECKS    STATUS     ID {20}TITLE ' "My PRs' ID/TITLE boundary drags its ID to 20"
 assert_file_contains "$vs_cols" '"mine": {' "the review pane's width is saved under its own id"
 frame_d=$(render populated.json --view-state "$vs_cols" --keys "=") || fail "reset all: render exited non-zero"
@@ -3515,7 +3595,7 @@ assert_contains "$frame_d" "column widths reset: 2 custom widths dropped" "= cou
 assert_file_not_contains "$vs_cols" '"id"' "= empties the saved widths"
 frame_d=$(render populated.json --keys "=") || fail "reset none: render exited non-zero"
 assert_contains "$frame_d" "no custom column widths to reset" "= with nothing to reset says so"
-frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,2->45" --keys ".,pagedown,enter,escape") || fail "settings reset: render exited non-zero"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,14->45" --keys ".,pagedown,enter,escape") || fail "settings reset: render exited non-zero"
 assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "the Settings page's last entry, Reset column widths, resets the board's columns"
 assert_contains "$frame_d" "column widths reset: 1 custom width dropped" "the Settings entry reports through the same notice"
 frame_s=$(render populated.json --keys ".") || fail "settings entry: render exited non-zero"
@@ -3540,7 +3620,7 @@ frame_d=$(render narrow.json --mouse "drag:20,1->30 drag:9,1->15") || fail "narr
 if [ "$frame_d" = "$frame_narrow" ]; then pass; else fail "narrow: a drag on the shared header changed the frame: $(diff <(printf '%s\n' "$frame_narrow") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
 # --no-mouse leaves a drag unread like every other gesture (falsify: skip only click tokens under
 # --no-mouse in driveOnce).
-frame_d=$(render populated.json --no-mouse --mouse "drag:35,2->45 dblclick:35,2 move:40,2 release:40,2") || fail "--no-mouse drag: render exited non-zero"
+frame_d=$(render populated.json --no-mouse --mouse "drag:35,14->45 dblclick:35,14 move:40,14 release:40,14") || fail "--no-mouse drag: render exited non-zero"
 if [ "$frame_d" = "$frame" ]; then pass; else fail "--no-mouse: a drag changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
 # The help names the key and the gesture (falsify: drop the = or drag lines from HELP_LINES).
 frame_d=$(render populated.json --keys "?") || fail "help columns: render exited non-zero"
@@ -3559,9 +3639,9 @@ else
   pass
 fi
 if printf '%s\n' "$out" | grep -Fq -- '--mouse: bad event "move:12"'; then pass; else fail "--mouse names the bad move token: $out"; fi
-frame_d=$(render populated.json --mouse "drag:35,2->45,x") || fail "drag comma list: render exited non-zero"
-assert_row "$frame_d" '^│ STATE +KEY +ID {23}WHAT ' "a comma-separated list keeps the drag token whole (STATE is narrower here: x hid the blocked row, so the widest state word is decide)"
-assert_contains "$frame_d" "hidden scout-beta" "and reads the rest as keys"
+frame_d=$(render populated.json --mouse "drag:35,14->45,x") || fail "drag comma list: render exited non-zero"
+assert_row "$frame_d" '^│ STATE +KEY +ID {23}WHAT ' "a comma-separated list keeps the drag token whole"
+assert_contains "$frame_d" "hidden ship-alpha" "and reads the rest as keys: x hid the In flight row the keyboard selection was on"
 
 # ----------------------------------------------------------- wrapper checks
 # The fake herdr on HERDR_BIN_PATH and PATH (fake_herdr_env, defined with the other fakes at the
@@ -3773,9 +3853,10 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   done
   [ -n "$pty_terms" ] || pty_terms=xterm-256color
   for t in $pty_terms; do
-    # One 0x0d on the first My PRs row (tab moves there once the row is drawn): exactly one opener
-    # call, made by the board (the trace names one pid and the URL as the only argument).
-    run_pty "$t" "cr-$t" "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\r" "wait:opened$PTY_URL" "sleep:0.4" "send:q" exit
+    # One 0x0d on the first My PRs row (two tabs move there from In flight once the row is drawn):
+    # exactly one opener call, made by the board (the trace names one pid and the URL as the only
+    # argument).
+    run_pty "$t" "cr-$t" "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:\t" "sleep:0.6" "send:\r" "wait:opened$PTY_URL" "sleep:0.4" "send:q" exit
     pty_ok "cr-$t" "pty $t: one Enter on a PR row reaches the opened notice and q quits"
     assert_opened "$PTY_URL" "pty $t: one carriage return on a PR row calls the opener exactly once (falsify: map 'return' to 'enter' in normalizeKey)"
     assert_lines "$(cat "$PTY_TRACE" 2>/dev/null)" 1 "pty $t: the opener trace holds one invocation (pid, ppid, argv)"
@@ -3787,15 +3868,40 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
     assert_upgrade_log "upgrade --version 0.2.0" "pty $t: one carriage return opens the prompt and y then runs the launcher exactly once"
     assert_not_opened "pty $t: nothing on the Settings page opens a PR"
   done
+  # The cursor bar's bytes, from the same captures. The rule is lib/tui-blessed.mjs barStyle: palette
+  # 214 (48;5;214) when the terminal reports 256 colours, the terminal's yellow (43) below that, so the
+  # library never reduces 214 to red; nothing is drawn inverse either way. The colour count that picks
+  # the expectation is the one neo-blessed's own terminfo reader gives for that TERM, not the TERM's
+  # name and not tput's answer: the terminfo entry for tmux-256color exists on the GitHub Ubuntu runner
+  # (infocmp admits it to pty_terms above) yet neo-blessed 0.2.0 reads it as 8 colours there, so the
+  # board rightly draws the fallback on that host; the note line names both counts so a CI log shows
+  # which case ran (falsify: put {inverse} or a hex tag back in STYLE_TAGS.selected, or drop barStyle
+  # from createScreen). The library joins a cell's codes into one SGR sequence (ESC [ codes m), so a
+  # code may sit between others; a cursor move such as ESC [ 7 ; 1 H is not one.
+  tput_colors() { # <TERM>: the colour count neo-blessed reads for it, 0 when it cannot
+    node -e 'const b = require(process.argv[1] + "/node_modules/neo-blessed"); let c = 0; try { c = new b.Tput({ terminal: process.argv[2] }).colors || 0; } catch (e) { c = 0; } process.stdout.write(String(c));' "$ROOT/bin/firstmate-tui" "$1"
+  }
+  for t in $pty_terms; do
+    colors=$(tput_colors "$t")
+    printf 'note: pty %s: neo-blessed reads %s colours (tput -T %s colors says %s)\n' "$t" "${colors:-0}" "$t" "$(tput -T "$t" colors 2>/dev/null || echo '?')"
+    if [ "${colors:-0}" -ge 256 ] 2>/dev/null; then
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t ($colors colours): the selected row is not drawn on the 256-colour amber background 48;5;214"; fi
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*43(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t ($colors colours): a 256-colour TERM got the yellow fallback"; else pass; fi
+    else
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*43(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t ($colors colours): below 256 colours the selected row is not drawn on the yellow background 43"; fi
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t ($colors colours): a TERM below 256 colours got a 256-colour background"; else pass; fi
+    fi
+    if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*7(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t: something is drawn inverse"; else pass; fi
+  done
   # 0x0d 0x0a (a terminal in newline mode) opens once: the linefeed is a separate key the board does not
   # bind. 0x0a alone opens nothing (falsify: bind linefeed to enter, which would double a CR LF).
-  run_pty xterm-256color crlf "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\r\n" "wait:opened$PTY_URL" "sleep:0.4" "send:q" exit
+  run_pty xterm-256color crlf "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:\t" "sleep:0.6" "send:\r\n" "wait:opened$PTY_URL" "sleep:0.4" "send:q" exit
   pty_ok crlf "pty: CR LF reaches the opened notice"
   assert_opened "$PTY_URL" "pty: CR LF on a PR row calls the opener exactly once"
-  run_pty xterm-256color lf "wait:$PTY_URL" "send:\t" "sleep:0.6" "send:\n" "sleep:1.2" "send:q" exit
+  run_pty xterm-256color lf "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:\t" "sleep:0.6" "send:\n" "sleep:1.2" "send:q" exit
   pty_ok lf "pty: LF alone leaves the board running until q"
   assert_not_opened "pty: LF alone (ctrl-j) opens nothing"
-  # The D prompt on a real terminal: j j selects decide-vendor, the stand-in's live captain hold; D
+  # The D prompt on a real terminal: tab, j, j selects decide-vendor, the stand-in's live captain hold; D
   # opens the footer prompt; ten 0x7f bytes (the Backspace key, which the library names 'backspace'
   # and hands over as the DEL character) clear the default date, and typed digits and dashes fill it
   # through the library's keypress path, which --keys never exercises; the carriage return runs the
@@ -3805,7 +3911,7 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   # default date). Only the prompt's `(YYYY-MM-DD):` is waited for on screen: its cells all differ
   # from the hint they replace, while the letters of a notice drawn over an earlier one of the same
   # length can reach the driver missing; the log, not the screen, proves the rest.
-  run_pty xterm-256color hold-prompt "wait:$PTY_URL" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:D" "wait:(YYYY-MM-DD):" "send:\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f" "sleep:0.4" "send:2027-01-15" "sleep:0.6" "send:\r" "sleep:1.5" "send:q" exit
+  run_pty xterm-256color hold-prompt "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:D" "wait:(YYYY-MM-DD):" "send:\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f" "sleep:0.4" "send:2027-01-15" "sleep:0.6" "send:\r" "sleep:1.5" "send:q" exit
   pty_ok hold-prompt "pty: the D prompt opens on a real terminal and the board exits on q"
   if [ -f "$HOLD_LOG" ]; then pass; else fail "pty: the D prompt's enter ran no hold command; the driver reported: $(tr '\n' ';' < "$SCRATCH/pty-hold-prompt.out")"; fi
   assert_hold_log "FM_HOME=$FAKE_HOME

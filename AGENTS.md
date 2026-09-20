@@ -181,7 +181,12 @@ belong to later milestones.
   terminal library must do goes through the screen contract at the top of
   that file. That includes the mouse: adding the screen's mouse listener is
   what switches terminal mouse reporting on, and the adapter only translates
-  events. The library reports one Enter press as two keypress events
+  events. It also owns the colours: `STYLE_TAGS` there is the one place a
+  style name becomes tags, and a colour beyond the basic 16 is named by its
+  palette index (`{214-bg}`, the cursor bar), never a hex value, because
+  neo-blessed 0.2.0 maps a hex tag to a basic colour; `barStyle` reads the
+  terminal's colour count and falls back to yellow below 256, since the
+  library reduces 214 to red there (its header says how this was found). The library reports one Enter press as two keypress events
   (`enter`, then `return`); `normalizeKey` keeps the first and drops the
   second, so the controller hears one key per press. `--render-once --keys`
   feeds the controller directly and never loads the library, so a change to
@@ -272,10 +277,10 @@ belong to later milestones.
   the home's script for real, so a fixture's homes must never be real ones;
   the pty section types the `D` prompt (digits, backspace, enter) against the
   stand-in home's copy of the fake.
-  The pane order is `PANES` in `lib/layout.mjs` (Needs you, My PRs,
-  Teammates' PRs, In flight, Findings, Landed); the 1-6 keys follow it by
-  position, the height priorities name panes by id, and view state is keyed
-  by pane id, so a reorder moves the mouse and line-number checks and
+  The pane order is `PANES` in `lib/layout.mjs` (In flight, Needs you, My
+  PRs, Teammates' PRs, Findings, Landed since 0.6.1); the 1-6 keys follow it
+  by position, the height priorities name panes by id, and view state is
+  keyed by pane id, so a reorder moves the mouse and line-number checks and
   nothing else.
   The refresh schedule (the snapshot, then the gh calls; the next refresh
   armed on completion for the last start plus `--refresh`, so a slow refresh

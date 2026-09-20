@@ -5,16 +5,18 @@
 import { width } from './text.mjs';
 
 // The six panes in screen order, which is also the order of the 1-6 keys
-// (lib/controller.mjs paneForKey reads PANES by position). The two PR panes
-// sit together so the captain's own PRs and the teammates' PRs read side by
-// side. A saved view-state file keeps its meaning across a reorder because
-// hidden_panes, hidden row keys and column widths are stored by pane id,
-// never by key number (lib/viewstate.mjs).
+// (lib/controller.mjs paneForKey reads PANES by position). In flight leads
+// (since 0.6.1, at the captain's ask) so the workers are the first thing on
+// the screen; the two PR panes sit together so the captain's own PRs and the
+// teammates' PRs read side by side. A saved view-state file keeps its meaning
+// across a reorder because hidden_panes, hidden row keys and column widths
+// are stored by pane id, never by key number (lib/viewstate.mjs), and the
+// height priorities below name panes by id too.
 export const PANES = [
+  { id: 'inflight', title: 'In flight', empty: 'no workers in flight' },
   { id: 'needs', title: 'Needs you', empty: 'no captain decisions, holds or blocked workers' },
   { id: 'mine', title: 'My PRs', empty: 'no pull requests of yours' },
   { id: 'toreview', title: "Teammates' PRs", empty: 'no pull requests waiting for your review' },
-  { id: 'inflight', title: 'In flight', empty: 'no workers in flight' },
   { id: 'findings', title: 'Findings', empty: 'no scout reports' },
   { id: 'landed', title: 'Landed', empty: 'nothing landed yet' },
 ];

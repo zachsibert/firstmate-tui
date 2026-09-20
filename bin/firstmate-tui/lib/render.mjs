@@ -31,8 +31,8 @@ export const HELP_LINES = [
   '  x            hide the selected row from view (x on a shown hidden row unhides it)',
   '  X            unhide every row in the current pane',
   '  H            toggle showing hidden rows, greyed and marked (hidden)',
-  '  1 - 6        show or hide a pane; each pane title carries its key: [1] Needs you',
-  "               [2] My PRs  [3] Teammates' PRs  [4] In flight  [5] Findings  [6] Landed",
+  '  1 - 6        show or hide a pane; each pane title carries its key: [1] In flight',
+  "               [2] Needs you  [3] My PRs  [4] Teammates' PRs  [5] Findings  [6] Landed",
   '  0            show every pane (with all six hidden the board lists these keys)',
   '  r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)',
   '  .            settings page: installed version, latest release, upgrade or a beta',
@@ -59,7 +59,7 @@ function seg(text, style = 'row') {
 }
 
 // Pad or clip a list of segments to exactly `cols` columns; the padding takes
-// `padStyle` (the row's base style, so a selected row stays inverse to the
+// `padStyle` (the row's base style, so a selected row's bar reaches the
 // border).
 function fitSegments(segments, cols, padStyle = 'row') {
   const out = [];
@@ -234,7 +234,7 @@ function renderPanes(model, cols, rows, view) {
     const spec = columns(cols, inner, pane.id, { rows: pane.rows, overrides: view.columns[pane.id] });
     const drag = view.drag && view.drag.paneId === pane.id ? view.drag : null;
     const borderStyle = focused ? 'border-focus' : 'border';
-    // `[1] Needs you (4) · ...`: the toggle key leads the title as its own dim
+    // `[1] In flight (4)`, then the rest of the title: the toggle key leads it as its own dim
     // segment, so the plain frame reads the badge and --tags can grey it.
     const badge = paneBadge(pane);
     const lead = `┌${H} `;
@@ -371,7 +371,8 @@ export function allPanesHidden(model) {
 export function landingEntries(model) {
   const entries = [{ key: '', text: 'all panes hidden', style: 'heading' }, null];
   for (const pane of model.panes) entries.push({ key: pane.key, text: pane.title });
-  entries.push({ key: '0', text: 'show all' }, null, { key: 'r', text: 'refresh' }, { key: '?', text: 'help' }, { key: 'q', text: 'quit' });
+  // The other keys that still act here, in the footer's order (lib/controller.mjs LANDING_KEYS).
+  entries.push({ key: '0', text: 'show all' }, null, { key: 'r', text: 'refresh' }, { key: '.', text: 'settings' }, { key: '?', text: 'help' }, { key: 'q', text: 'quit' });
   return entries;
 }
 
