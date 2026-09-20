@@ -226,16 +226,17 @@ An install older than 0.2.5 first runs its own `fm-board upgrade --version 0.2.5
 
 The six panes, top to bottom; each pane's key is its number:
 
-1. **Needs you**: what firstmate is waiting on you for: blocked agents, decisions to make, holds you set with their due dates, and one `review` row per pull request that is yours to review because its agent is done and GitHub reports the pull request open and mergeable.
+1. **In flight**: one row per agent working in the main home, with firstmate's state (`working`, `awaiting merge`, `repairing PR`, `done`) beside herdr's live pane count, and one group row per delegate home that expands to its agents.
+2. **Needs you**: what firstmate is waiting on you for: blocked agents, decisions to make, holds you set with their due dates, and one `review` row per pull request that is yours to review because its agent is done and GitHub reports the pull request open and mergeable.
    `enter` on a hold, decision or blocked row shows its hold card in the terminal viewer: the task's facts, the full hold reason, the backlog body, the pull request, the first 40 lines of its report, its brief and other files under `data/<id>/`, and the last 10 lines of its status log, read from the home that owns it; `d` discards the hold and `D` defers it (the Keys table below).
-2. **My PRs**: every open pull request your GitHub login authored, in any repository, plus the pull requests recorded on unfinished firstmate tasks whoever opened them, plus either kind that merged or closed in the last 12 hours; the columns are CHECKS (`passing`, `pending` or `failing`, judged from the newest run of each check on the head commit, so a run that a re-run superseded does not count), STATUS, ID, TITLE, BASE (the branch it targets) and AGE.
-3. **Teammates' PRs**: the open pull requests where you are a requested reviewer, directly or through a team, and not the author, in the repositories firstmate works in plus the ones the config file names, filtered by the config file's label rules, with the same columns plus AUTHOR.
-4. **In flight**: one row per agent working in the main home, with firstmate's state (`working`, `awaiting merge`, `repairing PR`, `done`) beside herdr's live pane count, and one group row per delegate home that expands to its agents.
+3. **My PRs**: every open pull request your GitHub login authored, in any repository, plus the pull requests recorded on unfinished firstmate tasks whoever opened them, plus either kind that merged or closed in the last 12 hours; the columns are CHECKS (`passing`, `pending` or `failing`, judged from the newest run of each check on the head commit, so a run that a re-run superseded does not count), STATUS, ID, TITLE, BASE (the branch it targets) and AGE.
+4. **Teammates' PRs**: the open pull requests where you are a requested reviewer, directly or through a team, and not the author, in the repositories firstmate works in plus the ones the config file names, filtered by the config file's label rules, with the same columns plus AUTHOR.
 5. **Findings**: the reports the agents wrote, newest first, from every home.
 6. **Landed**: finished work, newest first: merged pull requests and done tasks, with the pull request URL, report path or pane id in WHAT.
 
 The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing...` while one runs, and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
-Each pane title carries its key and its row count, as in `[1] Needs you (3)`.
+Each pane title carries its key and its row count, as in `[1] In flight (3)`.
+The selected row is drawn as an amber bar with black text (palette colour 214 on a 256-colour terminal, your terminal's yellow on one with fewer colours), whatever your theme's foreground colour is.
 In the HERDR column, `pane lost` in red means herdr no longer has that agent's pane, and `unknown` in grey means herdr is disconnected so the board cannot tell.
 The bottom line lists the keys, and `?` shows them all.
 
@@ -249,7 +250,7 @@ The bottom line lists the keys, and `?` shows them all.
 | `D` | defer the selected hold: the footer takes a date (`YYYY-MM-DD`, prefilled with today plus 14 days; digits and dashes edit it, `enter` defers, `esc` cancels), then `fm-captain-hold.sh hold --until <date>` records it in the hold's home with the hold's own reason; a hold in a delegate home is deferred only when that home's full reason is readable here |
 | `l` / `right`, `h` / `left` | expand / collapse the selected In flight group |
 | `x`, `X`, `H` | hide the selected row; unhide every row in the pane; show hidden rows greyed and marked `(hidden)` |
-| `1` to `6`, `0` | show or hide that pane; show every pane (with all six hidden the board lists these keys) |
+| `1` to `6`, `0` | show or hide that pane; show every pane (with all six hidden the board lists these keys, and `r`, `.`, `?` and `q`) |
 | `r` | refresh now: the fleet snapshot, then the GitHub fetch |
 | `.` | the Settings page ([Upgrade and betas](#upgrade-and-betas)) |
 | `=` | reset every column width to its automatic size |

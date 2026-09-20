@@ -60,10 +60,11 @@
 //   X       unhide every row of the current pane
 // Board-wide:
 //   H       toggle showing hidden rows (greyed, marked "(hidden)")
-//   1-6     show or hide one pane, in screen order (Needs you .. Landed;
+//   1-6     show or hide one pane, in screen order (In flight .. Landed;
 //           lib/layout.mjs PANES); 0 shows all six.
 //           Any pane may go, the last one too: with all six hidden the frame
-//           is the landing page (lib/render.mjs) and only 0-6, r, ? and q act
+//           is the landing page (lib/render.mjs) and only 0-6, r, ., ? and q
+//           act (LANDING_KEYS below)
 //   r       refresh (the snapshot and the PR checks, unless --no-prs)
 //   =       reset every column width to its automatic size (view state)
 //   .       the Settings page (lib/settings.mjs): installed version, latest
