@@ -3868,21 +3868,29 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
     assert_upgrade_log "upgrade --version 0.2.0" "pty $t: one carriage return opens the prompt and y then runs the launcher exactly once"
     assert_not_opened "pty $t: nothing on the Settings page opens a PR"
   done
-  # The cursor bar's bytes, from the same captures: a 256-colour TERM gets the selected row on the
-  # palette-214 background (48;5;214) and TERM=screen, 8 colours, on the terminal's yellow (43), the
-  # fallback that keeps the library from reducing 214 to red; nothing is drawn inverse on either
-  # (falsify: put {inverse} or a hex tag back in STYLE_TAGS.selected, or drop barStyle from
-  # createScreen). The library joins a cell's codes into one SGR sequence (ESC [ codes m), so a code
-  # may sit between others; a cursor move such as ESC [ 7 ; 1 H is not one.
+  # The cursor bar's bytes, from the same captures. The rule is lib/tui-blessed.mjs barStyle: palette
+  # 214 (48;5;214) when the terminal reports 256 colours, the terminal's yellow (43) below that, so the
+  # library never reduces 214 to red; nothing is drawn inverse either way. The colour count that picks
+  # the expectation is the one neo-blessed's own terminfo reader gives for that TERM, not the TERM's
+  # name and not tput's answer: the terminfo entry for tmux-256color exists on the GitHub Ubuntu runner
+  # (infocmp admits it to pty_terms above) yet neo-blessed 0.2.0 reads it as 8 colours there, so the
+  # board rightly draws the fallback on that host; the note line names both counts so a CI log shows
+  # which case ran (falsify: put {inverse} or a hex tag back in STYLE_TAGS.selected, or drop barStyle
+  # from createScreen). The library joins a cell's codes into one SGR sequence (ESC [ codes m), so a
+  # code may sit between others; a cursor move such as ESC [ 7 ; 1 H is not one.
+  tput_colors() { # <TERM>: the colour count neo-blessed reads for it, 0 when it cannot
+    node -e 'const b = require(process.argv[1] + "/node_modules/neo-blessed"); let c = 0; try { c = new b.Tput({ terminal: process.argv[2] }).colors || 0; } catch (e) { c = 0; } process.stdout.write(String(c));' "$ROOT/bin/firstmate-tui" "$1"
+  }
   for t in $pty_terms; do
-    case $t in
-      *256color)
-        if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t: the selected row is not drawn on the 256-colour amber background 48;5;214"; fi
-        if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*43(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t: a 256-colour TERM got the yellow fallback"; else pass; fi ;;
-      *)
-        if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*43(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t: on an 8-colour TERM the selected row is not drawn on the yellow background 43"; fi
-        if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t: an 8-colour TERM got a 256-colour background"; else pass; fi ;;
-    esac
+    colors=$(tput_colors "$t")
+    printf 'note: pty %s: neo-blessed reads %s colours (tput -T %s colors says %s)\n' "$t" "${colors:-0}" "$t" "$(tput -T "$t" colors 2>/dev/null || echo '?')"
+    if [ "${colors:-0}" -ge 256 ] 2>/dev/null; then
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t ($colors colours): the selected row is not drawn on the 256-colour amber background 48;5;214"; fi
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*43(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t ($colors colours): a 256-colour TERM got the yellow fallback"; else pass; fi
+    else
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*43(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t ($colors colours): below 256 colours the selected row is not drawn on the yellow background 43"; fi
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t ($colors colours): a TERM below 256 colours got a 256-colour background"; else pass; fi
+    fi
     if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*7(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t: something is drawn inverse"; else pass; fi
   done
   # 0x0d 0x0a (a terminal in newline mode) opens once: the linefeed is a separate key the board does not
