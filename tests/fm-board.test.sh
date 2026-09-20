@@ -233,13 +233,14 @@ assert_count() {
   n=$(printf '%s\n' "$1" | grep -Fc -- "$2")
   if [ "$n" -eq "$3" ]; then pass; else fail "$4: expected $3 lines with '$2', got $n"; fi
 }
-# The cursor bar's tags (lib/tui-blessed.mjs `selected`): palette colour 214, amber, behind black
-# text, never {inverse}, named by its index because neo-blessed 0.2.0 turns a hex tag into a basic
-# colour (the pty section checks the bytes a terminal gets). SEL and SEL_END are the ERE-escaped open
-# and close for assert_row, SEL_TAG the plain open for a fixed-string count.
-SEL='\{214-bg\}\{black-fg\}'
-SEL_END='\{/black-fg\}\{/214-bg\}'
-SEL_TAG='{214-bg}{black-fg}'
+# The cursor bar's tags (lib/tui-blessed.mjs `selected`): the terminal's inverse video, as before
+# 0.6.1, never a colour of the board's own; the amber 0.6.1 put behind the row marks the focused pane's
+# border instead ({bold}{214-fg}, palette colour 214 named by its index because neo-blessed 0.2.0 turns
+# a hex tag into a basic colour; the pty section checks the bytes a terminal gets). SEL and SEL_END are
+# the ERE-escaped open and close for assert_row, SEL_TAG the plain open for a fixed-string count.
+SEL='\{inverse\}'
+SEL_END='\{/inverse\}'
+SEL_TAG='{inverse}'
 # assert_lines <frame> <n> <label>
 assert_lines() {
   local n
@@ -360,25 +361,35 @@ assert_count "$frame" "┌─ [" 6 "exactly six badges, one per pane"
 tags=$(render populated.json --tags) || fail "populated --tags: render exited non-zero"
 assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[3\]\{/grey-fg\}\{blue-fg\} My PRs \(3\)' "--tags: the badge is grey and the title keeps the border color"
 assert_count "$tags" "{grey-fg}[" 6 "--tags: six grey badges"
-# The cursor bar is amber 214 behind black text and never the terminal's inverse, on every cell of the
-# selected row, and the panes' own foreground colours give way to it where they would not read on
-# amber: a selected decide row's yellow flag text turns black, a selected unknown HERDR cell's grey
-# too, while a selected pane-lost cell keeps its red; the unselected rows keep their colours (falsify:
-# put {inverse} back in STYLE_TAGS.selected, or drop flag or grey from BAR_TEXT in tagsFor).
-assert_row "$tags" "^.*${SEL}working +${SEL_END}.*${SEL}ship-alpha +${SEL_END}.*${SEL} 5m${SEL_END}" "--tags: the selected In flight row is drawn on the amber bar in black, first cell to last"
+# The focused pane's whole border is bold amber 214 (In flight holds the focus at start), its badge
+# still grey between the border segments, and an unfocused border is plain blue; no cyan is left
+# anywhere (falsify: put {cyan-fg} back in STYLE_TAGS['border-focus'], or give the badge the border
+# style).
+assert_row "$tags" '\{bold\}\{214-fg\}┌─ \{/214-fg\}\{/bold\}\{grey-fg\}\[1\]\{/grey-fg\}\{bold\}\{214-fg\} In flight \(7\)' "--tags: the focused pane's title line is bold amber around a grey badge"
+assert_row "$tags" '\{bold\}\{214-fg\}│ \{/214-fg\}\{/bold\}.*\{bold\}\{214-fg\} │\{/214-fg\}\{/bold\}$' "--tags: the focused pane's side borders are bold amber"
+assert_row "$tags" '^\{bold\}\{214-fg\}└─+┘\{/214-fg\}\{/bold\}$' "--tags: the focused pane's bottom border is bold amber"
+assert_not_contains "$tags" "{cyan-fg}" "--tags: no cyan anywhere in the frame (falsify: keep the cyan focus border)"
+# The cursor bar is the terminal's inverse video on every cell of the selected row, as before 0.6.1,
+# and nothing in a frame carries the amber background or, beyond the title line's black on white, the
+# black text 0.6.1 drew the bar with. A selected row's base style is `selected` alone (lib/render.mjs
+# rowSegments), so a selected decide row's yellow flag gives way to the plain inverse bar, while a
+# cell with its own colour keeps it inside the bar: a selected pane-lost cell stays red, a selected
+# unknown HERDR cell stays grey; the unselected rows keep their colours (falsify: put
+# {214-bg}{black-fg} back in STYLE_TAGS.selected, or filter names out of tagsFor for a selected cell).
+assert_row "$tags" "^.*${SEL}working +${SEL_END}.*${SEL}ship-alpha +${SEL_END}.*${SEL} 5m${SEL_END}" "--tags: the selected In flight row is drawn inverse, first cell to last"
 assert_count "$tags" "$SEL_TAG" 1 "--tags: one row carries the bar"
-assert_not_contains "$tags" "{inverse}" "--tags: nothing is drawn inverse (falsify: keep the inverse cursor)"
+assert_not_contains "$tags" "{214-bg}" "--tags: nothing is drawn on the amber background (falsify: keep the 0.6.1 bar)"
+assert_count "$tags" "{black-fg}" 1 "--tags: the title line is the one line with black text (falsify: keep the 0.6.1 bar's black text)"
 assert_row "$tags" '\{yellow-fg\}decide +\{/yellow-fg\}' "--tags: an unselected decide row keeps its yellow flag text"
 tags_sel=$(render populated.json --tags --keys "tab,j") || fail "populated --tags tab,j: render exited non-zero"
-assert_row "$tags_sel" "${SEL}decide +${SEL_END}.*${SEL}db-choice *${SEL_END}" "--tags: the selected decide row is black on the bar, not yellow"
+assert_row "$tags_sel" "${SEL}decide +${SEL_END}.*${SEL}db-choice *${SEL_END}" "--tags: the selected decide row is plain inverse, its yellow flag given way"
 assert_no_row "$tags_sel" "${SEL}\{yellow-fg\}" "--tags: no yellow text inside the bar"
 assert_row "$tags_sel" '\{yellow-fg\}decide +\{/yellow-fg\}' "--tags: In flight's decide group row, unselected, is still yellow"
 tags_sel=$(render populated.json --tags --keys "j,j,j,j,j,j") || fail "populated --tags lost row: render exited non-zero"
 assert_row "$tags_sel" "${SEL}\{red-fg\}pane lost\{/red-fg\}${SEL_END}" "--tags: a selected row's pane-lost cell keeps its red text inside the bar"
-assert_row "$tags_sel" "${SEL}done +${SEL_END}" "--tags: the rest of that row is black on the bar"
+assert_row "$tags_sel" "${SEL}done +${SEL_END}" "--tags: the rest of that row is plain inverse"
 tags_sel=$(render lost-disconnected.json --tags --keys "j") || fail "lost-disconnected --tags j: render exited non-zero"
-assert_row "$tags_sel" "${SEL}unknown *${SEL_END}" "--tags: a selected row's unknown HERDR cell is black on the bar, not grey"
-assert_no_row "$tags_sel" "${SEL}\{grey-fg\}" "--tags: no grey text inside the bar"
+assert_row "$tags_sel" "${SEL}\{grey-fg\}unknown *\{/grey-fg\}${SEL_END}" "--tags: a selected row's unknown HERDR cell keeps its grey text inside the bar"
 assert_row "$(render lost-disconnected.json --tags)" '\{grey-fg\}unknown *\{/grey-fg\}' "--tags: the same cell unselected is still grey"
 
 # Pane headers are `[n] Name (count)` and nothing else: the snapshot and checks ages, and the herdr
@@ -3275,13 +3286,15 @@ if [ -s "$HL/out-fail.log" ]; then fail "headless failing run wrote to the termi
 # its rows (etl-index, ship-old, mobile-fix, old-scout), 43 footer. The board starts focused on In
 # flight's first row.
 #
-# A left click selects: the pane gets the focus border and the row the cursor bar, the same as
-# tab/j/k would leave them (falsify: drop the 'select' case from applyAction, or the row zones from
-# renderPanes).
+# A left click selects: the pane gets the amber focus border and the row the inverse cursor bar, the
+# same as tab/j/k would leave them, and the pane that lost the focus is back to plain blue (falsify:
+# drop the 'select' case from applyAction, or the row zones from renderPanes).
 tags_m=$(render populated.json --mouse "click:30,33" --tags) || fail "mouse click: render exited non-zero"
 assert_row "$tags_m" "${SEL}report *${SEL_END}.*mobile-fix" "click on the second Findings row selects it"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[5\].*Findings \(3\)' "click on a Findings row focuses the Findings pane"
-assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[1\]' "click: In flight lost the focus border"
+assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[5\].*Findings \(3\)' "click on a Findings row focuses the Findings pane"
+assert_no_row "$tags_m" '\{214-fg\}┌─ .*\[1\]' "click: In flight lost the focus border"
+assert_row "$tags_m" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[1\]\{/grey-fg\}\{blue-fg\} In flight' "click: In flight's border is plain blue again"
+assert_not_contains "$tags_m" "{cyan-fg}" "click: no cyan anywhere in the frame"
 assert_no_row "$tags_m" "${SEL}working" "click: the old selection is no longer on the bar"
 # The selection a click leaves is what the keys then act on (falsify: set view.row without view.pane in 'select').
 frame_m=$(render populated.json --mouse "click:30,33" --keys "x") || fail "mouse click then x: render exited non-zero"
@@ -3290,22 +3303,22 @@ assert_contains "$frame_m" "hidden mobile-fix" "x after a click names the clicke
 # A click on a pane title focuses the pane, cursor on its first row (falsify: drop the title zone, or return
 # 'none' for a non-row hit in mouseAction).
 tags_m=$(render populated.json --mouse "click:5,30" --tags) || fail "mouse title click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[5\].*Findings \(3\)' "click on the Findings title focuses Findings"
+assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[5\].*Findings \(3\)' "click on the Findings title focuses Findings"
 assert_row "$tags_m" "${SEL}scout +${SEL_END}.*scout-beta" "click on the Findings title puts the cursor on its first row"
 frame_m=$(render populated.json --mouse "click:5,30" --keys "enter") || fail "mouse title click then enter: render exited non-zero"
 assert_contains "$frame_m" "would view /fixture/firstmate/data/scout-beta/report.md" "enter after a title click acts on that pane's first row"
 # A click on a pane's empty space (its column header) focuses the pane too (falsify: drop the pane zone).
 tags_m=$(render populated.json --mouse "click:30,14" --tags) || fail "mouse empty click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}┌─ .*\[2\].*Needs you \(4\)' "click on Needs you's column header focuses Needs you"
+assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[2\].*Needs you \(4\)' "click on Needs you's column header focuses Needs you"
 # A click on the title line or the footer changes nothing (falsify: give those lines a zone).
 frame_m=$(render populated.json --mouse "click:30,0 click:30,43") || fail "mouse chrome click: render exited non-zero"
 if [ "$frame_m" = "$frame" ]; then pass; else fail "a click on the title line or footer changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # The narrow list has zones too (falsify: drop the zones from renderList).
 tags_m=$(render narrow.json --mouse "click:10,14" --tags) || fail "mouse narrow click: render exited non-zero"
 assert_row "$tags_m" "${SEL}merged +${SEL_END}.*ship-old" "list mode: a click on the Landed row selects it"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[6\].*Landed \(1\)' "list mode: the Landed section header takes the focus style"
+assert_row "$tags_m" '\{bold\}\{214-fg\}── .*\[6\].*Landed \(1\)' "list mode: the Landed section header takes the focus style"
 tags_m=$(render narrow.json --mouse "click:10,5" --tags) || fail "mouse narrow title click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{cyan-fg\}── .*\[2\].*Needs you \(1\)' "list mode: a click on a section header focuses that section"
+assert_row "$tags_m" '\{bold\}\{214-fg\}── .*\[2\].*Needs you \(1\)' "list mode: a click on a section header focuses that section"
 
 # A double-click is enter on that row: two left clicks on one row within 400 ms, recognized in
 # lib/controller.mjs, not by the terminal library (falsify: drop the lastClick check from mouseAction, or
@@ -3424,7 +3437,7 @@ frame_m=$(render_mouse populated.json "tab wheel:down:30,39" --keys "enter") || 
 assert_opened "https://github.com/acme/api/pull/7" "wheel down over Landed moves the focused Needs you selection three rows to the review row, which enter opens"
 tags_m=$(render populated.json --mouse "tab wheel:down:30,39" --tags) || fail "mouse wheel --tags: render exited non-zero"
 assert_row "$tags_m" "${SEL}review " "wheel down: the fourth Needs you row is selected"
-assert_no_row "$tags_m" '\{cyan-fg\}┌─ .*\[6\]' "wheel: the pane under the pointer is not focused"
+assert_no_row "$tags_m" '\{214-fg\}┌─ .*\[6\]' "wheel: the pane under the pointer is not focused"
 tags_m=$(render populated.json --mouse "tab wheel:up:30,39 wheel:down:30,39 wheel:down:30,39" --tags) || fail "mouse wheel clamp: render exited non-zero"
 assert_row "$tags_m" "${SEL}review " "wheel up at the top stays, two wheel downs clamp at the last row"
 tags_m=$(render populated.json --mouse "tab wheel:down:30,39 wheel:up:30,39" --tags) || fail "mouse wheel back: render exited non-zero"
@@ -3868,30 +3881,34 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
     assert_upgrade_log "upgrade --version 0.2.0" "pty $t: one carriage return opens the prompt and y then runs the launcher exactly once"
     assert_not_opened "pty $t: nothing on the Settings page opens a PR"
   done
-  # The cursor bar's bytes, from the same captures. The rule is lib/tui-blessed.mjs barStyle: palette
-  # 214 (48;5;214) when the terminal reports 256 colours, the terminal's yellow (43) below that, so the
-  # library never reduces 214 to red; nothing is drawn inverse either way. The colour count that picks
-  # the expectation is the one neo-blessed's own terminfo reader gives for that TERM, not the TERM's
-  # name and not tput's answer: the terminfo entry for tmux-256color exists on the GitHub Ubuntu runner
-  # (infocmp admits it to pty_terms above) yet neo-blessed 0.2.0 reads it as 8 colours there, so the
-  # board rightly draws the fallback on that host; the note line names both counts so a CI log shows
-  # which case ran (falsify: put {inverse} or a hex tag back in STYLE_TAGS.selected, or drop barStyle
-  # from createScreen). The library joins a cell's codes into one SGR sequence (ESC [ codes m), so a
-  # code may sit between others; a cursor move such as ESC [ 7 ; 1 H is not one.
+  # The colour bytes, from the same captures. The selected row is the terminal's inverse video (SGR 7)
+  # whatever TERM says. The focused pane's border is lib/tui-blessed.mjs accentStyle: bold palette 214
+  # (38;5;214) when the terminal reports 256 colours, bold yellow (1;33) below that, so the library
+  # never reduces 214 to red; the amber background 0.6.1 drew the bar with (48;5;214) appears nowhere.
+  # The colour count that picks the expectation is the one neo-blessed's own terminfo reader gives for
+  # that TERM, not the TERM's name and not tput's answer: the terminfo entry for tmux-256color exists
+  # on the GitHub Ubuntu runner (infocmp admits it to pty_terms above) yet neo-blessed 0.2.0 reads it
+  # as 8 colours there, so the board rightly draws the fallback on that host; the note line names both
+  # counts so a CI log shows which case ran (falsify: put the amber background back in
+  # STYLE_TAGS.selected, a hex tag or cyan in STYLE_TAGS['border-focus'], or drop accentStyle from
+  # createScreen). The library joins a cell's codes into one SGR sequence (ESC [ codes m) with bold
+  # first, so bold yellow is `1;33` and a code may sit between others; a cursor move such as
+  # ESC [ 7 ; 1 H is not one. Bold yellow is otherwise only the column drag bar, which nothing here drags.
   tput_colors() { # <TERM>: the colour count neo-blessed reads for it, 0 when it cannot
     node -e 'const b = require(process.argv[1] + "/node_modules/neo-blessed"); let c = 0; try { c = new b.Tput({ terminal: process.argv[2] }).colors || 0; } catch (e) { c = 0; } process.stdout.write(String(c));' "$ROOT/bin/firstmate-tui" "$1"
   }
   for t in $pty_terms; do
     colors=$(tput_colors "$t")
     printf 'note: pty %s: neo-blessed reads %s colours (tput -T %s colors says %s)\n' "$t" "${colors:-0}" "$t" "$(tput -T "$t" colors 2>/dev/null || echo '?')"
+    if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*7(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t: the selected row is not drawn inverse (SGR 7)"; fi
+    if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t: something is drawn on the amber background 48;5;214 of the 0.6.1 bar"; else pass; fi
     if [ "${colors:-0}" -ge 256 ] 2>/dev/null; then
-      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t ($colors colours): the selected row is not drawn on the 256-colour amber background 48;5;214"; fi
-      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*43(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t ($colors colours): a 256-colour TERM got the yellow fallback"; else pass; fi
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*38;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t ($colors colours): the focused border is not drawn in the 256-colour amber 38;5;214"; fi
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*1;33(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t ($colors colours): a 256-colour TERM got the bold yellow fallback"; else pass; fi
     else
-      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*43(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t ($colors colours): below 256 colours the selected row is not drawn on the yellow background 43"; fi
-      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*48;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t ($colors colours): a TERM below 256 colours got a 256-colour background"; else pass; fi
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*1;33(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then pass; else fail "pty $t ($colors colours): below 256 colours the focused border is not drawn bold yellow 1;33"; fi
+      if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*38;5;214(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t ($colors colours): a TERM below 256 colours got a 256-colour foreground"; else pass; fi
     fi
-    if LC_ALL=C grep -aEq $'\e\\[([0-9]+;)*7(;[0-9]+)*m' "$SCRATCH/pty-cr-$t.bin"; then fail "pty $t: something is drawn inverse"; else pass; fi
   done
   # 0x0d 0x0a (a terminal in newline mode) opens once: the linefeed is a separate key the board does not
   # bind. 0x0a alone opens nothing (falsify: bind linefeed to enter, which would double a CR LF).

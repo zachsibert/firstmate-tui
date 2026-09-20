@@ -236,7 +236,7 @@ The six panes, top to bottom; each pane's key is its number:
 
 The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing...` while one runs, and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
 Each pane title carries its key and its row count, as in `[1] In flight (3)`.
-The selected row is drawn as an amber bar with black text (palette colour 214 on a 256-colour terminal, your terminal's yellow on one with fewer colours), whatever your theme's foreground colour is.
+The selected row is drawn inverse, in your theme's own colours, and the focused pane's border is amber (palette colour 214 on a 256-colour terminal, your terminal's yellow on one with fewer colours); the other panes keep their blue border.
 In the HERDR column, `pane lost` in red means herdr no longer has that agent's pane, and `unknown` in grey means herdr is disconnected so the board cannot tell.
 The bottom line lists the keys, and `?` shows them all.
 

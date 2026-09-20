@@ -182,11 +182,13 @@ belong to later milestones.
   that file. That includes the mouse: adding the screen's mouse listener is
   what switches terminal mouse reporting on, and the adapter only translates
   events. It also owns the colours: `STYLE_TAGS` there is the one place a
-  style name becomes tags, and a colour beyond the basic 16 is named by its
-  palette index (`{214-bg}`, the cursor bar), never a hex value, because
-  neo-blessed 0.2.0 maps a hex tag to a basic colour; `barStyle` reads the
-  terminal's colour count and falls back to yellow below 256, since the
-  library reduces 214 to red there (its header says how this was found). The library reports one Enter press as two keypress events
+  style name becomes tags; the cursor bar (`selected`) is the terminal's
+  inverse video and the focused pane's border (`border-focus`) is bold amber,
+  and a colour beyond the basic 16 is named by its palette index
+  (`{214-fg}`, that border), never a hex value, because neo-blessed 0.2.0
+  maps a hex tag to a basic colour; `accentStyle` reads the terminal's colour
+  count and falls back to yellow below 256, since the library reduces 214 to
+  red there (its header says how this was found). The library reports one Enter press as two keypress events
   (`enter`, then `return`); `normalizeKey` keeps the first and drops the
   second, so the controller hears one key per press. `--render-once --keys`
   feeds the controller directly and never loads the library, so a change to
