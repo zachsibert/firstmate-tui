@@ -13,8 +13,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, parseTime, repoFromUrl } from './text.mjs';
 import { whichOnPath } from './viewer.mjs';
 import { parseReleases, RELEASES_PER_PAGE } from './settings.mjs';
-import { recordedPrs, TERMINAL_WINDOW_SECONDS } from './model.mjs';
-import { configuredRepos, passesLabelRule } from './config.mjs';
+import { GH_MISSING, recordedPrs, SCRIPT_CONFIGURED, TERMINAL_WINDOW_SECONDS } from './model.mjs';
+import { configuredRepos, passesLabelRule, prSourceInEffect } from './config.mjs';
 import { identityKnown, resolveIdentity } from './identity.mjs';
 
 // Run a command to completion, bounded by timeoutMs. Resolves to { out, error,
@@ -274,9 +274,11 @@ export async function resolveIdentityLive({ config, askGh = true, timeoutMs = GH
 // in one more GraphQL call with aliased repository { pullRequest } fields,
 // bounded by PR_LIMIT; a lookup that fails leaves the model's `-` row.
 // The candidate rule and the checks mapping copy firstmate's
-// bin/fm-bearings-snapshot.sh, which stays as the fallback for My PRs when
-// gh is not on PATH (recorded PRs only, open ones only, none of the new
-// fields); To review has no fallback and says so.
+// bin/fm-bearings-snapshot.sh, which runs in place of the searches for My
+// PRs when gh is not on PATH, or when the config file's prs.source is
+// "firstmate" (lib/config.mjs prSourceInEffect; open PRs only, none of the
+// new fields, its rows judged by projectScriptPr below); To review has no
+// script path and says so.
 
 export const PR_REPOS = 10; // FM_BEARINGS_PR_REPOS: candidate repositories per fetch
 export const PR_LIMIT = 50; // PRs asked for per search (newest-updated first) and recorded PRs looked up per tick
@@ -632,10 +634,67 @@ export async function runGhPrs(snapshot, { identity, config, timeoutMs, env = pr
   return { mine, toreview };
 }
 
-// The fallback: fm-bearings-snapshot.sh --include-prs, which runs its own fleet
-// snapshot and then gh, lists open PRs only and carries no creation time,
-// title, base branch or draft flag (its rows read IN REVIEW or APPROVED from
-// the review decision alone, BASE '-', and the recorded task's title).
+// The check contexts a script row carries, when it carries any: gh's
+// statusCheckRollup list, or a `contexts` list (bare, or GraphQL's { nodes }),
+// the two shapes checksState reads. Null when the row has only the script's
+// checks word, which is what fm-bearings-snapshot.sh prints today.
+function scriptContexts(row) {
+  if (Array.isArray(row.statusCheckRollup)) return row.statusCheckRollup;
+  if (Array.isArray(row.contexts)) return row.contexts;
+  if (row.contexts && typeof row.contexts === 'object' && Array.isArray(row.contexts.nodes)) return row.contexts.nodes;
+  return null;
+}
+
+const CHECK_WORDS = new Set(['none', 'passing', 'pending', 'failing']);
+
+// One fm-bearings-snapshot.sh candidate_prs row -> the shape lib/model.mjs
+// reads, through the same projection as the board's own rows (projectPr), so
+// the two sources agree wherever the script gives the board enough to judge.
+// The script's row is { num, repo, task, url, review, mergeable, checks }: the
+// checks word is the script's own verdict over every context of the head
+// commit, under which a cancelled run a re-run superseded still reads
+// failing. When a row carries the contexts themselves (statusCheckRollup or
+// contexts, should the script one day print them) checksState judges the
+// newest run of each check and the word is ignored; a row with only the word
+// keeps it (an unknown word reads none). Everything the script does not
+// print (title, base, creation time, state, author, labels) reads null or
+// empty, so the row falls back to the recorded task's title, BASE '-' and
+// the status-log age marked `~`, as the script's rows always have.
+export function projectScriptPr(c) {
+  const row = c && typeof c === 'object' ? c : {};
+  const contexts = scriptContexts(row);
+  const projected = projectPr(
+    {
+      number: row.num === undefined || row.num === null || row.num === '-' ? null : row.num,
+      url: row.url,
+      title: row.title,
+      baseRefName: row.base,
+      reviewDecision: row.review,
+      mergeable: row.mergeable,
+      mergeStateStatus: row.merge_state ?? row.mergeStateStatus,
+      statusCheckRollup: contexts,
+      createdAt: row.created_at,
+      isDraft: row.draft,
+      state: row.state,
+      mergedAt: row.merged_at,
+      closedAt: row.closed_at,
+    },
+    typeof row.repo === 'string' && row.repo && row.repo !== '-' ? row.repo : null,
+  );
+  const word = typeof row.checks === 'string' ? row.checks.trim().toLowerCase() : '';
+  return {
+    ...projected,
+    task: typeof row.task === 'string' && row.task.trim() ? row.task.trim() : '-',
+    checks: contexts ? projected.checks : CHECK_WORDS.has(word) ? word : 'none',
+    pane: 'mine',
+  };
+}
+
+// firstmate's script as the source: fm-bearings-snapshot.sh --include-prs runs
+// its own fleet snapshot and then gh, lists open PRs only and carries no
+// creation time, title, base branch or draft flag (its rows read IN REVIEW or
+// APPROVED from the review decision alone, BASE '-', and the recorded task's
+// title). Every row goes through projectScriptPr.
 export async function runBearingsPrs(fmHome, { timeoutMs }) {
   const script = `${fmHome}/bin/fm-bearings-snapshot.sh`;
   const r = await runJson('bash', [script, '--json', '--include-prs'], {
@@ -649,37 +708,56 @@ export async function runBearingsPrs(fmHome, { timeoutMs }) {
   // the board treats that as a failed fetch and names it, not as an empty list.
   const status = typeof r.value.prs === 'string' ? r.value.prs : '';
   if (/^unavailable\b/.test(status)) return { candidate_prs: [], error: status, note: null };
-  const rows = (Array.isArray(r.value.candidate_prs) ? r.value.candidate_prs : []).map((c) => ({ ...c, pane: 'mine' }));
+  const rows = (Array.isArray(r.value.candidate_prs) ? r.value.candidate_prs : []).filter((c) => c && typeof c === 'object').map(projectScriptPr);
   return { candidate_prs: rows, error: null, note: null };
 }
 
-export const GH_MISSING = 'gh not on PATH';
+// The footer's one-time note when the script is the source, by the reason
+// (lib/config.mjs prSourceInEffect); the same words name what the script
+// cannot give either way.
+const SCRIPT_LIMITS = 'open PRs only, without titles, base branches or PR creation times';
+export const SCRIPT_NOTES = {
+  config: `PR data from fm-bearings-snapshot.sh (${SCRIPT_CONFIGURED}): ${SCRIPT_LIMITS}; Teammates' PRs needs the board's own fetch`,
+  'gh-missing': `${GH_MISSING}: PR data from fm-bearings-snapshot.sh, ${SCRIPT_LIMITS}; Teammates' PRs needs gh`,
+};
 
-// The live PR data of one refresh: { mine, toreview, note } with each pane's
-// { rows, error, note } (To review also `scope` and, without gh,
-// `unavailable`). With gh on PATH it is the board's own fetch against the
-// snapshot just taken (or the last good one when this tick's failed) for the
-// resolved identity; without gh the firstmate script runs for My PRs instead
-// and `note` says so, for the footer to show once, while To review lists
-// nothing and says why. An unknown identity fetches nothing: both panes come
-// back empty with no error and marked `skipped`, so mergePrs leaves them
+// The source the next fetch will use, from the config and PATH (lib/config.mjs
+// prSourceInEffect): what fetchPrs runs, and what the Settings page shows
+// before the first refresh lands.
+export function plannedPrSource(config, env = process.env) {
+  return prSourceInEffect(config, Boolean(whichOnPath('gh', env)));
+}
+
+// The live PR data of one refresh: { mine, toreview, note, source } with each
+// pane's { rows, error, note } (To review also `scope` and, on the script
+// path, `unavailable`) and `source` the { kind, reason } that ran
+// (plannedPrSource). On the board source it is the board's own fetch against
+// the snapshot just taken (or the last good one when this tick's failed) for
+// the resolved identity. On the firstmate source, gh missing or the config
+// asking for the script, the firstmate script runs for My PRs instead,
+// whoever the identity is, and `note` says so with the reason, for the
+// footer to show once, while To review lists nothing and says why. An
+// unknown identity on the board source fetches nothing: both panes come back
+// empty with no error and marked `skipped`, so mergePrs leaves them
 // unfetched (the first-fetch spinner still follows once r resolves the
 // login) and the model draws the identity row meanwhile.
 export async function fetchPrs(fmHome, snapshot, { identity, config, timeoutMs, env = process.env }) {
   const empty = () => ({ rows: [], error: null, note: null });
-  if (!whichOnPath('gh', env)) {
+  const source = plannedPrSource(config, env);
+  if (source.kind === 'firstmate') {
     const r = await runBearingsPrs(fmHome, { timeoutMs });
     return {
       mine: { rows: r.candidate_prs, error: r.error, note: null },
-      toreview: { ...empty(), scope: [], unavailable: GH_MISSING },
-      note: r.error ? null : 'gh not on PATH: PR data from fm-bearings-snapshot.sh, open PRs only, without titles, base branches or PR creation times; Teammates\' PRs needs gh',
+      toreview: { ...empty(), scope: [], unavailable: source.reason === 'config' ? SCRIPT_CONFIGURED : GH_MISSING },
+      note: r.error ? null : SCRIPT_NOTES[source.reason],
+      source,
     };
   }
-  if (!identityKnown(identity)) return { mine: { ...empty(), skipped: true }, toreview: { ...empty(), scope: [], skipped: true }, note: null };
-  if (!snapshot) return { mine: { ...empty(), error: 'no fleet snapshot to name the candidate repositories' }, toreview: { ...empty(), scope: [], error: 'no fleet snapshot to name the candidate repositories' }, note: null };
+  if (!identityKnown(identity)) return { mine: { ...empty(), skipped: true }, toreview: { ...empty(), scope: [], skipped: true }, note: null, source };
+  if (!snapshot) return { mine: { ...empty(), error: 'no fleet snapshot to name the candidate repositories' }, toreview: { ...empty(), scope: [], error: 'no fleet snapshot to name the candidate repositories' }, note: null, source };
   const r = await runGhPrs(snapshot, { identity, config, timeoutMs, env });
   const notes = [r.mine.note, r.toreview.note].filter(Boolean);
-  return { mine: r.mine, toreview: r.toreview, note: notes.length ? `PR fetch: ${notes.join('; ')}` : null };
+  return { mine: r.mine, toreview: r.toreview, note: notes.length ? `PR fetch: ${notes.join('; ')}` : null, source };
 }
 
 // The GitHub releases of the board's own repository, for the Settings page:

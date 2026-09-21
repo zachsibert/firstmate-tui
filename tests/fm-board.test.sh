@@ -30,14 +30,16 @@
 # reads it), the config file to `--config <temp file>` or a
 # temporary XDG_CONFIG_HOME. The r key is checked against a stand-in firstmate
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
-# that they ran and print canned JSON, with tests/fake-gh.sh first on PATH as
+# that they ran and print canned JSON (the populated fixture's snapshot;
+# tests/fixtures/bearings-prs.json), with tests/fake-gh.sh first on PATH as
 # `gh` (it logs each call and answers `api user` with a login and `api
 # graphql` with canned PRs, dispatched on the search string or the lookup's
 # aliases; it fails on `pr list`), so a live --render-once with --keys r shows
 # exactly which fetches a refresh triggers without GitHub or a real home; a run
-# under a PATH holding no gh proves the fallback to the firstmate script. Every
-# live render must put the fake gh first on PATH, or the board's own fetch
-# reaches the real GitHub CLI. The identity chain (the config file, then gh,
+# under a PATH holding no gh proves the fallback to the firstmate script, and a
+# config file with prs.source firstmate proves the opt-in to it with gh there.
+# Every live render must put the fake gh first on PATH, or the board's own
+# fetch reaches the real GitHub CLI. The identity chain (the config file, then gh,
 # then git) runs against a temporary config directory, the fake gh and a fake
 # git that answers `config --get github.user` alone. The refresh schedule
 # itself (one tick runs the snapshot and then the gh calls; a tick during a
@@ -85,7 +87,7 @@
 #                   Teammates' PRs row that must stay out of My PRs
 #   to-review.json  160x44, Teammates' PRs: one PR per STATUS word (DRAFT, IN
 #                   REVIEW, CHANGES REQUESTED, APPROVED, MERGED), a request
-#                   through a team, a labelled gemini PR, a PR merged outside
+#                   through a team, a labelled portal PR, a PR merged outside
 #                   the window and the identity's own PR, both dropped, the
 #                   AUTHOR column (a long login, a null author) and the scope
 #                   the fetch searched
@@ -141,6 +143,10 @@
 #                   its two home paths are placeholders the suite rewrites to
 #                   scratch homes holding the files, a fake fm-fleet-snapshot.sh
 #                   and tests/fake-captain-hold.sh (the hold section below)
+#   bearings-prs.json  not a frame: what the stand-in home's
+#                   fm-bearings-snapshot.sh prints, three rows in the script's
+#                   shape, one carrying the head commit's contexts (its _note
+#                   says what each proves)
 #   cold-start.json 120x40, the first refresh in flight with nothing landed:
 #                   no snapshot, no prs block, no herdr block, so every pane
 #                   shows its loading spinner (the two PR panes each naming
@@ -188,14 +194,15 @@ fake_herdr_env() {
 }
 # A stand-in firstmate home for the live-refresh checks: both snapshot scripts
 # append one line to FM_BOARD_TEST_FETCH_LOG and print canned JSON (the
-# populated fixture's snapshot; an empty PR list). Nothing reaches GitHub.
+# populated fixture's snapshot; the three PR rows of
+# tests/fixtures/bearings-prs.json). Nothing reaches GitHub.
 FAKE_HOME="$SCRATCH/firstmate"
 mkdir -p "$FAKE_HOME/bin"
 node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).snapshot))' "$FIX/populated.json" > "$FAKE_HOME/snapshot.json"
 # shellcheck disable=SC2016 # the fakes expand $FM_BOARD_TEST_FETCH_LOG at run time, not here
 printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\ncat "%s"\n' "$FAKE_HOME/snapshot.json" > "$FAKE_HOME/bin/fm-fleet-snapshot.sh"
 # shellcheck disable=SC2016
-printf '#!/usr/bin/env bash\necho "prs $*" >> "$FM_BOARD_TEST_FETCH_LOG"\necho "{\\"candidate_prs\\":[]}"\n' > "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
+printf '#!/usr/bin/env bash\necho "prs $*" >> "$FM_BOARD_TEST_FETCH_LOG"\ncat "%s"\n' "$FIX/bearings-prs.json" > "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
 chmod +x "$FAKE_HOME/bin/fm-fleet-snapshot.sh" "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
 # The stand-in's fm-captain-hold.sh is the fake too, so the pty section's D prompt never reaches a
 # real firstmate command (tests/fake-captain-hold.sh logs to FM_BOARD_TEST_HOLD_LOG).
@@ -419,13 +426,13 @@ assert_before "$frame" '^│ decide +db-choice' '^│ hold +- +decide-vendor' "d
 assert_before "$frame" '^│ hold +- +decide-vendor' '^│ review ' "hold sorts before review"
 # Secondmate decisions stay out of Needs you by default and flag their In flight group instead
 # (falsify: drop the opts.allHomesNeeds guard in needsRows, or the flag in ledgerGroup).
-assert_not_contains "$frame" "etl-cutover" "secondmate captain hold is not in Needs you by default (and hyperion is collapsed)"
+assert_not_contains "$frame" "etl-cutover" "secondmate captain hold is not in Needs you by default (and delegate-a is collapsed)"
 assert_not_contains "$frame" "etl-window" "a decision the secondmate record relays into the main home is not in Needs you by default"
-assert_row "$frame" '^│ decide +1 live +!▸ hyperion ' "the home holding those decisions is flagged with ! in In flight and reads decide"
+assert_row "$frame" '^│ decide +1 live +!▸ delegate-a ' "the home holding those decisions is flagged with ! in In flight and reads decide"
 frame_all=$(render populated.json --all-homes-needs) || fail "populated --all-homes-needs: render exited non-zero"
 assert_contains "$frame_all" "Needs you (6)" "--all-homes-needs adds the secondmate ledger decision and the relayed one"
-assert_row "$frame_all" '^│ hold +- +etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +hyperion +1d │$' "--all-homes-needs: secondmate captain hold row labelled with its home"
-assert_row "$frame_all" '^│ decide +etl-window +hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record (the KEY column grows to fit the key; falsify: cap extra below 10 in columnSpec)"
+assert_row "$frame_all" '^│ hold +- +etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +delegate-a +1d │$' "--all-homes-needs: secondmate captain hold row labelled with its home"
+assert_row "$frame_all" '^│ decide +etl-window +delegate-a +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record (the KEY column grows to fit the key; falsify: cap extra below 10 in columnSpec)"
 assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ review ' "--all-homes-needs: hold sorts before review"
 
 # My PRs with --no-prs: the recorded PRs only, tagged PR and marked off (falsify: drop the
@@ -439,7 +446,7 @@ assert_not_contains "$frame_noprs" "passing" "no live check state with --no-prs"
 assert_not_contains "$frame_noprs" "fetching" "--no-prs never says fetching"
 # Finished work stays out (falsify: drop the taskBacklogState or the secondmate check in recordedPrs).
 assert_no_row "$frame_noprs" '^│ PR +- +ship-old ' "a task whose backlog row is done does not list its PR without a fetched record"
-assert_no_row "$frame_noprs" '^│ PR +- +hyperion ' "a PR mentioned on a secondmate record is not ready for review"
+assert_no_row "$frame_noprs" '^│ PR +- +delegate-a ' "a PR mentioned on a secondmate record is not ready for review"
 
 # In flight rows: state, herdr join, tmux (falsify: remove the herdr agents block, or change
 # tmux-task's endpoint target).
@@ -458,31 +465,31 @@ assert_before "$frame" '^│ awaiting merge +done +ship-gamma' '^│ done +pane 
 
 # In flight groups, collapsed: one row per secondmate home with worst state, live count, child ids,
 # shared repo and newest child age; the mate's own agent row is folded into its group (falsify:
-# remove child-one from hyperion's active_children, w2A:p2 from the herdr block, or the mateTaskFor
+# remove child-one from delegate-a's active_children, w2A:p2 from the herdr block, or the mateTaskFor
 # fold in inflightRows).
-assert_row "$frame" '^│ decide +1 live +!▸ hyperion +child-one, child-failed +acme/etl +hyperion +1h │$' "hyperion group: the relayed decision is the worst state, one live worker, flagged, newest age 1h"
+assert_row "$frame" '^│ decide +1 live +!▸ delegate-a +child-one, child-failed +acme/etl +delegate-a +1h │$' "delegate-a group: the relayed decision is the worst state, one live worker, flagged, newest age 1h"
 assert_row "$frame" '^│ working +1 live +▸ remote-sm +remote-child +acme/mobile +remote-sm \(remote\) +- │$' "remote home group row, not flagged"
-assert_no_row "$frame" '^│ working +idle +hyperion ' "the secondmate agent row is folded into its group when collapsed"
+assert_no_row "$frame" '^│ working +idle +delegate-a ' "the secondmate agent row is folded into its group when collapsed"
 assert_not_contains "$frame" "child-one  " "children are hidden while collapsed (id appears only in the group text)"
 assert_not_contains "$frame" "↳" "no child rows while collapsed"
 assert_before "$frame" '^│ working +1 live +▸ remote-sm' '^│ blocked +blocked +scout-beta' "a working group sorts with the working rows, before blocked"
-assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ decide +1 live +!▸ hyperion' "a group with a pending decision sorts with the blocked/decide rows"
+assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ decide +1 live +!▸ delegate-a' "a group with a pending decision sorts with the blocked/decide rows"
 
 # In flight groups, expanded with --expand all (falsify: drop the children list in ledgerGroup, or
-# the etl-cutover decision from hyperion's decisions_open).
+# the etl-cutover decision from delegate-a's decisions_open).
 frame_x=$(render populated.json --expand all --rows 48) || fail "populated --expand all: render exited non-zero"
 assert_contains "$frame_x" "In flight (12)" "expanding both groups adds the children, the home decision and the relayed decision, never the delegate's own record"
-assert_row "$frame_x" '^│ decide +1 live +!▾ hyperion +child-one, child-failed +acme/etl +hyperion +1h │$' "expanded group row shows ▾"
-assert_no_row "$frame_x" '↳ hyperion +\(secondmate\)' "expanded: the delegate's own task record is not a child row (falsify: list mateRow among ledgerGroup's children)"
-assert_row "$frame_x" '^│ decide +etl-window +↳ hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "expanded: the relayed keyed decision lists under the group (falsify: drop relayed from ledgerGroup)"
-assert_row "$frame_x" '^│ working +working +↳ child-one +writing the loader +acme/etl +hyperion +3d │$' "expanded: active child with age from its home state file"
-assert_row "$frame_x" '^│ failed +pane lost +↳ child-failed +endpoint default:w2B:p2 \(run-step\) +- +hyperion +1h │$' "expanded: failed endpoint child whose pane is gone reads pane lost"
-assert_row "$frame_x" '^│ hold +- +↳ etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +hyperion +1d │$' "expanded: the home's live captain hold lists under the group"
+assert_row "$frame_x" '^│ decide +1 live +!▾ delegate-a +child-one, child-failed +acme/etl +delegate-a +1h │$' "expanded group row shows ▾"
+assert_no_row "$frame_x" '↳ delegate-a +\(secondmate\)' "expanded: the delegate's own task record is not a child row (falsify: list mateRow among ledgerGroup's children)"
+assert_row "$frame_x" '^│ decide +etl-window +↳ delegate-a +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "expanded: the relayed keyed decision lists under the group (falsify: drop relayed from ledgerGroup)"
+assert_row "$frame_x" '^│ working +working +↳ child-one +writing the loader +acme/etl +delegate-a +3d │$' "expanded: active child with age from its home state file"
+assert_row "$frame_x" '^│ failed +pane lost +↳ child-failed +endpoint default:w2B:p2 \(run-step\) +- +delegate-a +1h │$' "expanded: failed endpoint child whose pane is gone reads pane lost"
+assert_row "$frame_x" '^│ hold +- +↳ etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +delegate-a +1d │$' "expanded: the home's live captain hold lists under the group"
 assert_row "$frame_x" '^│ working +remote +↳ remote-child +porting the login screen +acme/mobile +remote-sm \(remote\) +- │$' "expanded: remote home child row reads remote in HERDR, never pane lost (falsify: drop the remote branch in herdrColumn)"
-assert_before "$frame_x" '!▾ hyperion' '↳ child-one' "children follow their group row"
+assert_before "$frame_x" '!▾ delegate-a' '↳ child-one' "children follow their group row"
 assert_before "$frame_x" '↳ remote-child' '^│ blocked +blocked +scout-beta' "the next top-level row starts after the previous group's children"
-assert_before "$frame_x" '↳ etl-cutover' '↳ hyperion +Which maintenance' "the ledger's home decisions come before the relayed ones"
-assert_before "$frame_x" '↳ hyperion +Which maintenance' '^│ awaiting merge' "the group's rows end before the next top-level row"
+assert_before "$frame_x" '↳ etl-cutover' '↳ delegate-a +Which maintenance' "the ledger's home decisions come before the relayed ones"
+assert_before "$frame_x" '↳ delegate-a +Which maintenance' '^│ awaiting merge' "the group's rows end before the next top-level row"
 assert_before "$frame_x" '↳ child-one' '↳ child-failed' "children sort working before failed"
 
 # Findings (falsify: remove scout_reports[0], the mobile-fix report_path, or the report mtimes).
@@ -495,7 +502,7 @@ assert_before "$frame" 'data/mobile-fix/report.md' 'data/old-scout/report.md' "f
 # Landed (falsify: change ship-old's state from done, or etl-index's completion date).
 assert_row "$frame" '^│ merged +09-14 +ship-old +Rename the widget table · https://github.com/acme/widgets/pu' "landed merged row with PR (text truncated to the flex column at 160 cols)"
 assert_row "$frame" '^│ merged +09-14 +ship-old .* acme/widgets +main +2d │$' "landed merged row keeps repo, home and age"
-assert_row "$frame" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +hyperion +1d │$' "secondmate landed row"
+assert_row "$frame" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +delegate-a +1d │$' "secondmate landed row"
 assert_row "$frame" '^│ reported +09-06 +old-scout +Scout: legacy import path · data/old-scout/report.md +acme/legacy +main +10d │$' "reported row in landed names its report, the target enter falls back to (falsify: drop the report rung from landedWhat)"
 assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship-old' "landed newest first"
 
@@ -520,15 +527,15 @@ assert_row "$(render populated.json --keys "tab,tab")" '^ j/k move  tab pane  en
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs). The board starts
 # on In flight's first row, so its rows need no tab.
 frame_k=$(render populated.json --keys "j,j,j,j,l") || fail "keys l: render exited non-zero"
-assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "l on the fifth In flight row expands the hyperion group"
+assert_row "$frame_k" '^│ decide +1 live +!▾ delegate-a ' "l on the fifth In flight row expands the delegate-a group"
 assert_contains "$frame_k" "↳ child-one" "expanded by key: child rows appear"
-assert_contains "$frame_k" "In flight (11)" "expanded by key: only hyperion's rows are added"
+assert_contains "$frame_k" "In flight (11)" "expanded by key: only delegate-a's rows are added"
 assert_not_contains "$frame_k" "▾ remote-sm" "expanded by key: the other group stays collapsed"
 frame_k=$(render populated.json --keys "j,j,j,j,l,j,h") || fail "keys h: render exited non-zero"
 assert_not_contains "$frame_k" "▾" "h from a child row collapses its group"
 assert_contains "$frame_k" "In flight (7)" "collapsed again by key"
 frame_k=$(render populated.json --keys "j,j,j,j,enter") || fail "keys enter group: render exited non-zero"
-assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "enter on a group row expands it"
+assert_row "$frame_k" '^│ decide +1 live +!▾ delegate-a ' "enter on a group row expands it"
 frame_k=$(render populated.json --keys "enter") || fail "keys enter worker: render exited non-zero"
 assert_contains "$frame_k" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus"
 frame_k=$(render populated.json --keys "?") || fail "keys ?: render exited non-zero"
@@ -652,45 +659,45 @@ assert_not_contains "$frame_g" "not fetched" "grouped: nothing reads not fetched
 
 # Needs you is main-home only (falsify: remove the opts.allHomesNeeds guard in needsRows).
 assert_contains "$frame_g" "Needs you (0)" "grouped: no main-home needs"
-assert_row "$frame_g" '^│ no captain decisions, holds or blocked workers +│$' "grouped: Needs you empty although hyperion has two live decisions"
+assert_row "$frame_g" '^│ no captain decisions, holds or blocked workers +│$' "grouped: Needs you empty although delegate-a has two live decisions"
 assert_not_contains "$frame_g" "cutover-day" "grouped: the keyed child decision is not in Needs you"
 assert_not_contains "$frame_g" "etl-vendor" "grouped: the secondmate captain hold is not in Needs you"
 
-# Collapsed groups (falsify: remove etl-backfill from hyperion's endpoints (state), the decisions_open
+# Collapsed groups (falsify: remove etl-backfill from delegate-a's endpoints (state), the decisions_open
 # entries, or the notes ledger).
 assert_contains "$frame_g" "In flight (3)" "grouped: one main worker plus two home groups"
 assert_row "$frame_g" '^│ STATE {4}HERDR ' "STATE column stays 8 wide when no longer state word is on the board"
 assert_row "$frame_g" '^│ working +working +ship-alpha +harness busy \(claude-hook\) +acme/widgets +main +5m │$' "grouped: main-home worker stays one row"
-assert_row "$frame_g" '^│ blocked +4 live +!▸ hyperion +etl-loader, etl-schema, etl-cutover-runbook, etl-backfill +acme/etl +hyperion +5m │$' "hyperion group: blocked is the worst child state, four live, flagged, newest child 5m"
+assert_row "$frame_g" '^│ blocked +4 live +!▸ delegate-a +etl-loader, etl-schema, etl-cutover-runbook, etl-backfill +acme/etl +delegate-a +5m │$' "delegate-a group: blocked is the worst child state, four live, flagged, newest child 5m"
 assert_row "$frame_g" '^│ working +2 live +▸ notes +brag-week-37, notes-monday +acme/brag +notes +40m │$' "notes group: working, two live, no flag"
-assert_before "$frame_g" '^│ working +2 live +▸ notes' '^│ blocked +4 live +!▸ hyperion' "grouped: working group sorts before blocked group"
+assert_before "$frame_g" '^│ working +2 live +▸ notes' '^│ blocked +4 live +!▸ delegate-a' "grouped: working group sorts before blocked group"
 assert_not_contains "$frame_g" "↳" "grouped: collapsed by default"
 
 # Expanded (falsify: drop the decision text lookup or the hold text lookup in ledgerChildRows, or
 # the dated-hold filter in liveDecisions).
 frame_gx=$(render grouped.json --expand all) || fail "grouped --expand all: render exited non-zero"
-assert_contains "$frame_gx" "In flight (10)" "grouped expanded: 3 top rows + 5 under hyperion + 2 under notes"
+assert_contains "$frame_gx" "In flight (10)" "grouped expanded: 3 top rows + 5 under delegate-a + 2 under notes"
 assert_not_contains "$frame_gx" "(secondmate)" "expanded: neither delegate's own record is a row (falsify: list mateRow among ledgerGroup's children)"
-assert_row "$frame_gx" '^│ working +working +↳ etl-loader +writing the loader +acme/etl +hyperion +3h │$' "expanded: working child with doing"
-assert_row "$frame_gx" '^│ working +working +↳ etl-schema +adding the schema migration +acme/etl +hyperion +20m │$' "expanded: second working child"
-assert_row "$frame_gx" '^│ decide +idle +↳ etl-cutover-runbook +Cut over Friday or Monday\? +acme/etl +hyperion +5m │$' "expanded: child with a keyed decision shows the decision text and tag decide"
-assert_row "$frame_gx" '^│ blocked +blocked +↳ etl-backfill +Backfill the ETL history · waiting on the prod snapshot +- +hyperion +1h │$' "expanded: blocked child shows its hold title and reason"
-assert_row "$frame_gx" '^│ hold +- +↳ etl-vendor +Pick the ETL vendor · Two quotes in the report +acme/etl +hyperion +2d │$' "expanded: the home's live captain hold lists last"
+assert_row "$frame_gx" '^│ working +working +↳ etl-loader +writing the loader +acme/etl +delegate-a +3h │$' "expanded: working child with doing"
+assert_row "$frame_gx" '^│ working +working +↳ etl-schema +adding the schema migration +acme/etl +delegate-a +20m │$' "expanded: second working child"
+assert_row "$frame_gx" '^│ decide +idle +↳ etl-cutover-runbook +Cut over Friday or Monday\? +acme/etl +delegate-a +5m │$' "expanded: child with a keyed decision shows the decision text and tag decide"
+assert_row "$frame_gx" '^│ blocked +blocked +↳ etl-backfill +Backfill the ETL history · waiting on the prod snapshot +- +delegate-a +1h │$' "expanded: blocked child shows its hold title and reason"
+assert_row "$frame_gx" '^│ hold +- +↳ etl-vendor +Pick the ETL vendor · Two quotes in the report +acme/etl +delegate-a +2d │$' "expanded: the home's live captain hold lists last"
 assert_not_contains "$frame_gx" "etl-later" "expanded: a dated hold is not live and stays out"
 assert_row "$frame_gx" '^│ working +working +↳ brag-week-37 +drafting week 37 +acme/brag +notes +2h │$' "expanded: notes child"
 assert_before "$frame_gx" '↳ etl-loader' '↳ etl-cutover-runbook' "children: working before decide"
 assert_before "$frame_gx" '↳ etl-cutover-runbook' '↳ etl-backfill' "children: decide before blocked (ledger order within a rank)"
 assert_before "$frame_gx" '↳ etl-backfill' '↳ etl-vendor' "home decisions come after the workers"
-frame_gh=$(render grouped.json --expand hyperion) || fail "grouped --expand hyperion: render exited non-zero"
-assert_contains "$frame_gh" "!▾ hyperion" "--expand by id expands that home"
+frame_gh=$(render grouped.json --expand delegate-a) || fail "grouped --expand delegate-a: render exited non-zero"
+assert_contains "$frame_gh" "!▾ delegate-a" "--expand by id expands that home"
 assert_contains "$frame_gh" "▸ notes" "--expand by id leaves the other home collapsed"
 assert_not_contains "$frame_gh" "↳ brag-week-37" "--expand by id: no children of the collapsed home"
 
 # --all-homes-needs restores the secondmate decisions (falsify: drop the flag in lib/args.mjs).
 frame_ga=$(render grouped.json --all-homes-needs) || fail "grouped --all-homes-needs: render exited non-zero"
 assert_contains "$frame_ga" "Needs you (2)" "--all-homes-needs: both live secondmate decisions"
-assert_row "$frame_ga" '^│ decide +cutover-day +etl-cutover-runbook +Cut over Friday or Monday\? +- +hyperion +- │$' "--all-homes-needs: keyed child decision"
-assert_row "$frame_ga" '^│ hold +- +etl-vendor +Pick the ETL vendor · Two quotes in the report +acme/etl +hyperion +2d │$' "--all-homes-needs: captain hold with repo from queued"
+assert_row "$frame_ga" '^│ decide +cutover-day +etl-cutover-runbook +Cut over Friday or Monday\? +- +delegate-a +- │$' "--all-homes-needs: keyed child decision"
+assert_row "$frame_ga" '^│ hold +- +etl-vendor +Pick the ETL vendor · Two quotes in the report +acme/etl +delegate-a +2d │$' "--all-homes-needs: captain hold with repo from queued"
 assert_not_contains "$frame_ga" "etl-later" "--all-homes-needs: dated hold still out"
 
 # Geometry (falsify: change the fixture cols/rows).
@@ -792,7 +799,7 @@ frame_v=$(render_view lost.json "tab,tab,enter") || fail "viewer main: render ex
 assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "enter on a main-home scout report hands its absolute path to the viewer"
 assert_contains "$frame_v" "viewed /fixture/firstmate/data/scout-beta/report.md (viewer-cmd)" "footer names the viewed report"
 frame_v=$(render_view lost.json "tab,tab,j,enter") || fail "viewer secondmate: render exited non-zero"
-assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "a secondmate report resolves against its own home, not FM_HOME (falsify: use fmHome for ledger reports)"
+assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "a secondmate report resolves against its own home, not FM_HOME (falsify: use fmHome for ledger reports)"
 frame_v=$(render_view lost.json "tab,tab,enter" "$FAKE_VIEWER -p") || fail "viewer flags: render exited non-zero"
 assert_viewed "-p
 /fixture/firstmate/data/scout-beta/report.md" "viewer flags stay separate argv elements, the path last (falsify: join argv into one string)"
@@ -821,7 +828,7 @@ frame_l=$(render lost.json --expand all) || fail "lost: render exited non-zero"
 tags_l=$(render lost.json --expand all --tags) || fail "lost --tags: render exited non-zero"
 # A recorded pane absent from the herdr overlay reads "pane lost" (falsify: drop the lost branch in herdrColumn).
 assert_row "$frame_l" '^│ working +pane lost +ship-lost +adding the retry loop +acme/api +main +10m │$' "main worker whose pane is gone: HERDR reads pane lost"
-assert_row "$frame_l" '^│ working +pane lost +↳ child-lost +indexing the warehouse +acme/etl +hyperion +1h │$' "secondmate child whose pane is gone: HERDR reads pane lost"
+assert_row "$frame_l" '^│ working +pane lost +↳ child-lost +indexing the warehouse +acme/etl +delegate-a +1h │$' "secondmate child whose pane is gone: HERDR reads pane lost"
 assert_row "$frame_l" '^│ working +working +ship-alpha ' "a worker whose pane is present keeps its agent status"
 assert_count "$tags_l" "{red-fg}pane lost{/red-fg}" 2 "--tags: both lost HERDR cells carry the red tag (falsify: drop the lost style in rowSegments)"
 # Needs you has no HERDR column, so the whole lost row is red; the live decision row is not (falsify: drop
@@ -855,14 +862,14 @@ assert_widths "$frame_l" 160 "lost frame lines are 160 columns"
 # done row its pane, or the report_path resolution).
 frame_t=$(render landed-targets.json) || fail "landed targets: render exited non-zero"
 assert_contains "$frame_t" "┌─ [6] Landed (9) ─" "landed targets: nine rows, one per target shape"
-assert_row "$frame_t" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +hyperion +1d │$' "secondmate row with a PR names the PR"
+assert_row "$frame_t" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +delegate-a +1d │$' "secondmate row with a PR names the PR"
 assert_row "$frame_t" '^│ done +09-14 +ship-done +Apply the widget migration · pane w1F:p1 +acme/widgets +main +2d │$' "main row whose done task still has its pane names the pane"
-assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table · pane w2C:p2 +- +hyperion +3d │$' "secondmate row whose ledger endpoint herdr lists names the pane"
+assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table · pane w2C:p2 +- +delegate-a +3d │$' "secondmate row whose ledger endpoint herdr lists names the pane"
 assert_row "$frame_t" '^│ merged +09-12 +ship-old +Rename the widget table · https://github.com/acme/widgets/pull/30 +acme/widgets +main +4d │$' "main row with a PR and a lost pane names the PR"
-assert_row "$frame_t" '^│ reported +09-11 +etl-report +Scout: warehouse index options · data/etl-report/report.md +- +hyperion +5d │$' "secondmate row with a report names it relative to its home"
+assert_row "$frame_t" '^│ reported +09-11 +etl-report +Scout: warehouse index options · data/etl-report/report.md +- +delegate-a +5d │$' "secondmate row with a report names it relative to its home"
 assert_row "$frame_t" '^│ done +09-10 +plain-done +Rotate the API keys +acme/api +main +6d │$' "main row with no PR, report or pane is the bare title"
 assert_row "$frame_t" '^│ reported +09-09 +mobile-fix +Fix the crash on launch · data/mobile-fix/report.md +- +remote-sm \(remote\) +7d │$' "remote home's report-only row still names the report"
-assert_row "$frame_t" '^│ done +09-08 +etl-none +Rotate the warehouse credentials +- +hyperion +8d │$' "secondmate row with nothing is the bare title"
+assert_row "$frame_t" '^│ done +09-08 +etl-none +Rotate the warehouse credentials +- +delegate-a +8d │$' "secondmate row with nothing is the bare title"
 assert_row "$frame_t" '^│ reported +09-06 +old-scout +Scout: legacy import path · data/old-scout/report.md +acme/legacy +main +10d │$' "main row with a report names it relative to the main home"
 assert_widths "$frame_t" 160 "landed targets frame lines are 160 columns"
 # The pane text needs a pane herdr lists: the same fixture with the herdr block's agents emptied
@@ -870,7 +877,7 @@ assert_widths "$frame_t" 160 "landed targets frame lines are 160 columns"
 # `pane <id>` for a lost pane in landedWhat).
 frame_t=$(render "$(variant landed-targets.json landed-nopanes '{"herdr": {"agents": []}}')") || fail "landed targets no panes: render exited non-zero"
 assert_row "$frame_t" '^│ done +09-14 +ship-done +Apply the widget migration +acme/widgets +main +2d │$' "with the pane lost the main pane-only row is the bare title"
-assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table +- +hyperion +3d │$' "with the pane lost the secondmate pane-only row is the bare title"
+assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table +- +delegate-a +3d │$' "with the pane lost the secondmate pane-only row is the bare title"
 assert_not_contains "$frame_t" "pane w" "no Landed row names a pane once every pane is lost"
 
 # render_targets <keys> [flags]: enter on a Landed row of landed-targets.json with the fake opener
@@ -893,9 +900,9 @@ assert_not_contains "$frame_t" "nothing to focus" "the lost pane is not reported
 # Rung 2, a report on this host: the viewer gets the absolute path resolved against the owning home,
 # the opener nothing (falsify: drop reportPath from landedRows, or the report rung from landedTarget).
 frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,enter" --no-herdr) || fail "landed enter secondmate report: render exited non-zero"
-assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "enter on a secondmate Landed row with a report views it against its own home"
+assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "enter on a secondmate Landed row with a report views it against its own home"
 assert_not_opened "a Landed row with a report and no PR calls no opener"
-assert_contains "$frame_t" "viewed /fixture/homes/hyperion/data/etl-report/report.md (viewer-cmd)" "footer names the viewed report"
+assert_contains "$frame_t" "viewed /fixture/homes/delegate-a/data/etl-report/report.md (viewer-cmd)" "footer names the viewed report"
 frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter main report: render exited non-zero"
 assert_viewed "/fixture/firstmate/data/old-scout/report.md" "enter on a main Landed row with a report views it against the main home"
 assert_not_contains "$frame_t" "no PR URL" "a report-only Landed row is no longer an error"
@@ -944,13 +951,13 @@ assert_contains "$frame_t" "etl-none: nothing to open (no PR, report or pane)" "
 # A double-click follows the same rungs, because mouseAction reuses keyAction enter (falsify: give
 # 'activate' a PR-only action of its own). Line 37 is etl-report, the report-only secondmate row.
 frame_t=$(render_mouse landed-targets.json "dblclick:60,37") || fail "landed dblclick report: render exited non-zero"
-assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "double-click on a report-only Landed row views the report"
+assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "double-click on a report-only Landed row views the report"
 assert_not_opened "double-click on a report-only Landed row calls no opener"
-assert_contains "$frame_t" "viewed /fixture/homes/hyperion/data/etl-report/report.md (viewer-cmd)" "double-click: the footer names the viewed report"
+assert_contains "$frame_t" "viewed /fixture/homes/delegate-a/data/etl-report/report.md (viewer-cmd)" "double-click: the footer names the viewed report"
 # The other panes keep their enter (falsify: route every pane through landedTarget, or widen
 # viewProblem / focusProblem beyond Landed): a Findings row views, an In flight worker asks herdr.
 frame_t=$(render_targets "tab,tab,tab,enter" --no-herdr) || fail "landed fixture findings enter: render exited non-zero"
-assert_viewed "/fixture/homes/hyperion/data/etl-report/report.md" "enter on a Findings row still views the report"
+assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "enter on a Findings row still views the report"
 frame_t=$(render_targets "enter" --no-herdr) || fail "landed fixture inflight enter: render exited non-zero"
 assert_contains "$frame_t" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus, refused under --no-herdr"
 assert_not_opened "enter on an In flight worker calls no opener"
@@ -1329,7 +1336,7 @@ frame_h=$(render populated.json --view-state "$vs" --keys "tab,tab,tab,tab,x") |
 assert_contains "$frame_h" "Landed (3, 1 hidden)" "x on the first Landed row: header counts it hidden"
 assert_no_row "$frame_h" '^│ merged +09-15 +etl-index ' "the hidden row is out of view"
 assert_contains "$frame_h" "hidden etl-index · H shows hidden rows, X unhides this pane" "x leaves a notice"
-assert_file_contains "$vs" '"landed:hyperion:etl-index:2026-09-15"' "the key is pane:home:id:completion date, so a re-landed item reappears"
+assert_file_contains "$vs" '"landed:delegate-a:etl-index:2026-09-15"' "the key is pane:home:id:completion date, so a re-landed item reappears"
 assert_file_contains "$vs" '"schema": "fm-board-view-state.v1"' "the file names its schema"
 # Restart: the file is loaded again (falsify: drop loadViewState from driveOnce).
 frame_h=$(render populated.json --view-state "$vs") || fail "hide reload: render exited non-zero"
@@ -1354,7 +1361,7 @@ assert_contains "$frame_h" "Landed (4)" "X: all four Landed rows are back"
 assert_file_contains "$vs" '"hidden": []' "X empties the hidden list in the file"
 # A hidden group takes its children with it (falsify: drop the parent lookup in applyHidden).
 frame_h=$(render populated.json --rows 48 --keys "j,j,j,j,l,x") || fail "hide group: render exited non-zero"
-assert_contains "$frame_h" "In flight (6, 5 hidden)" "hiding the expanded hyperion group hides its four children too"
+assert_contains "$frame_h" "In flight (6, 5 hidden)" "hiding the expanded delegate-a group hides its four children too"
 assert_not_contains "$frame_h" "↳ child-one" "hidden group: children are out of view"
 # A fixture render without --view-state loads and saves nothing (falsify: drop the fixture guard in viewStateFor).
 fake_home_dir="$SCRATCH/home"
@@ -1411,7 +1418,7 @@ assert_count "$frame_p" "┌─" 1 "five panes hidden: one frame"
 assert_contains "$frame_p" "In flight (7)" "five panes hidden: In flight remains"
 assert_lines "$frame_p" 44 "five panes hidden: still 44 lines"
 assert_widths "$frame_p" 160 "five panes hidden: lines are 160 columns"
-assert_row "$frame_p" '^│ decide +1 live +!▸ hyperion ' "five panes hidden: In flight rows render in the freed space"
+assert_row "$frame_p" '^│ decide +1 live +!▸ delegate-a ' "five panes hidden: In flight rows render in the freed space"
 # The last pane goes too: with every pane hidden the grid gives way to the landing page, a centered key
 # list between the title line and the footer (falsify: bring back a shown <= 1 guard in toggle-pane, or
 # drop the landing branch from renderFrame).
@@ -1743,7 +1750,7 @@ frame_rv_np=$(render review-rows.json --no-prs) || fail "review-rows --no-prs: r
 assert_contains "$frame_rv" "Needs you (6)" "review-rows: blocked, decide, hold and three review rows"
 assert_row "$frame_rv" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter · checks passing +acme/api +main +10m │$' "a done task's open PR that GitHub marks BLOCKED with a review required is a review row reading ready, with checks passing and a plain age (falsify: treat BLOCKED as not ready in prReadiness)"
 assert_row "$frame_rv" '^│ review +#22 +ship-paused +acme/api#22 · Rate-limit headers on every list endpoint · checks pending +acme/api +main +25m │$' "a task firstmate paused on the captain counts as parked (falsify: drop paused from PARKED_STATES)"
-assert_row "$frame_rv" '^│ review +#61 +child-ready +acme/etl#61 · ETL: nightly loader · checks passing +acme/etl +hyperion +40m │$' "a secondmate child parked with the PR its ledger's contributions.captain names is a review row labelled with its home, without --all-homes-needs (falsify: gate the ledger loop behind opts.allHomesNeeds, or read active_children alone)"
+assert_row "$frame_rv" '^│ review +#61 +child-ready +acme/etl#61 · ETL: nightly loader · checks passing +acme/etl +delegate-a +40m │$' "a secondmate child parked with the PR its ledger's contributions.captain names is a review row labelled with its home, without --all-homes-needs (falsify: gate the ledger loop behind opts.allHomesNeeds, or read active_children alone)"
 assert_no_row "$frame_rv" '^│ review +#23 ' "a task working again on a conflicting PR has no review row (falsify: drop the conflicting return in reviewRow)"
 assert_no_row "$frame_rv" '^│ review +#62 ' "a secondmate child repairing its PR has no review row"
 assert_no_row "$frame_rv" '^│ review +#24 ' "a PR closed 1h ago, inside the tail, yields no review row (falsify: drop the finished return in reviewRow)"
@@ -1783,8 +1790,8 @@ assert_row "$frame_rv" '^│ repairing PR +working +ship-dirty +merging main int
 assert_row "$frame_rv" '^│ working +working +ship-first +waiting for the Test workflow +acme/widgets +main +1h │$' "a first-pass worker with a PR still reads working"
 assert_row "$frame_rv" '^│ paused +idle +ship-paused +awaiting captain approve-and-label +acme/api +main +25m │$' "a paused task keeps its own state word"
 assert_row "$frame_rv" '^│ awaiting merge +done +ship-ready +PR https://github.com/acme/api/pull/21 checks green +acme/api +main +10m │$' "awaiting merge is kept for the done task with an unmerged PR"
-assert_row "$frame_rv_x" '^│ repairing PR +working +↳ child-repair +resolving the conflict with main +acme/etl +hyperion +2m │$' "the expanded group lists the repairing child as repairing PR"
-assert_row "$frame_rv_x" '^│ repairing PR +1 live +▾ hyperion ' "the group row takes the repairing child's state, ranked with working"
+assert_row "$frame_rv_x" '^│ repairing PR +working +↳ child-repair +resolving the conflict with main +acme/etl +delegate-a +2m │$' "the expanded group lists the repairing child as repairing PR"
+assert_row "$frame_rv_x" '^│ repairing PR +1 live +▾ delegate-a ' "the group row takes the repairing child's state, ranked with working"
 assert_before "$frame_rv" '^│ repairing PR +working +ship-dirty' '^│ blocked +blocked +scout-block' "in flight: repairing PR sorts with working, before blocked (falsify: drop repairing PR from INFLIGHT_ORDER)"
 # Without PR data the rows fall back to the task state: every parked task with a PR lists,
 # finished or not, with the ~ age mark and no checks word; the repairing state still comes from
@@ -1792,7 +1799,7 @@ assert_before "$frame_rv" '^│ repairing PR +working +ship-dirty' '^│ blocked
 assert_contains "$frame_rv_np" "Needs you (8)" "--no-prs: five review rows on the task state alone"
 assert_row "$frame_rv_np" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter +acme/api +main +10m~ │$' "--no-prs: the review row lists with the fallback ~ and no checks word"
 assert_row "$frame_rv_np" '^│ review +#24 +ship-closed +acme/api#24 · Abandoned retry budget spike +acme/api +main +2h~ │$' "--no-prs: a closed PR the board cannot see as closed lists on the task state, marked ~"
-assert_row "$frame_rv_np" '^│ review +#61 +child-ready +acme/etl#61 +acme/etl +hyperion +40m~ │$' "--no-prs: the child row has no title to show and reads the label alone"
+assert_row "$frame_rv_np" '^│ review +#61 +child-ready +acme/etl#61 +acme/etl +delegate-a +40m~ │$' "--no-prs: the child row has no title to show and reads the label alone"
 assert_not_contains "$frame_rv_np" "checks passing" "--no-prs: no checks word on any review row"
 assert_row "$frame_rv_np" '^│ repairing PR +working +ship-dirty ' "--no-prs: repairing PR comes from the status log, not GitHub"
 frame_rv_nc=$(render "$(variant review-rows.json prs-no-carry '{"prs": {"candidate_prs": []}}')") || fail "review-rows fetched without the PRs: render exited non-zero"
@@ -1835,7 +1842,7 @@ assert_row "$frame_mp" '^ Identity +captain  \(from config\) +$' "my-prs: the fi
 
 # ----------------------------------------------------------- Teammates' PRs
 # The pane over tests/fixtures/to-review.json: one row per STATUS word, the identity's own review
-# winning over the PR's decision, the request through a team, the labelled gemini PR, a PR merged
+# winning over the PR's decision, the request through a team, the labelled portal PR, a PR merged
 # outside the window and the identity's own PR both dropped, the seven columns with AUTHOR between ID
 # and TITLE (the login, `-` for a null author, content-sized, in this pane alone) and the sort
 # (falsify: drop toReviewStatus, the author check or the window from toReviewRows, reorder
@@ -1849,7 +1856,7 @@ assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' 
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "to-review: My PRs keeps its six columns and draws no AUTHOR"
 assert_count "$frame_tr" "AUTHOR" 1 "to-review: AUTHOR heads one pane only"
 assert_row "$frame_tr" '^│ pending +DRAFT +api#16 +teammate +Draft: split the geocoder +main +30m │$' "to-review: a draft reads DRAFT, its author's login beside its id"
-assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +gemini-dev +Gemini: index the parcel table +main +1h │$' "to-review: the labelled gemini PR reads IN REVIEW, with its own author"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +portal#120 +portal-dev +Portal: index the parcel table +main +1h │$' "to-review: the labelled portal PR reads IN REVIEW, with its own author"
 assert_row "$frame_tr" '^│ failing +IN REVIEW +api#8 +- +Retry on 429 +develop +2h │$' "to-review: changes requested by someone else still reads IN REVIEW, with the base branch and failing checks, and a null author draws as - (falsify: draw an empty cell for a null author)"
 assert_row "$frame_tr" '^│ passing +IN REVIEW +etl#15 +teammate +ETL: nightly loader for the team +main +3h │$' "to-review: a request through the identity's team is a row like any other"
 assert_row "$frame_tr" '^│ passing +CHANGES REQUESTED +widgets#46 +teammate +Widget: captain asked for changes +main +4h │$' "to-review: the identity's own CHANGES_REQUESTED review reads CHANGES REQUESTED (falsify: read reviewDecision instead of my_review)"
@@ -1858,9 +1865,9 @@ assert_row "$frame_tr" '^│ passing +MERGED +etl#14 +teammate +ETL: merged afte
 assert_not_contains "$frame_tr" "ETL: merged yesterday" "to-review: a PR merged 13h ago is outside the window"
 assert_not_contains "$frame_tr" "Retry budget: ask the API team" "to-review: the identity's own PR never lists, even when its team was asked"
 assert_row "$frame_tr" '^│ CHECKS +STATUS {13}ID ' "to-review: STATUS widens to CHANGES REQUESTED, its widest value, plus the gutter (falsify: cap extra below 17 in columnSpec)"
-assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {6}TITLE ' "to-review: AUTHOR is content-sized, as wide as gemini-dev, its widest login, plus the gutter (falsify: give author a fixed width, or measure it over the board)"
-assert_before "$frame_tr" '^│ pending +DRAFT ' '^│ passing +IN REVIEW +gemini#120' "to-review: DRAFT sorts first"
-assert_before "$frame_tr" '^│ passing +IN REVIEW +gemini#120' '^│ failing +IN REVIEW +api#8' "to-review: inside IN REVIEW the 1h-old PR sorts before the 2h-old one"
+assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {6}TITLE ' "to-review: AUTHOR is content-sized, as wide as portal-dev, its widest login, plus the gutter (falsify: give author a fixed width, or measure it over the board)"
+assert_before "$frame_tr" '^│ pending +DRAFT ' '^│ passing +IN REVIEW +portal#120' "to-review: DRAFT sorts first"
+assert_before "$frame_tr" '^│ passing +IN REVIEW +portal#120' '^│ failing +IN REVIEW +api#8' "to-review: inside IN REVIEW the 1h-old PR sorts before the 2h-old one"
 assert_before "$frame_tr" '^│ failing +IN REVIEW +api#8' '^│ passing +IN REVIEW +etl#15' "to-review: inside IN REVIEW the 2h-old PR sorts before the 3h-old one"
 assert_before "$frame_tr" '^│ passing +IN REVIEW +etl#15' '^│ passing +CHANGES REQUESTED ' "to-review: IN REVIEW sorts before CHANGES REQUESTED (the rows still waiting first)"
 assert_before "$frame_tr" '^│ passing +CHANGES REQUESTED ' '^│ passing +APPROVED ' "to-review: CHANGES REQUESTED sorts before APPROVED"
@@ -1872,13 +1879,13 @@ assert_lines "$frame_tr" 44 "to-review frame is 44 lines"
 # the breakpoint, or add it to the shared column set).
 frame_tr=$(render to-review.json --cols 90 --rows 30) || fail "to-review 90: render exited non-zero"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +AGE │$' "90 columns: Teammates' PRs keeps AUTHOR and AGE and drops BASE"
-assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +gemini-dev +Gemini: index the parcel tab… +1h │$' "90 columns: the row keeps its author and loses its base branch"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +portal#120 +portal-dev +Portal: index the parcel tab… +1h │$' "90 columns: the row keeps its author and loses its base branch"
 assert_widths "$frame_tr" 90 "90-column to-review frame lines are 90 columns"
 frame_tr=$(render to-review.json --cols 70 --rows 30) || fail "to-review 70: render exited non-zero"
 assert_row "$frame_tr" '^ STATE +ID +WHAT +HOME *$' "70 columns: the shared list header has no AUTHOR"
 assert_not_contains "$frame_tr" "AUTHOR" "70 columns: no AUTHOR anywhere in the list"
-assert_row "$frame_tr" '^ passing +gemini#120 +Gemini: index the parcel table +main *$' "70 columns: a Teammates' PRs row in the shared list draws without its author"
-assert_not_contains "$frame_tr" "gemini-dev" "70 columns: the login is not drawn"
+assert_row "$frame_tr" '^ passing +portal#120 +Portal: index the parcel table +main *$' "70 columns: a Teammates' PRs row in the shared list draws without its author"
+assert_not_contains "$frame_tr" "portal-dev" "70 columns: the login is not drawn"
 assert_widths "$frame_tr" 70 "70-column to-review frame lines are 70 columns"
 # Keys on Teammates' PRs: 3 hides and shows it, tab reaches it right after My PRs, enter and a
 # double-click open its PR through the fake opener, x hides a row under the toreview id (falsify: drop
@@ -1902,7 +1909,7 @@ assert_file_contains "$vs_tr" '"toreview:main:api#16"' "the hidden Teammates' PR
 # line 25, its column header 26 and its rows 27-33; a double-click on its second row opens the PR as
 # enter does (falsify: drop the row zones for the fourth pane).
 frame_m=$(render_mouse to-review.json "dblclick:30,28") || fail "to-review dblclick: render exited non-zero"
-assert_opened "https://github.com/MatthewsREIS/gemini/pull/120" "a double-click on Teammates' PRs' second row opens its PR"
+assert_opened "https://github.com/example-corp/portal/pull/120" "a double-click on Teammates' PRs' second row opens its PR"
 # The AUTHOR column resizes like any fixed column and its width persists under the author key: on the
 # header line 26 the columns start at x=2 CHECKS (7), 11 STATUS (17), 30 ID (10), 42 AUTHOR (10) and
 # 54 TITLE, so the AUTHOR/TITLE gutter is cells 52-53 (falsify: leave author out of COLUMN_KEYS, so
@@ -1910,7 +1917,7 @@ assert_opened "https://github.com/MatthewsREIS/gemini/pull/120" "a double-click 
 rm -f "${vs_tr:?}"
 frame_tr=$(render to-review.json --view-state "$vs_tr" --mouse "drag:52,26->57") || fail "to-review drag author: render exited non-zero"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR {11}TITLE ' "dragging the AUTHOR/TITLE boundary five cells right makes AUTHOR 15 wide"
-assert_row "$frame_tr" '^│ passing +IN REVIEW +gemini#120 +gemini-dev {7}Gemini: index the parcel table ' "the rows follow the AUTHOR width"
+assert_row "$frame_tr" '^│ passing +IN REVIEW +portal#120 +portal-dev {7}Portal: index the parcel table ' "the rows follow the AUTHOR width"
 assert_contains "$frame_tr" "AUTHOR 15 wide" "the footer names the column"
 assert_file_contains "$vs_tr" '"toreview": {' "the width is saved under the pane id"
 assert_file_contains "$vs_tr" '"author": 15' "and the author column key"
@@ -1934,7 +1941,7 @@ assert_count "$frame_tr" "identity unknown: see Settings (.)" 2 "identity unknow
 assert_contains "$frame_tr" "┌─ [4] Teammates' PRs (1) ─" "identity unknown: Teammates' PRs counts the one row"
 assert_row "$frame_tr" '^│ - +- +- +- +identity unknown: see Settings \(\.\) +- +- │$' "identity unknown: the Teammates' PRs row reads across its seven columns, - under AUTHOR"
 assert_contains "$frame_tr" "┌─ [3] My PRs (1) ─" "identity unknown: My PRs counts the one row"
-assert_not_contains "$frame_tr" "gemini#120" "identity unknown: the fixture's rows are not drawn"
+assert_not_contains "$frame_tr" "portal#120" "identity unknown: the fixture's rows are not drawn"
 frame_tr=$(render "$(variant to-review.json no-identity "{\"prs\": {\"identity\": $UNKNOWN_IDENTITY}}")" --install-root "$SCRATCH/nowhere" --keys "." --cols 200) || fail "to-review no identity settings: render exited non-zero"
 assert_contains "$frame_tr" " Identity       identity unknown: set identity.github_login in the config file, or run gh auth login" "identity unknown: the Settings page warns, naming the config file in general when a fixture render read none"
 assert_contains "$frame_tr" "tried: fixture: no login" "identity unknown: the Settings page lists the fixture's reason"
@@ -1957,7 +1964,7 @@ assert_not_contains "$frame_tr" "identity unknown" "identity pending: the identi
 assert_not_contains "$frame_tr" "loading GitHub" "identity pending: the fetch spinners wait for the login"
 assert_contains "$frame_tr" "┌─ [3] My PRs (0) ─" "identity pending: My PRs counts zero rows"
 assert_contains "$frame_tr" "┌─ [4] Teammates' PRs (0) ─" "identity pending: Teammates' PRs counts zero rows"
-assert_not_contains "$frame_tr" "gemini#120" "identity pending: the fixture's rows are not drawn for nobody"
+assert_not_contains "$frame_tr" "portal#120" "identity pending: the fixture's rows are not drawn for nobody"
 # Between the first draw and the first refresh (no refresh block) a pending identity reads the empty
 # text like the other panes, never the row (falsify: fire identityRow on !identityKnown).
 frame_tr=$(render "$(variant to-review.json identity-pending-idle '{"prs": {"identity": null}}')") || fail "to-review identity pending idle: render exited non-zero"
@@ -1980,6 +1987,20 @@ assert_row "$frame_tr" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs while th
 # unavailable branch from prPaneEmpty).
 frame_tr=$(render "$(variant to-review.json no-gh '{"prs": {"candidate_prs": [], "toreview": {"unavailable": "gh not on PATH"}}}')") || fail "to-review no gh: render exited non-zero"
 assert_row "$frame_tr" "^│ gh not on PATH: Teammates' PRs needs the GitHub CLI +│\$" "without gh Teammates' PRs names the CLI it needs"
+# The config's own reason (lib/model.mjs SCRIPT_CONFIGURED, the second `unavailable` reason): the pane
+# names the board's own fetch, not the CLI (falsify: one text for every reason in prPaneEmpty).
+frame_tr=$(render "$(variant to-review.json script-source '{"prs": {"candidate_prs": [], "toreview": {"unavailable": "config prs.source = firstmate"}}}')") || fail "to-review script source: render exited non-zero"
+assert_row "$frame_tr" "^│ config prs.source = firstmate: Teammates' PRs needs the board's own fetch +│\$" "with prs.source firstmate Teammates' PRs names the board's own fetch as what it needs"
+# The fixture's prs.source reaches the Settings page's PR source line in each of its shapes; without
+# the block a fixture reads the board default whatever PATH holds (the settings section below), so a
+# frame never depends on the host's gh (falsify: drop prSourceFromFixture, or ask whichOnPath for a
+# fixture render).
+frame_tr=$(render "$(variant to-review.json source-firstmate-config '{"prs": {"source": {"kind": "firstmate", "reason": "config"}}}')" --install-root "$SCRATCH/nowhere" --keys ".") || fail "to-review source firstmate settings: render exited non-zero"
+assert_row "$frame_tr" '^ PR source +firstmate: fm-bearings-snapshot.sh \(config prs.source\) +$' "Settings: a fixture's prs.source firstmate by config reads on the PR source line"
+frame_tr=$(render "$(variant to-review.json source-firstmate-nogh '{"prs": {"source": {"kind": "firstmate", "reason": "gh-missing"}}}')" --install-root "$SCRATCH/nowhere" --keys ".") || fail "to-review source gh-missing settings: render exited non-zero"
+assert_row "$frame_tr" '^ PR source +firstmate: fm-bearings-snapshot.sh \(gh not on PATH; the script needs gh too, so both sources fail the same way\) +$' "Settings: the gh-missing reason says both sources fail alike without gh (falsify: reuse the config wording for gh-missing)"
+frame_tr=$(render "$(variant to-review.json source-board-config '{"prs": {"source": {"kind": "board", "reason": "config"}}}')" --install-root "$SCRATCH/nowhere" --keys ".") || fail "to-review source board config settings: render exited non-zero"
+assert_row "$frame_tr" "^ PR source +board: the board's own GitHub fetch \\(config\\) +\$" "Settings: a board source the file set reads (config)"
 # The help names the sixth pane and its key (falsify: change the 1 - 6 lines in HELP_LINES).
 frame_tr=$(render to-review.json --keys "?") || fail "to-review help: render exited non-zero"
 assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] In flight" "help overlay documents 1-6"
@@ -2012,7 +2033,7 @@ unit_out=$(node --input-type=module -e "
   out.push(['pending', checksState([{ status: 'IN_PROGRESS' }, { status: 'COMPLETED', conclusion: 'SUCCESS' }])]);
   out.push(['failing', checksState([{ status: 'COMPLETED', conclusion: 'FAILURE' }, { status: 'IN_PROGRESS' }])]);
   out.push(['failing-state', checksState([{ state: 'ERROR' }])]);
-  // Runs of one check: only the newest counts. MatthewsREIS/gemini#6148's real rollup (six runs of
+  // Runs of one check: only the newest counts. example-corp/portal#6148's real rollup (six runs of
   // one check, the cancelled one listed first and superseded 23 seconds later), a check whose only
   // run was cancelled, a cancelled re-run after a success, a re-run still in progress, a check in
   // progress beside a completed check of another name, the same job name in two workflows, a
@@ -2046,7 +2067,7 @@ unit_out=$(node --input-type=module -e "
   out.push(['project-merged', [m.state, m.merged_at, m.closed_at].join(' ')]);
   // A GraphQL node: the repository from nameWithOwner, the checks from the head commit's contexts,
   // the author, the labels and the identity's review.
-  const node = { number: 120, title: 'Gemini: index', url: 'https://github.com/MatthewsREIS/gemini/pull/120', headRefName: 'parcel-index', baseRefName: 'main', reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', isDraft: false, state: 'OPEN', createdAt: '2026-09-16T09:00:00Z', mergedAt: null, closedAt: null, author: { login: 'teammate' }, repository: { nameWithOwner: 'MatthewsREIS/gemini' }, labels: { nodes: [{ name: 'ready-to-merge' }, { name: 'backend' }] }, latestReviews: { nodes: [{ state: 'COMMENTED', author: { login: 'someone' } }, { state: 'APPROVED', author: { login: 'captain' } }] }, commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }, { __typename: 'StatusContext', state: 'SUCCESS' }] } } } }] } };
+  const node = { number: 120, title: 'Portal: index', url: 'https://github.com/example-corp/portal/pull/120', headRefName: 'parcel-index', baseRefName: 'main', reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', isDraft: false, state: 'OPEN', createdAt: '2026-09-16T09:00:00Z', mergedAt: null, closedAt: null, author: { login: 'teammate' }, repository: { nameWithOwner: 'example-corp/portal' }, labels: { nodes: [{ name: 'ready-to-merge' }, { name: 'backend' }] }, latestReviews: { nodes: [{ state: 'COMMENTED', author: { login: 'someone' } }, { state: 'APPROVED', author: { login: 'captain' } }] }, commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }, { __typename: 'StatusContext', state: 'SUCCESS' }] } } } }] } };
   const n = projectPr(node, null);
   out.push(['project-node', [n.repo, n.num, n.task, n.author, n.labels.join('+'), n.checks, n.title].join(' ')]);
   out.push(['project-node-nochecks', projectPr({ ...node, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }, null).checks]);
@@ -2075,12 +2096,12 @@ unit_out=$(node --input-type=module -e "
   out.push(['repos', repos.join(' ')]);
   const many = { tasks: Array.from({ length: 12 }, (_, i) => ({ kind: 'ship', pr: { url: 'https://github.com/acme/r' + i + '/pull/1' } })) };
   out.push(['cap', (await candidateRepos(many, { timeoutMs: 10000 })).join(' ')]);
-  const config = { review: { default_labels: [], repos: { 'MatthewsREIS/gemini': { labels: ['ready-to-merge'] }, 'acme/etl': { labels: [] } } } };
+  const config = { review: { default_labels: [], repos: { 'example-corp/portal': { labels: ['ready-to-merge'] }, 'acme/etl': { labels: [] } } } };
   out.push(['scope', reviewScope(repos, config).join(' ')]);
   out.push(['scope-case', reviewScope(['Acme/Widgets', 'acme/widgets'], { review: { repos: { 'ACME/widgets': {} } } }).join(' ')]);
-  out.push(['in-scope', [inScope(['MatthewsREIS/gemini'], 'matthewsreis/gemini'), inScope(['acme/api'], 'acme/etl')].join(' ')]);
+  out.push(['in-scope', [inScope(['example-corp/portal'], 'Example-Corp/Portal'), inScope(['acme/api'], 'acme/etl')].join(' ')]);
   out.push(['since', closedSince(now)]);
-  const s = searchQueries('captain', { now, scope: ['acme/widgets', 'MatthewsREIS/gemini'] });
+  const s = searchQueries('captain', { now, scope: ['acme/widgets', 'example-corp/portal'] });
   out.push(['q-mine-open', s.mine.open]);
   out.push(['q-mine-tail', s.mine.tail]);
   out.push(['q-review-open', s.toreview.open]);
@@ -2101,7 +2122,7 @@ for expected in "none=none" "none-null=none" "passing=passing" "passing-state=pa
   "project-extra=null 0 false null mine" \
   "project-defaults=- none UNKNOWN none null null null false null null" \
   "project-merged=MERGED 2026-09-16T11:30:00Z 2026-09-16T11:30:00Z" \
-  "project-node=MatthewsREIS/gemini 120 - teammate ready-to-merge+backend failing Gemini: index" \
+  "project-node=example-corp/portal 120 - teammate ready-to-merge+backend failing Portal: index" \
   "project-node-nochecks=none" \
   "my-review=APPROVED" "my-review-comment=null" "my-review-none=null" "my-review-changes=CHANGES_REQUESTED" \
   "keep-open=true" "keep-no-state=true" "keep-merged-inside=true" "keep-merged-outside=false" "keep-merged-exact=false" \
@@ -2109,15 +2130,51 @@ for expected in "none=none" "none-null=none" "passing=passing" "passing-state=pa
   "fields=complete" \
   "repos=acme/widgets acme/etl acme/wt" \
   "cap=acme/r0 acme/r1 acme/r2 acme/r3 acme/r4 acme/r5 acme/r6 acme/r7 acme/r8 acme/r9" \
-  "scope=acme/widgets acme/etl acme/wt MatthewsREIS/gemini" "scope-case=Acme/Widgets" "in-scope=true false" \
+  "scope=acme/widgets acme/etl acme/wt example-corp/portal" "scope-case=Acme/Widgets" "in-scope=true false" \
   "since=2026-09-16T00:00:00+00:00" \
   "q-mine-open=is:pr is:open author:captain sort:updated-desc" \
   "q-mine-tail=is:pr author:captain closed:>=2026-09-16T00:00:00+00:00 sort:updated-desc" \
-  "q-review-open=is:pr is:open review-requested:captain -author:captain repo:acme/widgets repo:MatthewsREIS/gemini sort:updated-desc" \
-  "q-review-tail=is:pr review-requested:captain -author:captain closed:>=2026-09-16T00:00:00+00:00 repo:acme/widgets repo:MatthewsREIS/gemini sort:updated-desc" \
+  "q-review-open=is:pr is:open review-requested:captain -author:captain repo:acme/widgets repo:example-corp/portal sort:updated-desc" \
+  "q-review-tail=is:pr review-requested:captain -author:captain closed:>=2026-09-16T00:00:00+00:00 repo:acme/widgets repo:example-corp/portal sort:updated-desc" \
   "q-review-wide=no repo terms" "q-review-wide-len=true" \
   "lookup=true true true"; do
   if printf '%s\n' "$unit_out" | grep -Fxq -- "$expected"; then pass; else fail "sources: expected line '$expected' in: $unit_out"; fi
+done
+
+# fm-bearings-snapshot.sh's rows through the board's own projection (lib/sources.mjs projectScriptPr,
+# what runBearingsPrs maps every candidate_prs row through): a row carrying only the script's checks
+# word keeps it, since the board has nothing else to judge; a row carrying the contexts themselves
+# (gh's statusCheckRollup list, or contexts bare or as { nodes }) is judged by checksState's
+# newest-run rule and the word is ignored, so a cancelled run a re-run superseded reads passing there
+# and a cancelled run that is the newest reads failing; an unknown or missing word reads none; the
+# script's fields come through with title, base and creation time null, so the row falls back to the
+# recorded title and the status-log age as the fallback rows always have; and the pane is always mine
+# (falsify: spread the row as it is in runBearingsPrs, read the word when a list is there, or judge
+# every run of the list).
+script_out=$(node --input-type=module -e "
+  import { projectScriptPr } from '$ROOT/bin/firstmate-tui/lib/sources.mjs';
+  const out = [];
+  const run = (name, wf, conclusion, s, c) => ({ __typename: 'CheckRun', name, workflowName: wf, status: 'COMPLETED', conclusion, startedAt: s, completedAt: c });
+  const cancelled = run('hive', 'Schema', 'CANCELLED', '2026-09-18T19:38:34Z', '2026-09-18T19:38:39Z');
+  const superseded = [cancelled, run('merge check', 'CI', 'SUCCESS', '2026-09-18T19:32:55Z', '2026-09-18T19:33:00Z'), run('hive', 'Schema', 'SUCCESS', '2026-09-18T19:42:10Z', '2026-09-18T19:42:16Z')];
+  const word = projectScriptPr({ num: '41', repo: 'acme/widgets', task: 'ship-alpha', url: 'https://github.com/acme/widgets/pull/41', review: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', checks: 'failing' });
+  out.push(['word', [word.num, word.repo, word.task, word.url, word.review, word.mergeable, word.checks, word.title, word.base, word.created_at, word.state, word.pane].map(String).join(' ')]);
+  out.push(['list', projectScriptPr({ num: '6148', repo: 'example-corp/portal', task: '-', url: 'https://github.com/example-corp/portal/pull/6148', review: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', checks: 'failing', statusCheckRollup: superseded }).checks]);
+  out.push(['list-cancelled-newest', projectScriptPr({ num: '1', repo: 'a/b', url: 'https://github.com/a/b/pull/1', checks: 'passing', statusCheckRollup: [superseded[2], { ...cancelled, startedAt: '2026-09-18T19:50:00Z', completedAt: '2026-09-18T19:50:05Z' }] }).checks]);
+  out.push(['contexts-bare', projectScriptPr({ num: '2', repo: 'a/b', url: 'https://github.com/a/b/pull/2', checks: 'passing', contexts: [run('x', 'W', 'FAILURE', '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z')] }).checks]);
+  out.push(['contexts-nodes', projectScriptPr({ num: '3', repo: 'a/b', url: 'https://github.com/a/b/pull/3', checks: 'failing', contexts: { nodes: [] } }).checks]);
+  out.push(['unknown-word', projectScriptPr({ num: '4', repo: 'a/b', url: 'https://github.com/a/b/pull/4', checks: 'Green' }).checks]);
+  out.push(['no-word', projectScriptPr({ num: '5', repo: 'a/b', url: 'https://github.com/a/b/pull/5' }).checks]);
+  const empty = projectScriptPr({});
+  out.push(['empty', [empty.num, empty.repo, empty.task, empty.url, empty.review, empty.mergeable, empty.checks].join(' ')]);
+  out.push(['repo-from-url', projectScriptPr({ num: '6', url: 'https://github.com/acme/api/pull/6', checks: 'pending' }).repo]);
+  out.push(['pane', projectScriptPr({ num: '7', repo: 'a/b', url: 'https://github.com/a/b/pull/7', checks: 'pending', pane: 'toreview' }).pane]);
+  process.stdout.write(out.map(([k, v]) => k + '=' + v).join('\n'));
+") || fail "script projection checks: node exited non-zero: $script_out"
+for expected in "word=41 acme/widgets ship-alpha https://github.com/acme/widgets/pull/41 REVIEW_REQUIRED MERGEABLE failing null null null null mine" \
+  "list=passing" "list-cancelled-newest=failing" "contexts-bare=failing" "contexts-nodes=none" "unknown-word=none" "no-word=none" \
+  "empty=- - - - none UNKNOWN none" "repo-from-url=acme/api" "pane=mine"; do
+  if printf '%s\n' "$script_out" | grep -Fxq -- "$expected"; then pass; else fail "script projection: expected line '$expected' in: $script_out"; fi
 done
 
 # The config file's pure pieces (lib/config.mjs): the example is byte for byte docs/config.example.json,
@@ -2125,14 +2182,39 @@ done
 # label rule reads a repository's own entry before the default (an empty own list is unfiltered),
 # matching the repository name without case as GitHub does (falsify: change EXAMPLE_CONFIG, accept a
 # non-list default_labels, apply default_labels to a repository with its own entry, or compare the
-# names with case).
+# names with case). prs.source takes "board" or "firstmate" and nothing else: an absent prs, an empty
+# one and the example all read board, the example (which spells it out) as configured, the others
+# not; a bad value or a prs that is not an object is a malformed field naming the key and the allowed
+# values, and gives the defaults as a whole. prSourceInEffect is the one rule for which source a
+# fetch uses: firstmate in the file wins whatever PATH holds, board is the board's own fetch with gh
+# and the script without, the reason then naming gh (falsify: accept a third value, read a
+# configured flag for an absent key, or let a missing gh override a configured firstmate's reason).
 config_out=$(node --input-type=module -e "
-  import { exampleConfigText, parseConfig, labelsFor, passesLabelRule, configuredRepos, resolveConfigPath, defaultConfigPath } from '$ROOT/bin/firstmate-tui/lib/config.mjs';
+  import { exampleConfigText, parseConfig, labelsFor, passesLabelRule, configuredRepos, resolveConfigPath, defaultConfigPath, defaultConfig, prSource, prSourceInEffect } from '$ROOT/bin/firstmate-tui/lib/config.mjs';
   import { readFileSync } from 'node:fs';
   const out = [];
   out.push(['example', exampleConfigText() === readFileSync('$ROOT/docs/config.example.json', 'utf8')]);
   const ex = parseConfig(exampleConfigText());
-  out.push(['example-parse', [String(ex.error), String(ex.config.identity.github_login), ex.config.review.default_labels.length, configuredRepos(ex.config).join(','), labelsFor(ex.config, 'MatthewsREIS/gemini').join(',')].join(' ')]);
+  out.push(['example-parse', [String(ex.error), String(ex.config.identity.github_login), ex.config.review.default_labels.length, configuredRepos(ex.config).join(','), labelsFor(ex.config, 'example-corp/portal').join(',')].join(' ')]);
+  const prs = (text) => { const p = parseConfig(text); return [String(p.error), p.config.prs.source, p.config.prs.configured, prSource(p.config)].join(' '); };
+  out.push(['prs-example', prs(exampleConfigText())]);
+  out.push(['prs-absent', prs('{\"schema\":\"firstmate-tui-config.v1\"}')]);
+  out.push(['prs-empty', prs('{\"prs\":{}}')]);
+  out.push(['prs-board', prs('{\"prs\":{\"source\":\"board\"}}')]);
+  out.push(['prs-firstmate', prs('{\"prs\":{\"source\":\"firstmate\"}}')]);
+  out.push(['prs-bad', prs('{\"identity\":{\"github_login\":\"kept\"},\"prs\":{\"source\":\"github\"}}')]);
+  out.push(['prs-bad-login', String(parseConfig('{\"identity\":{\"github_login\":\"kept\"},\"prs\":{\"source\":\"github\"}}').config.identity.github_login)]);
+  out.push(['prs-null', prs('{\"prs\":{\"source\":null}}')]);
+  out.push(['prs-not-object', prs('{\"prs\":\"firstmate\"}')]);
+  out.push(['prs-default', [defaultConfig().prs.source, defaultConfig().prs.configured, prSource(null)].join(' ')]);
+  const effect = (text, gh) => { const e = prSourceInEffect(parseConfig(text).config, gh); return e.kind + ' ' + e.reason; };
+  out.push(['effect-absent-gh', effect('{}', true)]);
+  out.push(['effect-absent-nogh', effect('{}', false)]);
+  out.push(['effect-board-gh', effect('{\"prs\":{\"source\":\"board\"}}', true)]);
+  out.push(['effect-board-nogh', effect('{\"prs\":{\"source\":\"board\"}}', false)]);
+  out.push(['effect-firstmate-gh', effect('{\"prs\":{\"source\":\"firstmate\"}}', true)]);
+  out.push(['effect-firstmate-nogh', effect('{\"prs\":{\"source\":\"firstmate\"}}', false)]);
+  out.push(['effect-bad-gh', effect('{\"prs\":{\"source\":\"github\"}}', true)]);
   // Node's JSON.parse message differs between versions (20 stops at the position, 26 adds the line
   // and column), so only the board's own prefix is pinned.
   out.push(['bad-json', String(parseConfig('{').error).startsWith('bad JSON (') ? 'bad JSON (...)' : String(parseConfig('{').error)]);
@@ -2140,7 +2222,7 @@ config_out=$(node --input-type=module -e "
   out.push(['schema', parseConfig('{\"schema\":\"other.v9\"}').error]);
   out.push(['login-type', parseConfig('{\"identity\":{\"github_login\":7}}').error]);
   out.push(['labels-type', parseConfig('{\"review\":{\"default_labels\":\"ready\"}}').error]);
-  out.push(['repo-name', parseConfig('{\"review\":{\"repos\":{\"gemini\":{}}}}').error]);
+  out.push(['repo-name', parseConfig('{\"review\":{\"repos\":{\"portal\":{}}}}').error]);
   const c = parseConfig('{\"schema\":\"firstmate-tui-config.v1\",\"identity\":{\"github_login\":\" zachsibert \"},\"review\":{\"default_labels\":[\"ready\",\"\"],\"repos\":{\"a/b\":{\"labels\":[\"x\"]},\"c/d\":{},\"e/f\":{\"labels\":[]}}},\"extra\":1}').config;
   out.push(['parsed', [c.identity.github_login, c.review.default_labels.join(','), configuredRepos(c).join(',')].join(' ')]);
   out.push(['labels-own', labelsFor(c, 'a/b').join(',')]);
@@ -2158,10 +2240,18 @@ config_out=$(node --input-type=module -e "
   process.stdout.write(out.map(([k, v]) => k + '=' + v).join('\n'));
 ") || fail "config unit checks: node exited non-zero: $config_out"
 for expected in "example=true" \
-  "example-parse=null null 0 MatthewsREIS/gemini ready-to-merge" \
+  "example-parse=null null 0 example-corp/portal ready-to-merge" \
+  "prs-example=null board true board" "prs-absent=null board false board" "prs-empty=null board false board" \
+  "prs-board=null board true board" "prs-firstmate=null firstmate true firstmate" \
+  'prs-bad=prs.source is not "board" or "firstmate" (got "github") board false board' "prs-bad-login=null" \
+  'prs-null=prs.source is not "board" or "firstmate" (got null) board false board' \
+  "prs-not-object=prs is not an object board false board" "prs-default=board false board" \
+  "effect-absent-gh=board default" "effect-absent-nogh=firstmate gh-missing" \
+  "effect-board-gh=board config" "effect-board-nogh=firstmate gh-missing" \
+  "effect-firstmate-gh=firstmate config" "effect-firstmate-nogh=firstmate config" "effect-bad-gh=board default" \
   "bad-json=bad JSON (...)" \
   "not-object=not an object" "schema=unexpected schema other.v9" "login-type=identity.github_login is not a string" \
-  "labels-type=review.default_labels is not a list" 'repo-name=review.repos: "gemini" is not owner/name' \
+  "labels-type=review.default_labels is not a list" 'repo-name=review.repos: "portal" is not owner/name' \
   "parsed=zachsibert ready a/b,c/d,e/f" "labels-own=x" "labels-own-empty=0 0" "labels-default=ready" "labels-case=x" \
   "rule=true false true true false" \
   "path-xdg=/xdg/fm-board/config.json" "path-home=/home/cap/.config/fm-board/config.json" "path-none=null" \
@@ -2206,15 +2296,15 @@ done
 # searches did not return (ship-alpha's #41, ship-gamma's #7, then done ship-old's #30); r adds a
 # second set of searches and lookups and no second identity call. The Teammates' PRs searches carry
 # the scope as repo: qualifiers: the three candidate repositories of the stand-in snapshot and
-# MatthewsREIS/gemini from the config file, which no fleet task touches. The stand-in's
+# example-corp/portal from the config file, which no fleet task touches. The stand-in's
 # fm-bearings-snapshot.sh must not run at all, and no `pr list` may be issued, since the fake fails
 # on it (falsify: keep runBearingsPrs as the default source, drop a search from runGhPrs, drop the
 # configured repositories from reviewScope, resolve the identity on every tick, or drop fetchPrs
 # from refreshLive).
 q_mine_open='gh api graphql q=is:pr is:open author:captain sort:updated-desc'
 q_mine_tail='gh api graphql q=is:pr author:captain closed:>=<since> sort:updated-desc'
-q_review_open='gh api graphql q=is:pr is:open review-requested:captain -author:captain repo:acme/widgets repo:acme/api repo:acme/etl repo:MatthewsREIS/gemini sort:updated-desc'
-q_review_tail='gh api graphql q=is:pr review-requested:captain -author:captain closed:>=<since> repo:acme/widgets repo:acme/api repo:acme/etl repo:MatthewsREIS/gemini sort:updated-desc'
+q_review_open='gh api graphql q=is:pr is:open review-requested:captain -author:captain repo:acme/widgets repo:acme/api repo:acme/etl repo:example-corp/portal sort:updated-desc'
+q_review_tail='gh api graphql q=is:pr review-requested:captain -author:captain closed:>=<since> repo:acme/widgets repo:acme/api repo:acme/etl repo:example-corp/portal sort:updated-desc'
 q_lookup='gh api graphql lookup=acme/widgets#41,acme/api#7,acme/widgets#30'
 expected_live="snapshot
 gh api user --jq .login
@@ -2238,9 +2328,9 @@ if [ -f "$SCRATCH/xdg/fm-board/config.json" ]; then pass; else fail "the first l
 # bot-authored PR recorded on ship-alpha (through the lookup), ship-gamma's recorded PR the lookup
 # answered null (unlisted, and with no status file on this host no age to fall back to), the PR
 # merged at run time inside the window; the PR closed in 2020 is dropped by the fetch; and the
-# stand-in for MatthewsREIS/gemini#6148, whose head commit carries six runs of one check with one
+# stand-in for example-corp/portal#6148, whose head commit carries six runs of one check with one
 # cancelled and re-run, a BLOCKED merge state and a review required: CHECKS passing and STATUS IN
-# REVIEW, the case Zach saw read failing. Teammates' PRs: the labelled gemini PR and not the
+# REVIEW, the case Zach saw read failing. Teammates' PRs: the labelled portal PR and not the
 # unlabelled one, the acme/api PR with no label rule (checks failing), the request through the
 # identity's team (the same six-run rollup and BLOCKED state), the PR the identity approved (STATUS
 # APPROVED), the PR merged at run time after that approval, and never the identity's own PR (falsify:
@@ -2249,8 +2339,8 @@ if [ -f "$SCRATCH/xdg/fm-board/config.json" ]; then pass; else fail "the first l
 assert_contains "$frame_r" "My PRs (6)" "live: My PRs counts its six rows"
 assert_row "$frame_r" '^│ passing +IN REVIEW +dotfiles#5 +Tidy the zsh prompt +main +[0-9]+d │$' "live: the identity's own PR outside the candidate repositories is in My PRs (the author search, not the repositories, is the scope)"
 assert_row "$frame_r" '^│ pending +IN REVIEW +api#12 +Retry budget: ask the API team +main +[0-9]+d │$' "live: the identity's own PR that asked its team is in My PRs"
-assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#6148 +Hide the Primary Sub Type row behind a feature flag +main +[0-9]+d │$' "live: PR 6148's shape reads CHECKS passing and STATUS IN REVIEW: the cancelled run a re-run superseded does not count, and BLOCKED with a review required is a review to give, not a failure (falsify: judge every run in checksState, or read BLOCKED into prStatus)"
-assert_not_contains "$frame_r" "failing   IN REVIEW  gemini#6148" "live: the 6148 stand-in never reads failing"
+assert_row "$frame_r" '^│ passing +IN REVIEW +portal#6148 +Hide the Primary Sub Type row behind a feature flag +main +[0-9]+d │$' "live: PR 6148's shape reads CHECKS passing and STATUS IN REVIEW: the cancelled run a re-run superseded does not count, and BLOCKED with a review required is a review to give, not a failure (falsify: judge every run in checksState, or read BLOCKED into prStatus)"
+assert_not_contains "$frame_r" "failing   IN REVIEW  portal#6148" "live: the 6148 stand-in never reads failing"
 assert_row "$frame_r" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +[0-9]+d │$' "live: the bot-authored PR recorded on ship-alpha is in My PRs through the lookup, under the task id"
 assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "live: a recorded PR the lookup answered null stays unlisted"
 assert_row "$frame_r" '^│ passing +MERGED +api#9 +Bump the retry budget +main +[0-9]+d │$' "live: the identity's PR merged just now is listed as MERGED"
@@ -2258,8 +2348,8 @@ assert_no_row "$frame_r" 'api#10|Old spike' "live: a PR closed in 2020 is outsid
 assert_no_row "$frame_r" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]*(Rename the widget table|widgets#30)' "live: ship-old's PR merged in 2020 is dropped by the window although the lookup returned it (its Landed and In flight rows stay)"
 assert_before "$frame_r" '^│ pending +IN REVIEW +api#12' '^│ passing +MERGED +api#9' "live: MERGED sorts after the open PRs"
 assert_contains "$frame_r" "Teammates' PRs (5)" "live: Teammates' PRs counts its five rows"
-assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#120 +teammate +Gemini: index the parcel table +main +[0-9]+d │$' "live: the gemini PR with the ready-to-merge label is in Teammates' PRs (a configured repository searched with no fleet work in it), its author from the GraphQL node under AUTHOR"
-assert_no_row "$frame_r" 'gemini#121|still cooking' "live: the gemini PR without the label is dropped by the label rule"
+assert_row "$frame_r" '^│ passing +IN REVIEW +portal#120 +teammate +Portal: index the parcel table +main +[0-9]+d │$' "live: the portal PR with the ready-to-merge label is in Teammates' PRs (a configured repository searched with no fleet work in it), its author from the GraphQL node under AUTHOR"
+assert_no_row "$frame_r" 'portal#121|still cooking' "live: the portal PR without the label is dropped by the label rule"
 assert_row "$frame_r" '^│ failing +IN REVIEW +api#8 +teammate +Retry on 429 +main +[0-9]+d │$' "live: a PR in a candidate repository with no label rule is in Teammates' PRs, its FAILURE conclusion mapped to failing"
 assert_row "$frame_r" '^│ passing +IN REVIEW +etl#15 +teammate +ETL: nightly loader for the team +main +[0-9]+d │$' "live: a request to the identity's team is in Teammates' PRs, and with PR 6148's rollup and a BLOCKED merge state it reads passing and IN REVIEW there too"
 assert_row "$frame_r" '^│ passing +APPROVED +widgets#45 +teammate +Widget: approved by captain +main +[0-9]+d │$' "live: a PR the identity already approved reads APPROVED"
@@ -2299,6 +2389,75 @@ assert_contains "$frame_r" "gh not on PATH: PR data from fm-bearings-snapshot.sh
 assert_row "$frame_r" "^│ gh not on PATH: Teammates' PRs needs the GitHub CLI +│\$" "without gh Teammates' PRs says what it needs"
 assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "without gh My PRs still lists the recorded PRs (the script fallback needs no login)"
 assert_not_contains "$frame_r" "identity unknown" "without gh no identity row: the fallback lists recorded PRs whoever the captain is"
+# The script's rows (tests/fixtures/bearings-prs.json) through the board's projection: a row with only
+# the script's checks word keeps it, under the recorded task's title, BASE - and no PR age (no status
+# file on this host, so the stand-in age is -); a row carrying the head commit's contexts is judged by
+# the board's newest-run rule, so PR 6148's superseded cancelled run reads passing although the
+# script's own word says failing (falsify: spread the row as it is in runBearingsPrs, or prefer the
+# word over the list in projectScriptPr).
+assert_row "$frame_r" '^│ failing +IN REVIEW +ship-alpha +Add the widget cache +- +- │$' "without gh a script row with only its checks word keeps the word, with the recorded title and BASE -"
+assert_row "$frame_r" '^│ passing +IN REVIEW +portal#6148 +https://github.com/example-corp/portal/pull/6148 +- +- │$' "without gh a script row carrying its contexts reads passing through the board's rule, not the script's failing"
+assert_no_row "$frame_r" '^│ failing +[^│]*portal#6148' "without gh the 6148 row never reads failing"
+# The Settings page under the same PATH: the PR source line reads what the fetch used, firstmate
+# because gh is missing, although this config (the example) says board, and says both sources fail
+# alike without gh (falsify: build the line from the config alone).
+frame_r=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$NOGH_BIN" "$NOGH_BIN/node" "$ROOT/bin/firstmate-tui/index.mjs" --render-once --no-herdr --install-root "$SCRATCH/nowhere" --keys "." --rows 60 --cols 200) || fail "settings without gh: render exited non-zero"
+assert_row "$frame_r" '^ PR source +firstmate: fm-bearings-snapshot.sh \(gh not on PATH; the script needs gh too, so both sources fail the same way\) +$' "Settings: without gh the PR source line reads firstmate for the missing gh, whatever the file says"
+# prs.source = firstmate in the config file: the script runs although the fake gh is first on PATH, no
+# search is issued, the identity is still resolved once (gh api user, as on the board source), the
+# footer names the config as the reason once, Teammates' PRs says it needs the board's own fetch, and
+# My PRs lists the script's canned rows with their checks words and the stand-in age. prs.source =
+# board spelled out, and a file without the key, make exactly the default's calls; the Settings line
+# tells the two apart. --no-prs is off whatever the file says (falsify: test gh on PATH before the
+# config in fetchPrs, drop the config reason from SCRIPT_NOTES or SCRIPT_CONFIGURED from prPaneEmpty,
+# or build the Settings line without the configured flag).
+render_source() { # <xdg dir> [flags]: a live render with the fake gh first on PATH and its own config directory
+  rm -f "${FETCH_LOG:?}"
+  FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$1" PATH="$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr --rows 60 "${@:2}"
+}
+mkdir -p "$SCRATCH/src-firstmate/fm-board" "$SCRATCH/src-board/fm-board" "$SCRATCH/src-unset/fm-board" "$SCRATCH/src-bad/fm-board"
+src_review='"review":{"default_labels":[],"repos":{"example-corp/portal":{"labels":["ready-to-merge"]}}}'
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":null},%s,"prs":{"source":"firstmate"}}\n' "$src_review" > "$SCRATCH/src-firstmate/fm-board/config.json"
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":null},%s,"prs":{"source":"board"}}\n' "$src_review" > "$SCRATCH/src-board/fm-board/config.json"
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":null},%s}\n' "$src_review" > "$SCRATCH/src-unset/fm-board/config.json"
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":null},%s,"prs":{"source":"github"}}\n' "$src_review" > "$SCRATCH/src-bad/fm-board/config.json"
+frame_r=$(render_source "$SCRATCH/src-firstmate" --keys "r" --cols 260) || fail "source firstmate: render exited non-zero"
+assert_fetch_log "snapshot
+gh api user --jq .login
+prs --json --include-prs
+snapshot
+prs --json --include-prs" "prs.source firstmate: the start and r each run the snapshot and fm-bearings-snapshot.sh --include-prs, the identity is asked once, and no gh graphql search runs although gh is on PATH"
+assert_contains "$frame_r" "PR data from fm-bearings-snapshot.sh (config prs.source = firstmate): open PRs only, without titles, base branches or PR creation times; Teammates' PRs needs the board's own fetch" "prs.source firstmate: the footer names the config as the reason and what the script cannot give"
+assert_count "$frame_r" "PR data from fm-bearings-snapshot.sh" 1 "prs.source firstmate: the note is shown once"
+assert_not_contains "$frame_r" "gh not on PATH" "prs.source firstmate: with gh on PATH nothing blames a missing gh"
+assert_row "$frame_r" "^│ config prs.source = firstmate: Teammates' PRs needs the board's own fetch +│\$" "prs.source firstmate: Teammates' PRs says it needs the board's own fetch"
+assert_row "$frame_r" '^│ failing +IN REVIEW +ship-alpha +Add the widget cache +- +- │$' "prs.source firstmate: the script's word-only row keeps its failing word under the recorded title, BASE - and the stand-in age"
+assert_row "$frame_r" '^│ passing +APPROVED +etl#77 +https://github.com/acme/etl/pull/77 +- +- │$' "prs.source firstmate: a script row on no task reads repo#number and its URL, APPROVED from the review decision alone"
+assert_row "$frame_r" '^│ passing +IN REVIEW +portal#6148 +https://github.com/example-corp/portal/pull/6148 +- +- │$' "prs.source firstmate: the row carrying its contexts reads passing through the board's newest-run rule"
+assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "prs.source firstmate: a recorded PR the script did not list stays unlisted"
+assert_contains "$frame_r" "My PRs (4)" "prs.source firstmate: My PRs counts the three script rows and the unlisted recorded PR"
+assert_not_contains "$frame_r" "dotfiles#5" "prs.source firstmate: none of the fake gh's search answers is listed, since no search ran"
+assert_not_contains "$frame_r" "identity unknown" "prs.source firstmate: no identity row, the script needs no login"
+frame_r=$(render_source "$SCRATCH/src-firstmate" --install-root "$SCRATCH/nowhere" --keys ".") || fail "source firstmate settings: render exited non-zero"
+assert_row "$frame_r" '^ PR source +firstmate: fm-bearings-snapshot.sh \(config prs.source\) +$' "Settings: prs.source firstmate reads on the PR source line with the config as the reason"
+frame_r=$(render_source "$SCRATCH/src-board" --keys "r" --cols 160) || fail "source board: render exited non-zero"
+assert_fetch_log "$expected_live" "prs.source board spelled out: the default's calls exactly, the script never runs"
+frame_r=$(render_source "$SCRATCH/src-board" --install-root "$SCRATCH/nowhere" --keys ".") || fail "source board settings: render exited non-zero"
+assert_row "$frame_r" "^ PR source +board: the board's own GitHub fetch \\(config\\) +\$" "Settings: a board source the file set reads (config)"
+frame_r=$(render_source "$SCRATCH/src-unset" --keys "r" --cols 160) || fail "source unset: render exited non-zero"
+assert_fetch_log "$expected_live" "a config without prs.source: the board source, the default's calls exactly"
+frame_r=$(render_source "$SCRATCH/src-unset" --install-root "$SCRATCH/nowhere" --keys ".") || fail "source unset settings: render exited non-zero"
+assert_row "$frame_r" "^ PR source +board: the board's own GitHub fetch \\(default\\) +\$" "Settings: a config without prs.source reads (default)"
+frame_r=$(render_source "$SCRATCH/src-firstmate" --no-prs --install-root "$SCRATCH/nowhere" --keys ".") || fail "source off settings: render exited non-zero"
+assert_fetch_log "snapshot" "--no-prs with prs.source firstmate: neither the script nor gh runs"
+assert_row "$frame_r" '^ PR source +off \(--no-prs\) +$' "Settings: --no-prs reads off on the PR source line whatever the file says"
+# A bad prs.source is a malformed file: the defaults, so the board source runs (without the file's
+# portal rule), and the footer names the key and the allowed values (falsify: accept the value, or
+# keep the rest of the file on a bad prs.source).
+frame_r=$(render_source "$SCRATCH/src-bad" --cols 260) || fail "source bad: render exited non-zero"
+assert_contains "$frame_r" 'config: '"$SCRATCH"'/src-bad/fm-board/config.json: prs.source is not "board" or "firstmate" (got "github"); running with the defaults' "a bad prs.source is named in the footer with the allowed values"
+if grep -q "prs --json" "$FETCH_LOG"; then fail "a bad prs.source still ran the script: $(cat "$FETCH_LOG")"; else pass; fi
+if grep -q "api graphql" "$FETCH_LOG"; then pass; else fail "a bad prs.source did not fall back to the board's own fetch: $(cat "$FETCH_LOG")"; fi
 frame_r=$(render populated.json --keys "r") || fail "refresh fixture: render exited non-zero"
 assert_contains "$frame_r" "refresh is not available with --fixture" "r on a fixture render only reports"
 # A fixture render runs no script at all, whatever the prs default: with the stand-in home and the log
@@ -2406,7 +2565,7 @@ assert_row "$frame_c" '^ +acme/api: unfiltered +$' "Settings: a repository entry
 frame_c=$(render populated.json --config "$cfg_dir/fresh.json" --install-root "$SCRATCH/nowhere" --keys ".") || fail "config created settings: render exited non-zero"
 assert_row "$frame_c" "^ Config +$cfg_dir/fresh.json  \\(created from the example\\) +\$" "Settings: a file just written from the example says so"
 assert_row "$frame_c" '^ Review labels +default: none +$' "Settings: the example has no default labels"
-assert_row "$frame_c" '^ +MatthewsREIS/gemini: ready-to-merge +$' "Settings: the example's gemini rule is listed"
+assert_row "$frame_c" '^ +example-corp/portal: ready-to-merge +$' "Settings: the example's portal rule is listed"
 # A fixture render without --config touches no config file (falsify: drop the fixture guard in configFor).
 frame_c=$(HOME="$SCRATCH/cfg-home" XDG_CONFIG_HOME='' render populated.json) || fail "config fixture default: render exited non-zero"
 if [ -e "$SCRATCH/cfg-home/.config/fm-board/config.json" ]; then fail "a fixture render without --config wrote the default config file"; else pass; fi
@@ -2428,17 +2587,17 @@ assert_contains "$frame_c" "config: $cfg_dir/bad.json: review.default_labels is 
 frame_c=$(render populated.json --config "$cfg_dir/bad.json" --install-root "$SCRATCH/nowhere" --keys "." --cols 260) || fail "config malformed settings: render exited non-zero"
 assert_row "$frame_c" "^ Config +$cfg_dir/bad.json  \\(using defaults: $cfg_dir/bad.json: review.default_labels is not a list\\) +\$" "Settings: the Config line says the defaults are in effect and why"
 assert_row "$frame_c" '^ Review labels +default: none +$' "Settings: a malformed file leaves no default labels"
-assert_not_contains "$frame_c" "MatthewsREIS/gemini" "Settings: a malformed file leaves no configured repository (the example is not used in its place)"
+assert_not_contains "$frame_c" "example-corp/portal" "Settings: a malformed file leaves no configured repository (the example is not used in its place)"
 if grep -q '"ready"' "$cfg_dir/bad.json"; then pass; else fail "a malformed config file is left as it was"; fi
-# A live render with a malformed config searches without label rules (the gemini PR without the label
+# A live render with a malformed config searches without label rules (the portal PR without the label
 # is listed too) and the configured repository is not in the scope (falsify: fall back to the example
 # instead of the defaults).
 mkdir -p "$SCRATCH/cfg-bad-xdg/fm-board"
 cp "$cfg_dir/bad.json" "$SCRATCH/cfg-bad-xdg/fm-board/config.json"
 rm -f "${FETCH_LOG:?}"
 frame_c=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/cfg-bad-xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr --rows 60) || fail "config malformed live: render exited non-zero"
-if grep -q "repo:MatthewsREIS/gemini" "$FETCH_LOG"; then fail "a malformed config still put the example's repository into the scope: $(cat "$FETCH_LOG")"; else pass; fi
-assert_not_contains "$frame_c" "gemini#120" "a malformed config: gemini is out of the scope, so its PRs are not listed"
+if grep -q "repo:example-corp/portal" "$FETCH_LOG"; then fail "a malformed config still put the example's repository into the scope: $(cat "$FETCH_LOG")"; else pass; fi
+assert_not_contains "$frame_c" "portal#120" "a malformed config: portal is out of the scope, so its PRs are not listed"
 assert_contains "$frame_c" "Teammates' PRs (4)" "a malformed config: the four Teammates' PRs rows of the candidate repositories remain"
 
 # ------------------------------------------------------------- settings page
@@ -2515,6 +2674,9 @@ assert_row "$frame_s" '^ herdr overlay +off \(--no-herdr\) +$' "settings: the he
 assert_row "$frame_s" '^ mouse +on: click selects, double-click acts, wheel scrolls, a header boundary drags +$' "settings: the mouse line, on by default (falsify: drop the mouse entry from settingsFlags)"
 assert_row "$frame_s" '^ Identity +captain  \(from fixture\) +$' "settings: the identity block names the fixture's login and source (falsify: drop settingsInfo from renderSettings)"
 assert_row "$frame_s" '^ Config +none: using defaults \(not read \(fixture render without --config\)\) +$' "settings: a fixture render without --config says no config file was read"
+assert_row "$frame_s" "^ PR source +board: the board's own GitHub fetch \\(default\\) +\$" "settings: the PR source line reads the board default on a fixture without a source block (falsify: drop the line from settingsInfo, or ask PATH for gh on a fixture render)"
+assert_before "$frame_s" '^ Config ' '^ PR source ' "settings: the PR source line follows Config"
+assert_before "$frame_s" '^ PR source ' '^ Review labels ' "settings: the PR source line leads the label rules"
 assert_row "$frame_s" '^ Review labels +default: none +$' "settings: the label rules line with the defaults"
 assert_before "$frame_s" '^ mouse ' '^ Identity ' "settings: the identity block follows the flags"
 assert_row "$frame_s" '^ j/k move  enter choose  r refetch  esc/\. back  \? help +$' "settings: the footer names the page's keys"
@@ -2532,6 +2694,7 @@ assert_count "$(cat "$CURL_LOG")" "api.github.com" 4 "r inside the page fetches 
 frame_s=$(render_settings "$REL" "$INSTALL" "." --no-prs --refresh 45) || fail "settings flags: render exited non-zero"
 assert_row "$frame_s" '^ refresh cadence +45 s \(--refresh\) +$' "settings: the cadence line follows --refresh"
 assert_row "$frame_s" '^ PR data +off \(--no-prs\) +$' "settings: the PR data line follows --no-prs"
+assert_row "$frame_s" '^ PR source +off \(--no-prs\) +$' "settings: the PR source line follows --no-prs"
 frame_s=$(render_settings "$REL" "$INSTALL" "." --no-mouse) || fail "settings no-mouse: render exited non-zero"
 assert_row "$frame_s" '^ mouse +off \(--no-mouse\) +$' "settings: the mouse line follows --no-mouse"
 # Without --curl-cmd a one-shot render fetches nothing, not even through a curl on PATH (falsify:
@@ -2753,7 +2916,7 @@ rm -f "$OPENER_LOG"
 frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,tab,j,.,q,enter" --opener-cmd "$FAKE_OPENER") || fail "settings q: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "q closes the page like the help overlay, and the board is not quit"
 frame_k=$(render populated.json --install-root "$INSTALL" --keys "j,j,j,j,l,.,escape") || fail "settings expanded: render exited non-zero"
-assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "a group expanded before the page opened is still expanded after it closes"
+assert_row "$frame_k" '^│ decide +1 live +!▾ delegate-a ' "a group expanded before the page opened is still expanded after it closes"
 # . works from the landing page too and esc returns there (falsify: drop . from LANDING_KEYS).
 frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,6,.") || fail "settings landing: render exited non-zero"
 assert_row "$frame_s" '^ Settings +$' ". opens the page from the landing page"
@@ -3264,17 +3427,17 @@ assert_contains "$frame_v" "pane hidden: My PRs" "hiding the restored pane moves
 write_vs '"focus":{"pane":"review","row":"review:main:api#8","index":0},"expanded":[],"scroll":{}'
 tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore old id: render exited non-zero"
 assert_row "$tags_v" "${SEL}failing ${SEL_END}.*${SEL}api#8" "an old file's review pane and row key restore onto My PRs"
-# Expanded groups and scroll: the hyperion group comes back open with the cursor on it, and the
+# Expanded groups and scroll: the delegate-a group comes back open with the cursor on it, and the
 # In flight pane, three rows tall in this frame, starts three rows down as saved (falsify: drop
 # expanded from the view init in driveOnce, or scrollFromSaved).
-write_vs '"focus":{"pane":"inflight","row":"inflight:hyperion:home","index":4},"expanded":["home:/fixture/homes/hyperion"],"scroll":{"inflight":3}'
+write_vs '"focus":{"pane":"inflight","row":"inflight:delegate-a:home","index":4},"expanded":["home:/fixture/homes/delegate-a"],"scroll":{"inflight":3}'
 frame_v=$(render populated.json --view-state "$vs_f") || fail "view restore expanded: render exited non-zero"
-assert_contains "$frame_v" "!▾ hyperion" "the saved In flight group is expanded"
+assert_contains "$frame_v" "!▾ delegate-a" "the saved In flight group is expanded"
 assert_row "$frame_v" '^│ working +working +↳ child-one ' "the expanded group lists its children"
 frame_v=$(render populated.json --view-state "$vs_f" --rows 30) || fail "view restore scroll: render exited non-zero"
 assert_row "$frame_v" '3 above, \+[0-9]+ more ──┘$' "the saved scroll offset starts the two-row In flight pane three rows down, the cursor on its last shown row"
 tags_v=$(render populated.json --view-state "$vs_f" --rows 30 --tags) || fail "view restore expanded --tags: render exited non-zero"
-assert_row "$tags_v" "${SEL}decide +${SEL_END}.*${SEL}!▾ hyperion" "the cursor is on the group row"
+assert_row "$tags_v" "${SEL}decide +${SEL_END}.*${SEL}!▾ delegate-a" "the cursor is on the group row"
 # The restore waits for the rows: on a cold start the saved pane is loading and the default
 # selection stands; over a fresh cache the same file puts the cursor on the cached row (falsify:
 # apply focusFromSaved to a loading pane).
@@ -3348,7 +3511,7 @@ if [ -s "$HL/out-fail.log" ]; then fail "headless failing run wrote to the termi
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x44 the lines are: 0 title,
 # 1 In flight title, 2 its column header, 3-9 its rows (ship-alpha, tmux-task, remote-sm group,
-# scout-beta, hyperion group, ship-gamma, ship-old), 13 Needs you title, 14 its column header, 15-18
+# scout-beta, delegate-a group, ship-gamma, ship-old), 13 Needs you title, 14 its column header, 15-18
 # its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 20 My PRs title, 22-24 its rows
 # (ship-alpha #41, api#8, ship-gamma #7), 26 Teammates' PRs title, 27 its column header, 28 its empty
 # text, 30 Findings title, 32-34 its rows (scout-beta, mobile-fix, old-scout), 36 Landed title, 38-41
@@ -3400,11 +3563,11 @@ assert_not_opened "two single clicks a second apart on one row open nothing"
 frame_m=$(render_mouse populated.json "click:30,22 click:30,23 click:30,23 click:30,22") || fail "mouse clicks on different rows: render exited non-zero"
 assert_not_opened "clicks alternating between rows never make a double-click"
 frame_m=$(render_mouse populated.json "dblclick:30,7") || fail "mouse dblclick group: render exited non-zero"
-assert_row "$frame_m" '^│ decide +1 live +!▾ hyperion ' "double-click on the hyperion group row expands it"
+assert_row "$frame_m" '^│ decide +1 live +!▾ delegate-a ' "double-click on the delegate-a group row expands it"
 assert_contains "$frame_m" "In flight (11)" "double-click on a group: only that group's rows are added"
 assert_not_opened "double-click on a group row opens no PR"
 frame_m=$(render_mouse populated.json "dblclick:30,7 dblclick:30,7") || fail "mouse dblclick group twice: render exited non-zero"
-assert_row "$frame_m" '^│ decide +1 live +!▸ hyperion ' "a second double-click on the group row collapses it again"
+assert_row "$frame_m" '^│ decide +1 live +!▸ delegate-a ' "a second double-click on the group row collapses it again"
 frame_m=$(render_mouse populated.json "dblclick:60,32") || fail "mouse dblclick findings: render exited non-zero"
 assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "double-click on a Findings row views its report through --viewer-cmd"
 frame_m=$(render_mouse populated.json "dblclick:30,3") || fail "mouse dblclick worker: render exited non-zero"
@@ -3569,8 +3732,8 @@ if "$BOARD" --help 2>/dev/null | grep -Fq -- "--mouse <list>"; then pass; else f
 # width again in lib/layout.mjs columnSpec).
 frame_cw=$(render column-widths.json) || fail "column-widths: render exited non-zero"
 assert_row "$frame_cw" '^│ CHECKS   STATUS     ID {16}TITLE {104}BASE  AGE │$' "column widths: CHECKS is as wide as passing, ID as wide as firstmate-tui#17, BASE four cells for main, AGE three, and TITLE has the 107 cells left"
-assert_row "$frame_cw" '^│ passing  DRAFT      hyperion-ai#279   refactor\(helm\): read credentials from hyperion-secrets instead of the chart values +main  22d │$' "column widths: the 81-character title shows in full in the room BASE gave back"
-assert_row "$frame_cw" '^│ hold   by 09-15  uuidv7-rfc-rewrite +Rewrite RFC-017 as thought leadership for the platform team +MatthewsREIS/gemini  main  37d │$' "column widths: a 19-character repository name is not cut and HOME hugs main"
+assert_row "$frame_cw" '^│ passing  DRAFT      entity-ai#279     refactor\(helm\): read credentials from entity-secrets instead of the chart values +main  22d │$' "column widths: the 79-character title shows in full in the room BASE gave back (the id is five cells short of the ID column, which firstmate-tui#17 sizes)"
+assert_row "$frame_cw" '^│ hold   by 09-15  uuidv7-rfc-rewrite +Rewrite RFC-017 as thought leadership for the platform team +example-corp/portal  main  37d │$' "column widths: a 19-character repository name is not cut and HOME hugs main"
 assert_row "$frame_cw" '^│ hold   by 09-09  review-rfc-discussion-t…  Review RFC · Captain asked on 2026-09-02' "column widths: an id longer than the 24-cell cap truncates with an ellipsis (falsify: raise COLUMN_CAP)"
 assert_row "$frame_cw" '^│ STATE  KEY       ID {24}WHAT ' "column widths: STATE stays as wide as its label when every value is shorter, KEY is as wide as by 09-15"
 assert_widths "$frame_cw" 160 "column widths: lines are 160 columns"

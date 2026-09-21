@@ -1,5 +1,5 @@
 {
-  "_comment": "Needs you review rows, the In flight repairing state and the My PRs READY / REPAIRING words. now is 2026-09-16T12:00:00Z = epoch 1789560000. Main home: ship-ready said done with acme/api#21, open and MERGEABLE/CLEAN (review row, checks passing, 10m; READY); ship-paused is parked by firstmate ('paused: awaiting captain approve-and-label') with #22, open and clean, checks pending (review row, 25m; READY); ship-dirty is working again after a done line (status_logs) with #23 CONFLICTING/DIRTY (no review row, In flight `repairing PR`, REPAIRING); ship-first is working on its first pass with acme/widgets#31 clean (no review row, In flight `working`, IN REVIEW); ship-closed said done with #24, closed 1h ago (no review row, CLOSED); ship-merged said done with #25, merged 2h ago (no review row, MERGED); scout-block is blocked and ship-decide carries a keyed decision, and the backlog holds a live captain hold (hold-vendor), so all four Needs you tags are present. The hyperion ledger names two children's PRs through contributions.captain: child-ready is done with acme/etl#61 clean (review row from the ledger, HOME hyperion, 40m; READY) and child-repair is working again after a done line with #62 DIRTY (no review row, `repairing PR` under the expanded group, REPAIRING). With --no-prs the parked tasks fall back to their state alone: review rows for ship-ready, ship-paused, ship-closed, ship-merged and child-ready, each AGE marked ~ and no checks word. 60 rows so every pane shows all of its rows.",
+  "_comment": "Needs you review rows, the In flight repairing state and the My PRs READY / REPAIRING words. now is 2026-09-16T12:00:00Z = epoch 1789560000. Main home: ship-ready said done with acme/api#21, open and MERGEABLE/CLEAN (review row, checks passing, 10m; READY); ship-paused is parked by firstmate ('paused: awaiting captain approve-and-label') with #22, open and clean, checks pending (review row, 25m; READY); ship-dirty is working again after a done line (status_logs) with #23 CONFLICTING/DIRTY (no review row, In flight `repairing PR`, REPAIRING); ship-first is working on its first pass with acme/widgets#31 clean (no review row, In flight `working`, IN REVIEW); ship-closed said done with #24, closed 1h ago (no review row, CLOSED); ship-merged said done with #25, merged 2h ago (no review row, MERGED); scout-block is blocked and ship-decide carries a keyed decision, and the backlog holds a live captain hold (hold-vendor), so all four Needs you tags are present. The delegate-a ledger names two children's PRs through contributions.captain: child-ready is done with acme/etl#61 clean (review row from the ledger, HOME delegate-a, 40m; READY) and child-repair is working again after a done line with #62 DIRTY (no review row, `repairing PR` under the expanded group, REPAIRING). With --no-prs the parked tasks fall back to their state alone: review rows for ship-ready, ship-paused, ship-closed, ship-merged and child-ready, each AGE marked ~ and no checks word. 60 rows so every pane shows all of its rows.",
   "now": "2026-09-16T12:00:00Z",
   "cols": 160,
   "rows": 60,
@@ -585,8 +585,8 @@
   },
   "ledgers": [
     {
-      "id": "hyperion",
-      "home": "/fixture/homes/hyperion",
+      "id": "delegate-a",
+      "home": "/fixture/homes/delegate-a",
       "remote": false,
       "cached": false,
       "summary": {
@@ -896,7 +896,7 @@
       "working",
       "done"
     ],
-    "/fixture/homes/hyperion/state/child-repair.status": [
+    "/fixture/homes/delegate-a/state/child-repair.status": [
       "working",
       "done",
       "working"
@@ -911,7 +911,7 @@
     "/fixture/firstmate/state/ship-merged.status": 1789549200,
     "/fixture/firstmate/state/scout-block.status": 1789558200,
     "/fixture/firstmate/state/ship-decide.status": 1789559100,
-    "/fixture/homes/hyperion/state/child-ready.status": 1789557600,
-    "/fixture/homes/hyperion/state/child-repair.status": 1789559880
+    "/fixture/homes/delegate-a/state/child-ready.status": 1789557600,
+    "/fixture/homes/delegate-a/state/child-repair.status": 1789559880
   }
 }

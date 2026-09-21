@@ -79,6 +79,7 @@ Install, Debian and Ubuntu, when one is missing: `sudo apt install curl tar core
 gh gives the two pull request panes their data.
 On every refresh the board runs `gh api graphql` itself, at most four searches plus one lookup, and once per session `gh api user` for your GitHub login unless the [config file](#configuration) names it.
 Without gh on `PATH`, My PRs falls back to a firstmate script that needs gh as well, so in practice that pane reports a failed fetch, and Teammates' PRs reads `gh not on PATH: Teammates' PRs needs the GitHub CLI`.
+The config file's `prs.source` can pick that script on purpose ([Configuration](#configuration)); it needs gh just the same, so neither choice removes this prerequisite.
 `--no-prs` runs the board without any GitHub call; the two panes then list only the pull request links firstmate recorded.
 Check: `gh auth status` prints `Logged in to github.com`.
 Install: macOS `brew install gh`.
@@ -208,7 +209,7 @@ From a git checkout, `firstmate-tui upgrade` refuses and prints the `git pull` t
 
 **From inside the board.**
 Press `.` for the Settings page.
-It shows the running version, where it is installed and from which release, the latest stable release with its date and a verdict (`upgrade available`, `up to date`, or that you are on a beta), the launch flags in effect, and the identity and config file the pull request panes use.
+It shows the running version, where it is installed and from which release, the latest stable release with its date and a verdict (`upgrade available`, `up to date`, or that you are on a beta), the launch flags in effect, and the identity, config file and PR source the pull request panes use.
 From an install it offers `Upgrade to <version>`, a **Betas** submenu listing the prereleases newest first with their commit and date, and `Back to stable`.
 Choosing one shows the exact command it stands for and asks `y to confirm, esc to cancel`; only `y` runs it, through the same `firstmate-tui upgrade` as the command line, with the installer's lines appearing on the page.
 On success the page reads `restart to use <version>` and `R` restarts the board on the new copy.
@@ -230,6 +231,7 @@ The six panes, top to bottom; each pane's key is its number:
 2. **Needs you**: what firstmate is waiting on you for: blocked agents, decisions to make, holds you set with their due dates, and one `review` row per pull request that is yours to review because its agent is done and GitHub reports the pull request open and mergeable.
    `enter` on a hold, decision or blocked row shows its hold card in the terminal viewer: the task's facts, the full hold reason, the backlog body, the pull request, the first 40 lines of its report, its brief and other files under `data/<id>/`, and the last 10 lines of its status log, read from the home that owns it; `d` discards the hold and `D` defers it (the Keys table below).
 3. **My PRs**: every open pull request your GitHub login authored, in any repository, plus the pull requests recorded on unfinished firstmate tasks whoever opened them, plus either kind that merged or closed in the last 12 hours; the columns are CHECKS (`passing`, `pending` or `failing`, judged from the newest run of each check on the head commit, so a run that a re-run superseded does not count), STATUS, ID, TITLE, BASE (the branch it targets) and AGE.
+   With the config file's `prs.source` set to `firstmate`, or without gh on `PATH`, the pane lists what firstmate's own `fm-bearings-snapshot.sh` reports instead; [config.json](#configjson) says what that shows and leaves out.
 4. **Teammates' PRs**: the open pull requests where you are a requested reviewer, directly or through a team, and not the author, in the repositories firstmate works in plus the ones the config file names, filtered by the config file's label rules, with the same columns plus AUTHOR.
 5. **Findings**: the reports the agents wrote, newest first, from every home.
 6. **Landed**: finished work, newest first: merged pull requests and done tasks, with the pull request URL, report path or pane id in WHAT.
@@ -306,7 +308,7 @@ All three live in the same directory: the one `herdr plugin config-dir firstmate
 
 ### config.json
 
-The config file holds the two things about the pull request panes that are yours to set.
+The config file holds the three things about the pull request panes that are yours to set.
 When no file exists at startup, the board writes this example, [`docs/config.example.json`](docs/config.example.json), byte for byte, and never touches the file again:
 
 ```json
@@ -318,12 +320,15 @@ When no file exists at startup, the board writes this example, [`docs/config.exa
   "review": {
     "default_labels": [],
     "repos": {
-      "MatthewsREIS/gemini": {
+      "example-corp/portal": {
         "labels": [
           "ready-to-merge"
         ]
       }
     }
+  },
+  "prs": {
+    "source": "board"
   }
 }
 ```
@@ -334,10 +339,19 @@ When no file exists at startup, the board writes this example, [`docs/config.exa
 | `identity.github_login` | the GitHub login the two pull request panes are built around, such as `zachsibert`, never a name or an email. `null` means resolve it: the account gh is logged in as, else git's `github.user`, else unknown |
 | `review.default_labels` | the labels a pull request must carry one of to be listed in Teammates' PRs, in every repository without its own entry under `repos`; an empty list means no filter |
 | `review.repos` | one entry per repository, `"owner/name": { "labels": [...] }`. Each named repository is searched even when firstmate has no work in it, and its `labels` list is its own rule; an empty list means no filter there whatever `default_labels` says |
+| `prs.source` | where the pull request panes get their data. `board` (the default, and what a file without the key means) is the board's own GitHub fetch described under [Using the board](#using-the-board), which still falls back to firstmate's script when gh is not on `PATH`. `firstmate` runs firstmate's own `FM_HOME/bin/fm-bearings-snapshot.sh --include-prs` on every refresh instead, whether or not gh is there. That script lists open pull requests only, in the repositories firstmate works in, without titles, base branches, creation times, authors or labels, so a row shows the recorded task's title or the URL, `-` under BASE and the task's status-log age marked `~` under AGE; its CHECKS word is the script's own verdict; and Teammates' PRs reads `config prs.source = firstmate: Teammates' PRs needs the board's own fetch`. The script calls gh itself, so this source needs gh on `PATH` and logged in exactly as the default does |
 
+The example's `example-corp/portal` entry is a placeholder, not a real repository.
+To add your own rule, replace it with the repository as GitHub spells it, `owner/name`, and list the labels a pull request there must carry one of; add one entry per repository, or delete the entry to search only the repositories firstmate works in.
 Unknown keys are ignored.
-A malformed file (bad JSON, a wrong type, a repository name that is not `owner/name`) is reported once in the footer and on the Settings page, and the board runs with the defaults: no login from the file, no label rules, no extra repositories.
-The Settings page (`.`) shows the identity and where it came from, such as `Identity  zachsibert  (from gh api user)`, the config file's path with `(created from the example)` or `(using defaults: <reason>)` when that applies, and the label rules in effect.
+A malformed file (bad JSON, a wrong type, a repository name that is not `owner/name`, a `prs.source` other than the two words) is reported once in the footer and on the Settings page, and the board runs with the defaults: no login from the file, no label rules, no extra repositories, the `board` source.
+The Settings page (`.`) shows the identity and where it came from, such as `Identity  zachsibert  (from gh api user)`, the config file's path with `(created from the example)` or `(using defaults: <reason>)` when that applies, the PR source the last refresh used and why (`PR source  board: the board's own GitHub fetch (default)`, `(config)` when the file set it, `firstmate: fm-bearings-snapshot.sh (config prs.source)`, or `(gh not on PATH; the script needs gh too, so both sources fail the same way)` when gh is missing whatever the file says), and the label rules in effect.
+
+**What the `firstmate` source cannot show yet.**
+The board judges CHECKS from the newest run of each check, so a run that a re-run superseded does not count.
+It applies that rule to the script's rows too, but only when a row carries the head commit's check runs, and today `fm-bearings-snapshot.sh` prints one `checks` word per pull request and no runs.
+That word comes from the script's own rule, which reads any cancelled run as failing, so on the `firstmate` source a pull request whose cancelled run was re-run and passed still reads `failing` until the script itself changes; the `board` source reads it `passing`.
+The board does not change or copy the script: it lives in firstmate's repository.
 
 ### view-state.json
 
@@ -381,6 +395,12 @@ Cause: the board could not learn your GitHub login: the config file's `identity.
 Fix: either write your login into the config file's `identity.github_login`, or run `gh auth login` once.
 Then press `r`; while the identity is unknown a refresh asks again, so no restart is needed.
 Check: the Settings page's Identity line reads your login followed by `(from config)` or `(from gh api user)`.
+
+**My PRs reads `failing` for a pull request whose checks are green on GitHub, and the Settings page's PR source line starts with `firstmate`.**
+Symptom: a pull request whose check was cancelled once and then re-run to success reads `failing` under CHECKS; its row has `-` under BASE and a `~` after its age, and the footer said once `PR data from fm-bearings-snapshot.sh (...)`.
+Cause: the pull request data comes from firstmate's script, either because the config file's `prs.source` is `firstmate` or because gh is not on `PATH`, and that script reads any cancelled run as failing ([config.json](#configjson) says why the board cannot regroup those rows).
+Fix: set `prs.source` to `board` (or remove the key) and make sure gh is on `PATH`; then press `r`.
+Check: the Settings page's PR source line reads `board: the board's own GitHub fetch`.
 
 **The footer reads `state cache ignored: <path>: <reason>` once, and the panes start with spinners.**
 Symptom: right after launch the footer names the state cache file with `bad JSON`, `not an object`, `unexpected schema` or `written for another home`, and the board starts as if it had no cache.

@@ -1,0 +1,42 @@
+{
+  "_note": "What the stand-in home's bin/fm-bearings-snapshot.sh --json --include-prs prints in tests/fm-board.test.sh: three candidate_prs rows in the script's shape (num, repo, task, url, review, mergeable, checks). ship-alpha's row and etl#77 carry only the script's checks word, which the board keeps (failing and passing). portal#6148 carries the word failing beside the head commit's statusCheckRollup as gh pr list --json prints it, the real PR 6148 shape of 2026-09-18: six runs of one check with the first cancelled and superseded, so the board's newest-run rule reads passing and the word is ignored. No row carries a title, base branch or creation time, so the rows fall back to the recorded task's title or the URL, BASE - and the status-log age.",
+  "prs": "ok",
+  "candidate_prs": [
+    {
+      "num": "41",
+      "repo": "acme/widgets",
+      "task": "ship-alpha",
+      "url": "https://github.com/acme/widgets/pull/41",
+      "review": "REVIEW_REQUIRED",
+      "mergeable": "MERGEABLE",
+      "checks": "failing"
+    },
+    {
+      "num": "77",
+      "repo": "acme/etl",
+      "task": "-",
+      "url": "https://github.com/acme/etl/pull/77",
+      "review": "APPROVED",
+      "mergeable": "MERGEABLE",
+      "checks": "passing"
+    },
+    {
+      "num": "6148",
+      "repo": "example-corp/portal",
+      "task": "-",
+      "url": "https://github.com/example-corp/portal/pull/6148",
+      "review": "REVIEW_REQUIRED",
+      "mergeable": "MERGEABLE",
+      "checks": "failing",
+      "statusCheckRollup": [
+        { "__typename": "CheckRun", "name": "check graphql schema (hive)", "workflowName": "GraphQL Schema Check", "status": "COMPLETED", "conclusion": "CANCELLED", "startedAt": "2026-09-18T19:38:34Z", "completedAt": "2026-09-18T19:38:39Z" },
+        { "__typename": "CheckRun", "name": "merge check", "workflowName": "CI", "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-09-18T19:32:55Z", "completedAt": "2026-09-18T19:33:00Z" },
+        { "__typename": "CheckRun", "name": "check graphql schema (hive)", "workflowName": "GraphQL Schema Check", "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-09-18T19:33:17Z", "completedAt": "2026-09-18T19:33:31Z" },
+        { "__typename": "CheckRun", "name": "check graphql schema (hive)", "workflowName": "GraphQL Schema Check", "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-09-18T19:36:52Z", "completedAt": "2026-09-18T19:36:58Z" },
+        { "__typename": "CheckRun", "name": "check graphql schema (hive)", "workflowName": "GraphQL Schema Check", "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-09-18T19:38:57Z", "completedAt": "2026-09-18T19:39:05Z" },
+        { "__typename": "CheckRun", "name": "check graphql schema (hive)", "workflowName": "GraphQL Schema Check", "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-09-18T19:41:33Z", "completedAt": "2026-09-18T19:41:39Z" },
+        { "__typename": "CheckRun", "name": "check graphql schema (hive)", "workflowName": "GraphQL Schema Check", "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-09-18T19:42:10Z", "completedAt": "2026-09-18T19:42:16Z" }
+      ]
+    }
+  ]
+}
