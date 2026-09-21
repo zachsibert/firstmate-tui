@@ -14,8 +14,8 @@
 //                 toreview } from the live PR fetch in lib/sources.mjs (enabled
 //                 unless --no-prs; fetchedAt is null until the first fetch of a
 //                 session lands). A candidate is {num, repo, task, url, review,
-//                 mergeable, checks} plus, from gh only (absent from the
-//                 fm-bearings-snapshot.sh fallback): merge_state (GitHub's
+//                 mergeable, checks} plus, from gh only (absent from
+//                 fm-bearings-snapshot.sh's rows): merge_state (GitHub's
 //                 mergeStateStatus, CLEAN, DIRTY, BLOCKED, ... or null),
 //                 created_at, merged_at,
 //                 closed_at (ISO 8601), title, base (the base branch), draft
@@ -676,6 +676,12 @@ function fleetStatus(c, status, task) {
 export const IDENTITY_UNKNOWN_TEXT = 'identity unknown: see Settings (.)';
 export const SCOPE_EMPTY_TEXT = 'no repositories in scope: see Settings (.)';
 export const PRS_OFF_TEXT = 'PR fetch off (--no-prs)';
+// The two reasons Teammates' PRs can be `unavailable` (lib/sources.mjs
+// fetchPrs puts one on facts.prs.toreview when firstmate's script is the
+// source): gh is not on PATH, or the config file's prs.source asked for the
+// script. prPaneEmpty names what the pane needs after each.
+export const GH_MISSING = 'gh not on PATH';
+export const SCRIPT_CONFIGURED = 'config prs.source = firstmate';
 
 // Recorded PRs: task records and backlog rows with a PR URL, keyed by URL, each
 // with its task id, the backlog title (the TITLE fallback for a source that
@@ -703,7 +709,7 @@ export function recordedPrs(facts) {
 // draft closed unmerged reads CLOSED and leaves with the window instead of
 // sitting as DRAFT for good; then DRAFT; an open PR is APPROVED when GitHub's
 // review decision says so and IN REVIEW otherwise. A record with no state
-// (the fm-bearings-snapshot.sh fallback lists open PRs only) counts as open.
+// (fm-bearings-snapshot.sh lists open PRs only) counts as open.
 export function prStatus(c) {
   const state = String(c.state || 'OPEN').toUpperCase();
   if (c.merged === true || state === 'MERGED') return 'MERGED';
@@ -767,9 +773,10 @@ function identityRow() {
 }
 
 // Whether a PR pane's rows come from a fetch that needs the identity: the
-// fetch is on and gh is there to run it (without gh My PRs lists the recorded
-// PRs through the script fallback, which needs no login, and To review says
-// why it is empty). Then a pending identity (null: the first refresh has not
+// fetch is on and the board's own fetch runs it (when firstmate's script is
+// the source, gh missing or the config asking for it, My PRs lists the
+// script's rows, which need no login, and To review says why it is empty).
+// Then a pending identity (null: the first refresh has not
 // reached the rungs yet, or r is asking them again) puts the resolving
 // spinner in both panes with no rows, and a resolved unknown one (every rung
 // failed) puts the identity row there.
@@ -915,14 +922,16 @@ function toReviewRows(facts) {
 }
 
 // The empty text of a PR pane, by what stands between it and its rows: the
-// fetch switched off, no way to fetch at all (To review without gh), an empty
-// To review scope, else the pane's own words.
+// fetch switched off, no way to fetch at all (To review while firstmate's
+// script is the source: it needs the GitHub CLI when gh is missing, the
+// board's own fetch when the config chose the script), an empty To review
+// scope, else the pane's own words.
 function prPaneEmpty(facts, pane) {
   const prs = facts.prs || { enabled: false };
   if (!prs.enabled) return pane.id === 'toreview' ? PRS_OFF_TEXT : pane.empty;
   if (pane.id === 'toreview') {
     const own = paneFetch(prs, 'toreview');
-    if (own.unavailable) return `${own.unavailable}: Teammates' PRs needs the GitHub CLI`;
+    if (own.unavailable) return `${own.unavailable}: Teammates' PRs needs ${own.unavailable === SCRIPT_CONFIGURED ? "the board's own fetch" : 'the GitHub CLI'}`;
     if (own.scope && own.scope.length === 0) return SCOPE_EMPTY_TEXT;
   }
   return pane.empty;

@@ -8,7 +8,9 @@
 // Cadence: one refresh runs the fleet snapshot and then, unless --no-prs, the
 // live GitHub PR fetch (at most four searches through gh api graphql for the
 // two PR panes, all at once, then one lookup of the recorded PRs the author
-// search missed; the firstmate script when gh is not on PATH), applied in one
+// search missed; the firstmate script when gh is not on PATH or when the
+// config file's prs.source asks for it, which the Settings page's PR source
+// line reports after every fetch), applied in one
 // frame update. The next refresh is due --refresh seconds (default 30)
 // after the last one started: a single timer, armed when a refresh completes
 // (armRefreshTimer), and the title line counts down to it once a second. A
@@ -92,7 +94,7 @@
 import { userInfo } from 'node:os';
 import { buildModel, initialPrs, mergePrs, parseTarget, prsFailureText } from './model.mjs';
 import { renderFrame } from './render.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
 import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openDeferPrompt, savedFocus, savedScroll, viewProblem } from './controller.mjs';
@@ -189,7 +191,9 @@ export async function runApp(opts) {
       prompt: null, // the discard or defer prompt in the footer (lib/card.mjs), or null
       busy: null, // a short text while a hold effect runs (a delegate record read, the command); the controller refuses a second one meanwhile
       page: 'board',
-      settings: initialSettings({ install: readInstall(opts.installRoot || defaultInstallRoot()), flags: settingsFlags(opts), config: settingsConfig(cfg) }),
+      // The PR source line starts on what the next fetch will use and follows
+      // what each fetch actually used (the refresh below).
+      settings: initialSettings({ install: readInstall(opts.installRoot || defaultInstallRoot()), flags: settingsFlags(opts), config: settingsConfig(cfg), prSource: { enabled: Boolean(opts.prs), ...plannedPrSource(cfg.config, process.env) } }),
     },
     noticeStrongUntil: 0, // epoch ms until which the shown notice must not be painted over by a weak one
     refreshing: false,
@@ -451,6 +455,7 @@ export async function runApp(opts) {
     let prsFailure = null;
     let prsNote = null;
     if (prs) {
+      if (prs.source) state.view.settings.prSource = { enabled: true, ...prs.source };
       // A failing pane keeps its previous rows and its title marks them stale.
       state.prs = mergePrs(state.prs, prs, Math.floor(Date.now() / 1000), state.identity);
       // A pane whose searches answered draws live data now; a failing one

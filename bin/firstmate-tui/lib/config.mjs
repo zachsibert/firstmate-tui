@@ -17,28 +17,41 @@
 //   { "schema": "firstmate-tui-config.v1",
 //     "identity": { "github_login": null },
 //     "review": { "default_labels": [],
-//                 "repos": { "<owner/name>": { "labels": [ "<label>", ... ] } } } }
+//                 "repos": { "<owner/name>": { "labels": [ "<label>", ... ] } } },
+//     "prs": { "source": "board" } }
 // identity.github_login names the captain's GitHub login; null means "ask gh,
 // then git" (lib/identity.mjs). review.repos adds each named repository to
 // the To review scope and gives it a label rule: a PR there is listed only
 // when it carries one of the labels (an empty list means unfiltered);
 // review.default_labels is the rule for every repository without its own
-// entry. Unknown keys are ignored. A malformed file is reported once and the
-// board runs with the defaults (no login from the file, no label rules, no
-// configured repositories); the file is never overwritten once it exists.
+// entry. prs.source picks where the PR panes' data comes from: "board" (the
+// default, and what an absent key means) is the board's own GitHub fetch,
+// falling back to firstmate's bin/fm-bearings-snapshot.sh when gh is not on
+// PATH; "firstmate" runs that script whether or not gh is there (My PRs from
+// the script's open-PR rows, Teammates' PRs unavailable). The parsed config
+// carries prs.configured, true when the file set the key, so the Settings
+// page can say whether "board" came from the file or the default. Unknown
+// keys are ignored. A malformed file is reported once and the board runs
+// with the defaults (no login from the file, no label rules, no configured
+// repositories, the board source); the file is never overwritten once it
+// exists.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export const CONFIG_SCHEMA = 'firstmate-tui-config.v1';
 
+// The two values prs.source takes (the header says what each does).
+export const PR_SOURCES = ['board', 'firstmate'];
+
 // The documented example, byte for byte what docs/config.example.json holds
 // and what the board writes on a first launch: the captain's rule for the
-// gemini repository.
+// gemini repository, and the default PR source spelled out.
 export const EXAMPLE_CONFIG = {
   schema: CONFIG_SCHEMA,
   identity: { github_login: null },
   review: { default_labels: [], repos: { 'MatthewsREIS/gemini': { labels: ['ready-to-merge'] } } },
+  prs: { source: 'board' },
 };
 
 export function exampleConfigText() {
@@ -47,7 +60,7 @@ export function exampleConfigText() {
 
 // The defaults the board runs with when there is no usable file.
 export function defaultConfig() {
-  return { schema: CONFIG_SCHEMA, identity: { github_login: null }, review: { default_labels: [], repos: {} } };
+  return { schema: CONFIG_SCHEMA, identity: { github_login: null }, review: { default_labels: [], repos: {} }, prs: { source: 'board', configured: false } };
 }
 
 export function defaultConfigPath(env = process.env) {
@@ -115,7 +128,34 @@ export function parseConfig(text) {
       }
     }
   }
+  if (doc.prs !== undefined) {
+    if (!isObject(doc.prs)) return { config: defaultConfig(), error: 'prs is not an object' };
+    const source = doc.prs.source;
+    if (source !== undefined) {
+      if (!PR_SOURCES.includes(source)) return { config: defaultConfig(), error: `prs.source is not ${PR_SOURCES.map((s) => `"${s}"`).join(' or ')} (got ${JSON.stringify(source)})` };
+      config.prs = { source, configured: true };
+    }
+  }
   return { config, error: null };
+}
+
+// The PR source the config asks for: 'firstmate' or 'board' (the default, and
+// what a config without the key means).
+export function prSource(config) {
+  return config && config.prs && config.prs.source === 'firstmate' ? 'firstmate' : 'board';
+}
+
+// The source one refresh uses and why, given whether gh is on PATH:
+// { kind: 'board' | 'firstmate', reason: 'default' | 'config' | 'gh-missing' }.
+// "firstmate" in the file wins whatever PATH holds; "board" is the board's
+// own fetch when gh is there and the script when it is not, the reason then
+// naming the missing gh rather than the file. lib/sources.mjs fetchPrs runs
+// what this names and hands it back, so the Settings page can say what the
+// last refresh actually used.
+export function prSourceInEffect(config, ghOnPath) {
+  if (prSource(config) === 'firstmate') return { kind: 'firstmate', reason: 'config' };
+  if (!ghOnPath) return { kind: 'firstmate', reason: 'gh-missing' };
+  return { kind: 'board', reason: config && config.prs && config.prs.configured ? 'config' : 'default' };
 }
 
 // The labels a PR in `repo` must carry one of to be listed in To review, or

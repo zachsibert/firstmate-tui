@@ -30,14 +30,16 @@
 # reads it), the config file to `--config <temp file>` or a
 # temporary XDG_CONFIG_HOME. The r key is checked against a stand-in firstmate
 # home whose bin/fm-fleet-snapshot.sh and bin/fm-bearings-snapshot.sh only log
-# that they ran and print canned JSON, with tests/fake-gh.sh first on PATH as
+# that they ran and print canned JSON (the populated fixture's snapshot;
+# tests/fixtures/bearings-prs.json), with tests/fake-gh.sh first on PATH as
 # `gh` (it logs each call and answers `api user` with a login and `api
 # graphql` with canned PRs, dispatched on the search string or the lookup's
 # aliases; it fails on `pr list`), so a live --render-once with --keys r shows
 # exactly which fetches a refresh triggers without GitHub or a real home; a run
-# under a PATH holding no gh proves the fallback to the firstmate script. Every
-# live render must put the fake gh first on PATH, or the board's own fetch
-# reaches the real GitHub CLI. The identity chain (the config file, then gh,
+# under a PATH holding no gh proves the fallback to the firstmate script, and a
+# config file with prs.source firstmate proves the opt-in to it with gh there.
+# Every live render must put the fake gh first on PATH, or the board's own
+# fetch reaches the real GitHub CLI. The identity chain (the config file, then gh,
 # then git) runs against a temporary config directory, the fake gh and a fake
 # git that answers `config --get github.user` alone. The refresh schedule
 # itself (one tick runs the snapshot and then the gh calls; a tick during a
@@ -141,6 +143,10 @@
 #                   its two home paths are placeholders the suite rewrites to
 #                   scratch homes holding the files, a fake fm-fleet-snapshot.sh
 #                   and tests/fake-captain-hold.sh (the hold section below)
+#   bearings-prs.json  not a frame: what the stand-in home's
+#                   fm-bearings-snapshot.sh prints, three rows in the script's
+#                   shape, one carrying the head commit's contexts (its _note
+#                   says what each proves)
 #   cold-start.json 120x40, the first refresh in flight with nothing landed:
 #                   no snapshot, no prs block, no herdr block, so every pane
 #                   shows its loading spinner (the two PR panes each naming
@@ -188,14 +194,15 @@ fake_herdr_env() {
 }
 # A stand-in firstmate home for the live-refresh checks: both snapshot scripts
 # append one line to FM_BOARD_TEST_FETCH_LOG and print canned JSON (the
-# populated fixture's snapshot; an empty PR list). Nothing reaches GitHub.
+# populated fixture's snapshot; the three PR rows of
+# tests/fixtures/bearings-prs.json). Nothing reaches GitHub.
 FAKE_HOME="$SCRATCH/firstmate"
 mkdir -p "$FAKE_HOME/bin"
 node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).snapshot))' "$FIX/populated.json" > "$FAKE_HOME/snapshot.json"
 # shellcheck disable=SC2016 # the fakes expand $FM_BOARD_TEST_FETCH_LOG at run time, not here
 printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\ncat "%s"\n' "$FAKE_HOME/snapshot.json" > "$FAKE_HOME/bin/fm-fleet-snapshot.sh"
 # shellcheck disable=SC2016
-printf '#!/usr/bin/env bash\necho "prs $*" >> "$FM_BOARD_TEST_FETCH_LOG"\necho "{\\"candidate_prs\\":[]}"\n' > "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
+printf '#!/usr/bin/env bash\necho "prs $*" >> "$FM_BOARD_TEST_FETCH_LOG"\ncat "%s"\n' "$FIX/bearings-prs.json" > "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
 chmod +x "$FAKE_HOME/bin/fm-fleet-snapshot.sh" "$FAKE_HOME/bin/fm-bearings-snapshot.sh"
 # The stand-in's fm-captain-hold.sh is the fake too, so the pty section's D prompt never reaches a
 # real firstmate command (tests/fake-captain-hold.sh logs to FM_BOARD_TEST_HOLD_LOG).
@@ -1980,6 +1987,20 @@ assert_row "$frame_tr" '^│ PR fetch off \(--no-prs\) +│$' "--no-prs while th
 # unavailable branch from prPaneEmpty).
 frame_tr=$(render "$(variant to-review.json no-gh '{"prs": {"candidate_prs": [], "toreview": {"unavailable": "gh not on PATH"}}}')") || fail "to-review no gh: render exited non-zero"
 assert_row "$frame_tr" "^│ gh not on PATH: Teammates' PRs needs the GitHub CLI +│\$" "without gh Teammates' PRs names the CLI it needs"
+# The config's own reason (lib/model.mjs SCRIPT_CONFIGURED, the second `unavailable` reason): the pane
+# names the board's own fetch, not the CLI (falsify: one text for every reason in prPaneEmpty).
+frame_tr=$(render "$(variant to-review.json script-source '{"prs": {"candidate_prs": [], "toreview": {"unavailable": "config prs.source = firstmate"}}}')") || fail "to-review script source: render exited non-zero"
+assert_row "$frame_tr" "^│ config prs.source = firstmate: Teammates' PRs needs the board's own fetch +│\$" "with prs.source firstmate Teammates' PRs names the board's own fetch as what it needs"
+# The fixture's prs.source reaches the Settings page's PR source line in each of its shapes; without
+# the block a fixture reads the board default whatever PATH holds (the settings section below), so a
+# frame never depends on the host's gh (falsify: drop prSourceFromFixture, or ask whichOnPath for a
+# fixture render).
+frame_tr=$(render "$(variant to-review.json source-firstmate-config '{"prs": {"source": {"kind": "firstmate", "reason": "config"}}}')" --install-root "$SCRATCH/nowhere" --keys ".") || fail "to-review source firstmate settings: render exited non-zero"
+assert_row "$frame_tr" '^ PR source +firstmate: fm-bearings-snapshot.sh \(config prs.source\) +$' "Settings: a fixture's prs.source firstmate by config reads on the PR source line"
+frame_tr=$(render "$(variant to-review.json source-firstmate-nogh '{"prs": {"source": {"kind": "firstmate", "reason": "gh-missing"}}}')" --install-root "$SCRATCH/nowhere" --keys ".") || fail "to-review source gh-missing settings: render exited non-zero"
+assert_row "$frame_tr" '^ PR source +firstmate: fm-bearings-snapshot.sh \(gh not on PATH; the script needs gh too, so both sources fail the same way\) +$' "Settings: the gh-missing reason says both sources fail alike without gh (falsify: reuse the config wording for gh-missing)"
+frame_tr=$(render "$(variant to-review.json source-board-config '{"prs": {"source": {"kind": "board", "reason": "config"}}}')" --install-root "$SCRATCH/nowhere" --keys ".") || fail "to-review source board config settings: render exited non-zero"
+assert_row "$frame_tr" "^ PR source +board: the board's own GitHub fetch \\(config\\) +\$" "Settings: a board source the file set reads (config)"
 # The help names the sixth pane and its key (falsify: change the 1 - 6 lines in HELP_LINES).
 frame_tr=$(render to-review.json --keys "?") || fail "to-review help: render exited non-zero"
 assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] In flight" "help overlay documents 1-6"
@@ -2120,19 +2141,80 @@ for expected in "none=none" "none-null=none" "passing=passing" "passing-state=pa
   if printf '%s\n' "$unit_out" | grep -Fxq -- "$expected"; then pass; else fail "sources: expected line '$expected' in: $unit_out"; fi
 done
 
+# fm-bearings-snapshot.sh's rows through the board's own projection (lib/sources.mjs projectScriptPr,
+# what runBearingsPrs maps every candidate_prs row through): a row carrying only the script's checks
+# word keeps it, since the board has nothing else to judge; a row carrying the contexts themselves
+# (gh's statusCheckRollup list, or contexts bare or as { nodes }) is judged by checksState's
+# newest-run rule and the word is ignored, so a cancelled run a re-run superseded reads passing there
+# and a cancelled run that is the newest reads failing; an unknown or missing word reads none; the
+# script's fields come through with title, base and creation time null, so the row falls back to the
+# recorded title and the status-log age as the fallback rows always have; and the pane is always mine
+# (falsify: spread the row as it is in runBearingsPrs, read the word when a list is there, or judge
+# every run of the list).
+script_out=$(node --input-type=module -e "
+  import { projectScriptPr } from '$ROOT/bin/firstmate-tui/lib/sources.mjs';
+  const out = [];
+  const run = (name, wf, conclusion, s, c) => ({ __typename: 'CheckRun', name, workflowName: wf, status: 'COMPLETED', conclusion, startedAt: s, completedAt: c });
+  const cancelled = run('hive', 'Schema', 'CANCELLED', '2026-09-18T19:38:34Z', '2026-09-18T19:38:39Z');
+  const superseded = [cancelled, run('merge check', 'CI', 'SUCCESS', '2026-09-18T19:32:55Z', '2026-09-18T19:33:00Z'), run('hive', 'Schema', 'SUCCESS', '2026-09-18T19:42:10Z', '2026-09-18T19:42:16Z')];
+  const word = projectScriptPr({ num: '41', repo: 'acme/widgets', task: 'ship-alpha', url: 'https://github.com/acme/widgets/pull/41', review: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', checks: 'failing' });
+  out.push(['word', [word.num, word.repo, word.task, word.url, word.review, word.mergeable, word.checks, word.title, word.base, word.created_at, word.state, word.pane].map(String).join(' ')]);
+  out.push(['list', projectScriptPr({ num: '6148', repo: 'MatthewsREIS/gemini', task: '-', url: 'https://github.com/MatthewsREIS/gemini/pull/6148', review: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', checks: 'failing', statusCheckRollup: superseded }).checks]);
+  out.push(['list-cancelled-newest', projectScriptPr({ num: '1', repo: 'a/b', url: 'https://github.com/a/b/pull/1', checks: 'passing', statusCheckRollup: [superseded[2], { ...cancelled, startedAt: '2026-09-18T19:50:00Z', completedAt: '2026-09-18T19:50:05Z' }] }).checks]);
+  out.push(['contexts-bare', projectScriptPr({ num: '2', repo: 'a/b', url: 'https://github.com/a/b/pull/2', checks: 'passing', contexts: [run('x', 'W', 'FAILURE', '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z')] }).checks]);
+  out.push(['contexts-nodes', projectScriptPr({ num: '3', repo: 'a/b', url: 'https://github.com/a/b/pull/3', checks: 'failing', contexts: { nodes: [] } }).checks]);
+  out.push(['unknown-word', projectScriptPr({ num: '4', repo: 'a/b', url: 'https://github.com/a/b/pull/4', checks: 'Green' }).checks]);
+  out.push(['no-word', projectScriptPr({ num: '5', repo: 'a/b', url: 'https://github.com/a/b/pull/5' }).checks]);
+  const empty = projectScriptPr({});
+  out.push(['empty', [empty.num, empty.repo, empty.task, empty.url, empty.review, empty.mergeable, empty.checks].join(' ')]);
+  out.push(['repo-from-url', projectScriptPr({ num: '6', url: 'https://github.com/acme/api/pull/6', checks: 'pending' }).repo]);
+  out.push(['pane', projectScriptPr({ num: '7', repo: 'a/b', url: 'https://github.com/a/b/pull/7', checks: 'pending', pane: 'toreview' }).pane]);
+  process.stdout.write(out.map(([k, v]) => k + '=' + v).join('\n'));
+") || fail "script projection checks: node exited non-zero: $script_out"
+for expected in "word=41 acme/widgets ship-alpha https://github.com/acme/widgets/pull/41 REVIEW_REQUIRED MERGEABLE failing null null null null mine" \
+  "list=passing" "list-cancelled-newest=failing" "contexts-bare=failing" "contexts-nodes=none" "unknown-word=none" "no-word=none" \
+  "empty=- - - - none UNKNOWN none" "repo-from-url=acme/api" "pane=mine"; do
+  if printf '%s\n' "$script_out" | grep -Fxq -- "$expected"; then pass; else fail "script projection: expected line '$expected' in: $script_out"; fi
+done
+
 # The config file's pure pieces (lib/config.mjs): the example is byte for byte docs/config.example.json,
 # a malformed or mistyped file gives the defaults with a reason, unknown keys are ignored, and the
 # label rule reads a repository's own entry before the default (an empty own list is unfiltered),
 # matching the repository name without case as GitHub does (falsify: change EXAMPLE_CONFIG, accept a
 # non-list default_labels, apply default_labels to a repository with its own entry, or compare the
-# names with case).
+# names with case). prs.source takes "board" or "firstmate" and nothing else: an absent prs, an empty
+# one and the example all read board, the example (which spells it out) as configured, the others
+# not; a bad value or a prs that is not an object is a malformed field naming the key and the allowed
+# values, and gives the defaults as a whole. prSourceInEffect is the one rule for which source a
+# fetch uses: firstmate in the file wins whatever PATH holds, board is the board's own fetch with gh
+# and the script without, the reason then naming gh (falsify: accept a third value, read a
+# configured flag for an absent key, or let a missing gh override a configured firstmate's reason).
 config_out=$(node --input-type=module -e "
-  import { exampleConfigText, parseConfig, labelsFor, passesLabelRule, configuredRepos, resolveConfigPath, defaultConfigPath } from '$ROOT/bin/firstmate-tui/lib/config.mjs';
+  import { exampleConfigText, parseConfig, labelsFor, passesLabelRule, configuredRepos, resolveConfigPath, defaultConfigPath, defaultConfig, prSource, prSourceInEffect } from '$ROOT/bin/firstmate-tui/lib/config.mjs';
   import { readFileSync } from 'node:fs';
   const out = [];
   out.push(['example', exampleConfigText() === readFileSync('$ROOT/docs/config.example.json', 'utf8')]);
   const ex = parseConfig(exampleConfigText());
   out.push(['example-parse', [String(ex.error), String(ex.config.identity.github_login), ex.config.review.default_labels.length, configuredRepos(ex.config).join(','), labelsFor(ex.config, 'MatthewsREIS/gemini').join(',')].join(' ')]);
+  const prs = (text) => { const p = parseConfig(text); return [String(p.error), p.config.prs.source, p.config.prs.configured, prSource(p.config)].join(' '); };
+  out.push(['prs-example', prs(exampleConfigText())]);
+  out.push(['prs-absent', prs('{\"schema\":\"firstmate-tui-config.v1\"}')]);
+  out.push(['prs-empty', prs('{\"prs\":{}}')]);
+  out.push(['prs-board', prs('{\"prs\":{\"source\":\"board\"}}')]);
+  out.push(['prs-firstmate', prs('{\"prs\":{\"source\":\"firstmate\"}}')]);
+  out.push(['prs-bad', prs('{\"identity\":{\"github_login\":\"kept\"},\"prs\":{\"source\":\"github\"}}')]);
+  out.push(['prs-bad-login', String(parseConfig('{\"identity\":{\"github_login\":\"kept\"},\"prs\":{\"source\":\"github\"}}').config.identity.github_login)]);
+  out.push(['prs-null', prs('{\"prs\":{\"source\":null}}')]);
+  out.push(['prs-not-object', prs('{\"prs\":\"firstmate\"}')]);
+  out.push(['prs-default', [defaultConfig().prs.source, defaultConfig().prs.configured, prSource(null)].join(' ')]);
+  const effect = (text, gh) => { const e = prSourceInEffect(parseConfig(text).config, gh); return e.kind + ' ' + e.reason; };
+  out.push(['effect-absent-gh', effect('{}', true)]);
+  out.push(['effect-absent-nogh', effect('{}', false)]);
+  out.push(['effect-board-gh', effect('{\"prs\":{\"source\":\"board\"}}', true)]);
+  out.push(['effect-board-nogh', effect('{\"prs\":{\"source\":\"board\"}}', false)]);
+  out.push(['effect-firstmate-gh', effect('{\"prs\":{\"source\":\"firstmate\"}}', true)]);
+  out.push(['effect-firstmate-nogh', effect('{\"prs\":{\"source\":\"firstmate\"}}', false)]);
+  out.push(['effect-bad-gh', effect('{\"prs\":{\"source\":\"github\"}}', true)]);
   // Node's JSON.parse message differs between versions (20 stops at the position, 26 adds the line
   // and column), so only the board's own prefix is pinned.
   out.push(['bad-json', String(parseConfig('{').error).startsWith('bad JSON (') ? 'bad JSON (...)' : String(parseConfig('{').error)]);
@@ -2159,6 +2241,14 @@ config_out=$(node --input-type=module -e "
 ") || fail "config unit checks: node exited non-zero: $config_out"
 for expected in "example=true" \
   "example-parse=null null 0 MatthewsREIS/gemini ready-to-merge" \
+  "prs-example=null board true board" "prs-absent=null board false board" "prs-empty=null board false board" \
+  "prs-board=null board true board" "prs-firstmate=null firstmate true firstmate" \
+  'prs-bad=prs.source is not "board" or "firstmate" (got "github") board false board' "prs-bad-login=null" \
+  'prs-null=prs.source is not "board" or "firstmate" (got null) board false board' \
+  "prs-not-object=prs is not an object board false board" "prs-default=board false board" \
+  "effect-absent-gh=board default" "effect-absent-nogh=firstmate gh-missing" \
+  "effect-board-gh=board config" "effect-board-nogh=firstmate gh-missing" \
+  "effect-firstmate-gh=firstmate config" "effect-firstmate-nogh=firstmate config" "effect-bad-gh=board default" \
   "bad-json=bad JSON (...)" \
   "not-object=not an object" "schema=unexpected schema other.v9" "login-type=identity.github_login is not a string" \
   "labels-type=review.default_labels is not a list" 'repo-name=review.repos: "gemini" is not owner/name' \
@@ -2299,6 +2389,75 @@ assert_contains "$frame_r" "gh not on PATH: PR data from fm-bearings-snapshot.sh
 assert_row "$frame_r" "^│ gh not on PATH: Teammates' PRs needs the GitHub CLI +│\$" "without gh Teammates' PRs says what it needs"
 assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "without gh My PRs still lists the recorded PRs (the script fallback needs no login)"
 assert_not_contains "$frame_r" "identity unknown" "without gh no identity row: the fallback lists recorded PRs whoever the captain is"
+# The script's rows (tests/fixtures/bearings-prs.json) through the board's projection: a row with only
+# the script's checks word keeps it, under the recorded task's title, BASE - and no PR age (no status
+# file on this host, so the stand-in age is -); a row carrying the head commit's contexts is judged by
+# the board's newest-run rule, so PR 6148's superseded cancelled run reads passing although the
+# script's own word says failing (falsify: spread the row as it is in runBearingsPrs, or prefer the
+# word over the list in projectScriptPr).
+assert_row "$frame_r" '^│ failing +IN REVIEW +ship-alpha +Add the widget cache +- +- │$' "without gh a script row with only its checks word keeps the word, with the recorded title and BASE -"
+assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#6148 +https://github.com/MatthewsREIS/gemini/pull/6148 +- +- │$' "without gh a script row carrying its contexts reads passing through the board's rule, not the script's failing"
+assert_no_row "$frame_r" '^│ failing +[^│]*gemini#6148' "without gh the 6148 row never reads failing"
+# The Settings page under the same PATH: the PR source line reads what the fetch used, firstmate
+# because gh is missing, although this config (the example) says board, and says both sources fail
+# alike without gh (falsify: build the line from the config alone).
+frame_r=$(FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$NOGH_BIN" "$NOGH_BIN/node" "$ROOT/bin/firstmate-tui/index.mjs" --render-once --no-herdr --install-root "$SCRATCH/nowhere" --keys "." --rows 60 --cols 200) || fail "settings without gh: render exited non-zero"
+assert_row "$frame_r" '^ PR source +firstmate: fm-bearings-snapshot.sh \(gh not on PATH; the script needs gh too, so both sources fail the same way\) +$' "Settings: without gh the PR source line reads firstmate for the missing gh, whatever the file says"
+# prs.source = firstmate in the config file: the script runs although the fake gh is first on PATH, no
+# search is issued, the identity is still resolved once (gh api user, as on the board source), the
+# footer names the config as the reason once, Teammates' PRs says it needs the board's own fetch, and
+# My PRs lists the script's canned rows with their checks words and the stand-in age. prs.source =
+# board spelled out, and a file without the key, make exactly the default's calls; the Settings line
+# tells the two apart. --no-prs is off whatever the file says (falsify: test gh on PATH before the
+# config in fetchPrs, drop the config reason from SCRIPT_NOTES or SCRIPT_CONFIGURED from prPaneEmpty,
+# or build the Settings line without the configured flag).
+render_source() { # <xdg dir> [flags]: a live render with the fake gh first on PATH and its own config directory
+  rm -f "${FETCH_LOG:?}"
+  FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$1" PATH="$FAKE_BIN:$PATH" "$BOARD" --render-once --no-herdr --rows 60 "${@:2}"
+}
+mkdir -p "$SCRATCH/src-firstmate/fm-board" "$SCRATCH/src-board/fm-board" "$SCRATCH/src-unset/fm-board" "$SCRATCH/src-bad/fm-board"
+src_review='"review":{"default_labels":[],"repos":{"MatthewsREIS/gemini":{"labels":["ready-to-merge"]}}}'
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":null},%s,"prs":{"source":"firstmate"}}\n' "$src_review" > "$SCRATCH/src-firstmate/fm-board/config.json"
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":null},%s,"prs":{"source":"board"}}\n' "$src_review" > "$SCRATCH/src-board/fm-board/config.json"
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":null},%s}\n' "$src_review" > "$SCRATCH/src-unset/fm-board/config.json"
+printf '{"schema":"firstmate-tui-config.v1","identity":{"github_login":null},%s,"prs":{"source":"github"}}\n' "$src_review" > "$SCRATCH/src-bad/fm-board/config.json"
+frame_r=$(render_source "$SCRATCH/src-firstmate" --keys "r" --cols 260) || fail "source firstmate: render exited non-zero"
+assert_fetch_log "snapshot
+gh api user --jq .login
+prs --json --include-prs
+snapshot
+prs --json --include-prs" "prs.source firstmate: the start and r each run the snapshot and fm-bearings-snapshot.sh --include-prs, the identity is asked once, and no gh graphql search runs although gh is on PATH"
+assert_contains "$frame_r" "PR data from fm-bearings-snapshot.sh (config prs.source = firstmate): open PRs only, without titles, base branches or PR creation times; Teammates' PRs needs the board's own fetch" "prs.source firstmate: the footer names the config as the reason and what the script cannot give"
+assert_count "$frame_r" "PR data from fm-bearings-snapshot.sh" 1 "prs.source firstmate: the note is shown once"
+assert_not_contains "$frame_r" "gh not on PATH" "prs.source firstmate: with gh on PATH nothing blames a missing gh"
+assert_row "$frame_r" "^│ config prs.source = firstmate: Teammates' PRs needs the board's own fetch +│\$" "prs.source firstmate: Teammates' PRs says it needs the board's own fetch"
+assert_row "$frame_r" '^│ failing +IN REVIEW +ship-alpha +Add the widget cache +- +- │$' "prs.source firstmate: the script's word-only row keeps its failing word under the recorded title, BASE - and the stand-in age"
+assert_row "$frame_r" '^│ passing +APPROVED +etl#77 +https://github.com/acme/etl/pull/77 +- +- │$' "prs.source firstmate: a script row on no task reads repo#number and its URL, APPROVED from the review decision alone"
+assert_row "$frame_r" '^│ passing +IN REVIEW +gemini#6148 +https://github.com/MatthewsREIS/gemini/pull/6148 +- +- │$' "prs.source firstmate: the row carrying its contexts reads passing through the board's newest-run rule"
+assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "prs.source firstmate: a recorded PR the script did not list stays unlisted"
+assert_contains "$frame_r" "My PRs (4)" "prs.source firstmate: My PRs counts the three script rows and the unlisted recorded PR"
+assert_not_contains "$frame_r" "dotfiles#5" "prs.source firstmate: none of the fake gh's search answers is listed, since no search ran"
+assert_not_contains "$frame_r" "identity unknown" "prs.source firstmate: no identity row, the script needs no login"
+frame_r=$(render_source "$SCRATCH/src-firstmate" --install-root "$SCRATCH/nowhere" --keys ".") || fail "source firstmate settings: render exited non-zero"
+assert_row "$frame_r" '^ PR source +firstmate: fm-bearings-snapshot.sh \(config prs.source\) +$' "Settings: prs.source firstmate reads on the PR source line with the config as the reason"
+frame_r=$(render_source "$SCRATCH/src-board" --keys "r" --cols 160) || fail "source board: render exited non-zero"
+assert_fetch_log "$expected_live" "prs.source board spelled out: the default's calls exactly, the script never runs"
+frame_r=$(render_source "$SCRATCH/src-board" --install-root "$SCRATCH/nowhere" --keys ".") || fail "source board settings: render exited non-zero"
+assert_row "$frame_r" "^ PR source +board: the board's own GitHub fetch \\(config\\) +\$" "Settings: a board source the file set reads (config)"
+frame_r=$(render_source "$SCRATCH/src-unset" --keys "r" --cols 160) || fail "source unset: render exited non-zero"
+assert_fetch_log "$expected_live" "a config without prs.source: the board source, the default's calls exactly"
+frame_r=$(render_source "$SCRATCH/src-unset" --install-root "$SCRATCH/nowhere" --keys ".") || fail "source unset settings: render exited non-zero"
+assert_row "$frame_r" "^ PR source +board: the board's own GitHub fetch \\(default\\) +\$" "Settings: a config without prs.source reads (default)"
+frame_r=$(render_source "$SCRATCH/src-firstmate" --no-prs --install-root "$SCRATCH/nowhere" --keys ".") || fail "source off settings: render exited non-zero"
+assert_fetch_log "snapshot" "--no-prs with prs.source firstmate: neither the script nor gh runs"
+assert_row "$frame_r" '^ PR source +off \(--no-prs\) +$' "Settings: --no-prs reads off on the PR source line whatever the file says"
+# A bad prs.source is a malformed file: the defaults, so the board source runs (without the file's
+# gemini rule), and the footer names the key and the allowed values (falsify: accept the value, or
+# keep the rest of the file on a bad prs.source).
+frame_r=$(render_source "$SCRATCH/src-bad" --cols 260) || fail "source bad: render exited non-zero"
+assert_contains "$frame_r" 'config: '"$SCRATCH"'/src-bad/fm-board/config.json: prs.source is not "board" or "firstmate" (got "github"); running with the defaults' "a bad prs.source is named in the footer with the allowed values"
+if grep -q "prs --json" "$FETCH_LOG"; then fail "a bad prs.source still ran the script: $(cat "$FETCH_LOG")"; else pass; fi
+if grep -q "api graphql" "$FETCH_LOG"; then pass; else fail "a bad prs.source did not fall back to the board's own fetch: $(cat "$FETCH_LOG")"; fi
 frame_r=$(render populated.json --keys "r") || fail "refresh fixture: render exited non-zero"
 assert_contains "$frame_r" "refresh is not available with --fixture" "r on a fixture render only reports"
 # A fixture render runs no script at all, whatever the prs default: with the stand-in home and the log
@@ -2515,6 +2674,9 @@ assert_row "$frame_s" '^ herdr overlay +off \(--no-herdr\) +$' "settings: the he
 assert_row "$frame_s" '^ mouse +on: click selects, double-click acts, wheel scrolls, a header boundary drags +$' "settings: the mouse line, on by default (falsify: drop the mouse entry from settingsFlags)"
 assert_row "$frame_s" '^ Identity +captain  \(from fixture\) +$' "settings: the identity block names the fixture's login and source (falsify: drop settingsInfo from renderSettings)"
 assert_row "$frame_s" '^ Config +none: using defaults \(not read \(fixture render without --config\)\) +$' "settings: a fixture render without --config says no config file was read"
+assert_row "$frame_s" "^ PR source +board: the board's own GitHub fetch \\(default\\) +\$" "settings: the PR source line reads the board default on a fixture without a source block (falsify: drop the line from settingsInfo, or ask PATH for gh on a fixture render)"
+assert_before "$frame_s" '^ Config ' '^ PR source ' "settings: the PR source line follows Config"
+assert_before "$frame_s" '^ PR source ' '^ Review labels ' "settings: the PR source line leads the label rules"
 assert_row "$frame_s" '^ Review labels +default: none +$' "settings: the label rules line with the defaults"
 assert_before "$frame_s" '^ mouse ' '^ Identity ' "settings: the identity block follows the flags"
 assert_row "$frame_s" '^ j/k move  enter choose  r refetch  esc/\. back  \? help +$' "settings: the footer names the page's keys"
@@ -2532,6 +2694,7 @@ assert_count "$(cat "$CURL_LOG")" "api.github.com" 4 "r inside the page fetches 
 frame_s=$(render_settings "$REL" "$INSTALL" "." --no-prs --refresh 45) || fail "settings flags: render exited non-zero"
 assert_row "$frame_s" '^ refresh cadence +45 s \(--refresh\) +$' "settings: the cadence line follows --refresh"
 assert_row "$frame_s" '^ PR data +off \(--no-prs\) +$' "settings: the PR data line follows --no-prs"
+assert_row "$frame_s" '^ PR source +off \(--no-prs\) +$' "settings: the PR source line follows --no-prs"
 frame_s=$(render_settings "$REL" "$INSTALL" "." --no-mouse) || fail "settings no-mouse: render exited non-zero"
 assert_row "$frame_s" '^ mouse +off \(--no-mouse\) +$' "settings: the mouse line follows --no-mouse"
 # Without --curl-cmd a one-shot render fetches nothing, not even through a curl on PATH (falsify:

@@ -26,6 +26,12 @@
 //             loadOrCreateConfig plus the config's review block): where the
 //             config file is and whether it was created, loaded or replaced
 //             by the defaults; settingsInfo() turns both into read-only lines
+//   prSource  { enabled, kind, reason }: where the PR panes' data comes from,
+//             the { kind, reason } lib/sources.mjs fetchPrs hands back with
+//             every fetch (board or firstmate; default, config or gh-missing)
+//             behind `enabled` (false under --no-prs); the app sets it from
+//             the planned source at startup and from each refresh after, so
+//             the PR source line reads what the last refresh actually used
 //   releases  { state: idle | fetching | ready | error, fetchedAt, latest |
 //             null, latestError, betas[], error, idleReason }
 //   menu      'main' | 'betas'      cursor  index into the selectable entries
@@ -112,10 +118,21 @@ export function settingsFlags(opts) {
   ];
 }
 
+// The PR source line's words (the state's prSource): which source the last
+// refresh used and why. gh missing is the one warning: fm-bearings-snapshot.sh
+// calls gh itself, so both sources fail the same way without it.
+export const PR_SOURCE_GH_MISSING = 'firstmate: fm-bearings-snapshot.sh (gh not on PATH; the script needs gh too, so both sources fail the same way)';
+export function describePrSource(p) {
+  if (!p || !p.enabled) return 'off (--no-prs)';
+  if (p.kind === 'firstmate') return p.reason === 'gh-missing' ? PR_SOURCE_GH_MISSING : 'firstmate: fm-bearings-snapshot.sh (config prs.source)';
+  return `board: the board's own GitHub fetch (${p.reason === 'config' ? 'config' : 'default'})`;
+}
+
 // The read-only block after the flags: who the PR panes are built around,
-// where the config file is and what it says about To review. Pure entries,
-// no actions. `bad` marks the two warnings (an identity resolved unknown, a
-// config file replaced by the defaults; a null identity is still being
+// where the config file is, where the PR data comes from and what the file
+// says about To review. Pure entries, no actions. `bad` marks the three
+// warnings (an identity resolved unknown, a config file replaced by the
+// defaults, the script running without gh; a null identity is still being
 // resolved and reads so, not as a warning); a line with an empty label
 // continues the one above it (the per-repository label rules).
 export function settingsInfo(s) {
@@ -133,6 +150,8 @@ export function settingsInfo(s) {
   else if (config.status === 'defaults') where = `${config.path}  (using defaults: ${config.error || config.problem || 'unreadable'})`;
   else where = config.path;
   lines.push({ label: 'Config', value: where, bad: config.status === 'defaults' });
+  const prSource = s.prSource ?? null;
+  lines.push({ label: 'PR source', value: describePrSource(prSource), bad: Boolean(prSource && prSource.enabled && prSource.kind === 'firstmate' && prSource.reason === 'gh-missing') });
   const review = config.review || { default_labels: [], repos: {} };
   const defaults = Array.isArray(review.default_labels) && review.default_labels.length ? review.default_labels.join(', ') : 'none';
   lines.push({ label: 'Review labels', value: `default: ${defaults}`, bad: false });
@@ -148,12 +167,13 @@ export function settingsConfig(cfg) {
   return { path: cfg.path, problem: cfg.problem, status: cfg.status, error: cfg.error, review: cfg.config.review };
 }
 
-export function initialSettings({ install, flags, idleReason = null, identity = null, config = null }) {
+export function initialSettings({ install, flags, idleReason = null, identity = null, config = null, prSource = null }) {
   return {
     install,
     flags,
     identity,
     config,
+    prSource,
     releases: { state: 'idle', fetchedAt: null, latest: null, latestError: null, betas: [], error: null, idleReason },
     menu: 'main',
     cursor: 0,

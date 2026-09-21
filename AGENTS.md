@@ -59,7 +59,9 @@ belong to later milestones.
   path inside `FM_HOME`), `config.json` beside
   it (`lib/config.mjs`, the same chain, passed by the launcher as `--config`
   the way `--view-state` is): the GitHub login the two PR panes are built
-  around and the Teammates' PRs label rules, and `state-cache.json` beside
+  around, the Teammates' PRs label rules and `prs.source` (`board`, the
+  default, or `firstmate`, the opt-in to firstmate's script; the parsed
+  config's `prs.configured` says whether the file set it), and `state-cache.json` beside
   both (`lib/cache.mjs`: the last facts drawn, written after a clean refresh
   and on quit, drawn at once on the next launch with `(cached Nm ago)` on
   every pane title until that pane's live source lands; `facts.cached` in
@@ -108,10 +110,19 @@ belong to later milestones.
   replace it, it carries no review decision, checks or base branch, and
   `user-review-requested:` must not replace `review-requested:`, it drops the
   team requests. The candidate rule copies `fm-bearings-snapshot.sh`, which
-  stays the My PRs fallback when gh is not on PATH; the checks rule
+  stays the My PRs fallback when gh is not on PATH and is the PR source
+  outright when the config file's `prs.source` is `firstmate`
+  (`prSourceInEffect` in `lib/config.mjs` is the one rule; `fetchPrs` hands
+  the source it used back for the Settings page's PR source line, and
+  Teammates' PRs is `unavailable` with `GH_MISSING` or `SCRIPT_CONFIGURED`
+  from `lib/model.mjs` as the reason); the checks rule
   (`checksState`) judges only the newest run of each check on the head
   commit, which that script does not, so a cancelled run a re-run superseded
-  never reads failing here), and upgrading itself from the Settings page (`.`): only after a
+  never reads failing here. The script's rows go through `projectScriptPr`,
+  so a row that ever carries its check runs is judged by the same rule, and
+  a row with only the script's `checks` word keeps the word; do not
+  recompute the word from nothing or copy the script into this repository),
+  and upgrading itself from the Settings page (`.`): only after a
   `y` confirmation, only by running the installed launcher's own
   `firstmate-tui upgrade --version <v>` / `--stable` (`lib/upgrade.mjs`, argv
   spawn of `bash <prefix>/bin/firstmate-tui.sh upgrade ...`), so the record checks

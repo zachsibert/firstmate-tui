@@ -72,7 +72,9 @@
 //                                   checks, created_at?, title?, base?, draft?,
 //                                   state?, merged_at?, closed_at?, author?,
 //                                   labels?, requested?, my_review?, pane? } ],
-//              "error"?, "identity"?, "mine"?, "toreview"? } | null,
+//              "error"?, "identity"?, "mine"?, "toreview"?,
+//              "source"?: { "kind": "board" | "firstmate",
+//                           "reason": "default" | "config" | "gh-missing" } } | null,
 //     "snapshot_error": text (optional; marks the four snapshot panes stale),
 //     "refresh": { "next_in": seconds, "refreshing": bool, "failed_ago": seconds,
 //                  "failed": text, "loading_frame": N } (optional; every field optional),
@@ -107,7 +109,10 @@
 // and prs.toreview carry a pane's own { error, fetched, scope, unavailable }
 // (fetched: false keeps that pane before its first fetch; scope: [] is an
 // empty To review scope), the top-level "error" standing for both when a pane
-// has no block.
+// has no block. prs.source is what the Settings page's PR source line reads
+// (the { kind, reason } a live fetch hands back); absent, a fixture stands
+// for the board's own fetch by default, never consulting PATH for gh, so a
+// fixture frame is the same on every host.
 // With --no-herdr the fixture's herdr block is still applied as an offline
 // overlay (state "fixture", which the title line treats as connected: no
 // herdr text) so the join is testable without a live server; a "state" in
@@ -123,7 +128,7 @@ import { buildModel, initialPrs, mergePrs, prsFailureText } from './lib/model.mj
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
 import { focusFromSaved, focusProblem, handleKey, handleMouse, openDeferPrompt, scrollFromSaved, viewProblem } from './lib/controller.mjs';
 import { deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, prepareHoldCard, removeTempDir } from './lib/hold.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
@@ -181,7 +186,7 @@ function factsFromFixture(path, opts) {
   const refresh = refreshFromFixture(fx.refresh, now);
   return {
     // `identity` beside `prs` is what the Settings page reads when the fetch is off.
-    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs: prsFromFixture(fx.prs, opts, now), identity: identityFromFixture(fx.prs), refresh, mtime: fixtureMtime, statusVerbs: fixtureVerbs },
+    facts: { now, fmHome, snapshot, snapshotAt: snapshot ? now - Number(fx.snapshot_age_seconds ?? 12) : null, snapshotError: fx.snapshot_error || null, ledgers, herdr, prs: prsFromFixture(fx.prs, opts, now), identity: identityFromFixture(fx.prs), prSource: prSourceFromFixture(fx.prs), refresh, mtime: fixtureMtime, statusVerbs: fixtureVerbs },
     size: { cols: opts.cols || fx.cols || 120, rows: opts.rows || fx.rows || 40 },
   };
 }
@@ -213,6 +218,15 @@ export function prsFromFixture(block, opts, now) {
     };
   };
   return { enabled: true, fetchedAt: fetched, error: topError, candidate_prs: block && Array.isArray(block.candidate_prs) ? block.candidate_prs : [], identity: identityFromFixture(block), mine: pane('mine'), toreview: pane('toreview') };
+}
+
+// The fixture's prs.source -> the { kind, reason } the Settings page's PR
+// source line reads: the block's own when it has one, else the board's own
+// fetch by default (a fixture never asks PATH whether gh is there).
+export function prSourceFromFixture(block) {
+  const given = block && block.source && typeof block.source === 'object' ? block.source : null;
+  if (given && (given.kind === 'board' || given.kind === 'firstmate')) return { kind: given.kind, reason: typeof given.reason === 'string' && given.reason ? given.reason : given.kind === 'board' ? 'default' : 'config' };
+  return { kind: 'board', reason: 'default' };
 }
 
 // The fixture's refresh block -> the facts the title line reads (lib/model.mjs
@@ -266,7 +280,8 @@ async function factsLive(opts, cfg) {
   }
   return {
     // A one-shot render has no schedule, so the title line carries no refresh label.
-    facts: { now: now(), fmHome, snapshot, snapshotAt: snapshot ? now() : null, snapshotError: snap.error, ledgers, herdr, prs, refresh: null, mtime, statusVerbs, identity, config: cfg.config },
+    // prSource is what this fetch used (fetchPrs), as the app's Settings page reads it.
+    facts: { now: now(), fmHome, snapshot, snapshotAt: snapshot ? now() : null, snapshotError: snap.error, ledgers, herdr, prs, prSource: r ? r.source : null, refresh: null, mtime, statusVerbs, identity, config: cfg.config },
     size: { cols: opts.cols || process.stdout.columns || 120, rows: opts.rows || process.stdout.rows || 40 },
   };
 }
@@ -354,6 +369,7 @@ async function driveOnce(facts, opts, size, cfg) {
     idleReason: opts.curlCmd ? null : 'not fetched (no --curl-cmd in --render-once)',
     identity: facts.prs && facts.prs.identity ? facts.prs.identity : facts.identity || null,
     config: settingsConfig(cfg),
+    prSource: opts.prs ? { enabled: true, ...(facts.prSource || plannedPrSource(cfg.config, process.env)) } : { enabled: false },
   });
   const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, prompt: null, busy: null, page: 'board', settings };
   // The login a discard names: the fixture's or the live identity, else the OS user.
@@ -533,6 +549,7 @@ async function driveOnce(facts, opts, size, cfg) {
           .then((text) => ctx.notice(text))
           .then(() => {
             settings.identity = facts.identity || settings.identity;
+            if (facts.prSource) settings.prSource = { enabled: true, ...facts.prSource };
             ctx.rebuild();
           }),
       );
@@ -631,6 +648,7 @@ async function refreshLive(facts, opts, cfg) {
   }
   const r = await fetchPrs(facts.fmHome, facts.snapshot, { identity: facts.identity, config: cfg.config, timeoutMs });
   facts.prs = mergePrs(facts.prs, r, Math.floor(Date.now() / 1000), facts.identity);
+  facts.prSource = r.source || facts.prSource || null;
   const failure = prsFailureText(r);
   if (failure) return `PR fetch: ${failure}`;
   return r.note ? `refreshed: snapshot and PR checks · ${r.note}` : 'refreshed: snapshot and PR checks';
