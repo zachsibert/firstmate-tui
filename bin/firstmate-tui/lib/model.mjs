@@ -952,18 +952,30 @@ function prPaneEmpty(facts, pane) {
 // tied to its own item (holds/decisions_open/queued by id, used below for the
 // child's title, decision text or hold reason) but not to a coarser
 // initiative, and item-level grouping would reproduce one row per worker.
-// FALLBACK IN EFFECT: group by home. The group row shows the worst state among
-// the mate's agent row, its children and the mate's own relayed decisions, the
-// live worker count, the child ids, the shared repo and the newest child event;
-// expanding it lists the mate's own agent row, every child, the home's live
-// captain decisions and the mate's relayed decisions. When the ledger grows a
+// FALLBACK IN EFFECT: group by home. A group is built from the home's live
+// work only: its child rows (ledgerChildRows: every active_children entry,
+// plus the endpoints whose state is live, that is not done and not unknown
+// without a herdr pane) and its open decisions (the ledger's live
+// decisions_open, and the keyed decisions and blocker the delegate relayed
+// through its own task record in the main home, hints.open_decisions /
+// blocked_event). The delegate's own task record contributes nothing else:
+// its current_state is the last verb of its own status log, "done" after any
+// done relay, so it never sets the group's STATE and never lists as a child.
+// The group row shows the worst state among the child rows and the decisions
+// (groupState; idle when none of them is live work), the live worker count,
+// the child ids (idle when there are none), the shared repo and the newest
+// child event, else the newest decision; expanding it lists the child rows,
+// the home's live captain decisions and the relayed decisions. Finished
+// children appear in Landed and nowhere here. When the ledger grows a
 // per-child parent field, make groupKeyFor() read it and the rest stands.
 
-// Worst-state ranking for a group row: blocked > decision > working > failed >
-// everything else (idle, unknown, done, parked). A failed child is the mate's
-// own cleanup, so it does not outrank live work; it shows on expansion.
-const STATE_RANK = { blocked: 0, failed: 3, decide: 1, 'needs-decision': 1, hold: 1, working: 2, 'repairing PR': 2 };
-const INFLIGHT_ORDER = { working: 0, 'repairing PR': 0, blocked: 1, decide: 1, 'needs-decision': 1, hold: 1, unknown: 2, 'awaiting merge': 3, done: 3, failed: 4 };
+// Worst-state ranking for a group row: blocked > decide > hold > working.
+// Only these words are live work; a row with any other tag (idle, unknown,
+// paused, failed) never raises the group, so a group whose only child failed
+// reads idle: a failed child is the delegate's own cleanup, and it shows on
+// expansion. A done row is never built (ledgerChildRows), so it is not here.
+const STATE_RANK = { blocked: 0, decide: 1, 'needs-decision': 1, hold: 2, working: 3, 'repairing PR': 3 };
+const INFLIGHT_ORDER = { working: 0, 'repairing PR': 0, blocked: 1, decide: 1, 'needs-decision': 1, hold: 1, unknown: 2, idle: 2, 'awaiting merge': 3, done: 3, failed: 4 };
 
 // The STATE word of a task with a recorded PR: `awaiting merge` for a done
 // main-home task whose backlog row is open (awaitingMerge), `repairing PR`
@@ -977,8 +989,15 @@ function prStateTag(state, { awaiting = false, repairing = false }) {
 const FLAG_TAGS = new Set(['blocked', 'decide', 'needs-decision', 'hold']);
 const TERMINAL_TAGS = new Set(['done', 'failed']);
 
-function stateRank(tag) {
-  return STATE_RANK[tag] ?? 4;
+// The STATE of a group row over the rows listed under it: the lowest rank in
+// STATE_RANK, else idle.
+function groupState(rows) {
+  let worst = null;
+  for (const r of rows) {
+    const rank = STATE_RANK[r.tag];
+    if (rank !== undefined && (worst === null || rank < worst.rank)) worst = { rank, tag: r.tag };
+  }
+  return worst ? worst.tag : 'idle';
 }
 
 function sortInflight(entries) {
@@ -1022,14 +1041,20 @@ function decisionRow(ledger, d, extraFields = {}) {
 
 // A main-home worker's row. A task whose backlog record is a captain hold,
 // any bucket, carries the card (and the hold while the task is not done), so
-// enter shows the hold instead of focusing the pane; f still focuses it.
+// enter shows the hold instead of focusing the pane; f still focuses it. A
+// failed task under such a hold reads `hold`, not `failed`: firstmate parked
+// the item on the captain after the run failed (a check fix it cannot push),
+// and the hold is what is left to act on. A task that finished and was
+// cleaned up has no record in the snapshot, so it has no row here: that, not
+// a filter, is how finished main-home work leaves the pane.
 function mainTaskRow(facts, task, backlogById = new Map()) {
   const cs = task.current_state || {};
   const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
   const doing = cs.detail || (task.hints && task.hints.last_event_text) || (task.paths && task.paths.status_log && task.paths.status_log.last_event && task.paths.status_log.last_event.note) || '';
   const record = backlogById.get(task.id);
+  const held = heldForCaptain(record);
   return makeRow({
-    tag: prStateTag(cs.state, { awaiting: awaitingMerge(task, backlogById), repairing: isRepairing(facts, task) }),
+    tag: held && cs.state === 'failed' ? 'hold' : prStateTag(cs.state, { awaiting: awaitingMerge(task, backlogById), repairing: isRepairing(facts, task) }),
     extra: herdr.extra,
     id: task.id,
     text: `${kindPrefix(task.kind)}${doing}`,
@@ -1040,17 +1065,28 @@ function mainTaskRow(facts, task, backlogById = new Map()) {
     unknown: herdr.unknown,
     focusable: Boolean(herdr.paneId),
     url: task.pr && task.pr.url ? task.pr.url : null,
-    ...(heldForCaptain(record) ? mainCard(facts, task.id, record) : {}),
+    ...(held ? mainCard(facts, task.id, record) : {}),
   });
 }
 
-// Child worker rows of one secondmate ledger, in ledger order. A child keyed by
-// an open decision shows the decision text; a held child shows its hold title
-// and reason; otherwise its `doing`.
-function ledgerChildRows(facts, ledger, decisionByChild) {
+// Child worker rows of one secondmate ledger, in ledger order: every
+// active_children entry, then the endpoints entries the ledger lists on their
+// own whose state is live. An endpoint whose state is done is finished work
+// (Landed lists it from the ledger's landed entries) and is skipped; one whose
+// state is unknown, or missing, is skipped unless herdr shows a pane for it
+// (a tmux target, no target, or a pane herdr says is gone: nothing is running
+// there, only a task record that outlived its worker). Working, repairing,
+// blocked, decide, hold, paused and failed endpoints list. A row is never
+// built from the delegate's own task record, its status lines or its relayed
+// notes; only the ledger's live decisions_open reach here (`decisions`, for
+// a child's decision text and tag). A child keyed by an open decision shows
+// the decision text; a held child shows its hold title and reason; otherwise
+// its `doing`.
+function ledgerChildRows(facts, ledger, decisions) {
   const summary = ledger.summary || {};
   const endpoints = Array.isArray(summary.endpoints) ? summary.endpoints : [];
   const endpointById = new Map(endpoints.map((e) => [e.id, e]));
+  const decisionByChild = new Map(decisions.map((d) => [d.id, d]));
   const holdsById = new Map((Array.isArray(summary.holds) ? summary.holds : []).map((h) => [h.id, h]));
   const heldText = (h) => (h.reason && h.reason !== h.title ? `${h.title} · ${h.reason}` : h.title);
   const decisionText = (d) => (d.reason && d.reason !== d.summary ? `${d.summary} · ${d.reason}` : d.summary);
@@ -1085,9 +1121,14 @@ function ledgerChildRows(facts, ledger, decisionByChild) {
   for (const ep of endpoints) {
     if (covered.has(ep.id)) continue;
     const herdr = herdrColumn(facts, ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) });
+    const epState = ep.state || 'unknown';
+    if (epState === 'done') continue;
+    // A herdr pane the endpoint names and herdr has not declared gone; a
+    // remote home's panes cannot be asked, so its target alone counts.
+    const paneShown = Boolean(herdr.paneId) && !herdr.lost;
+    if (epState === 'unknown' && !paneShown) continue;
     const d = decisionByChild.get(ep.id);
     const h = holdsById.get(ep.id);
-    const epState = ep.state || 'unknown';
     rows.push(
       makeRow({
         tag: d ? decisionTag(d.verb) : prStateTag(epState, { repairing: childRepairing(facts, ledger, ep.id, epState, childPrUrl(ledger, ep.id)) }),
@@ -1114,51 +1155,52 @@ function childMarker(row) {
 }
 
 // One group per secondmate home: { row, children } where children is the list
-// of rows shown under it when expanded (the mate's own agent row from the main
-// snapshot first, then workers by state, then the home's live decisions).
+// of rows shown under it when expanded (workers by state, then the home's
+// live decisions that are not a listed child's, then the decisions the
+// delegate relayed). The delegate's own task record (mateTask) lends the
+// group only its herdr pane, so `f` focuses the delegate, and its relayed
+// decisions; its state and status line stay out (the header above says why).
 function ledgerGroup(facts, ledger, mateTask, expanded, backlogById = new Map()) {
   const key = groupKeyFor(ledger);
   const decisions = liveDecisions(ledger);
-  const summary = ledger.summary || {};
-  const childIds = new Set([
-    ...(Array.isArray(summary.active_children) ? summary.active_children : []).map((c) => c.id),
-    ...(Array.isArray(summary.endpoints) ? summary.endpoints : []).map((e) => e.id),
-  ]);
-  const decisionByChild = new Map(decisions.filter((d) => childIds.has(d.id)).map((d) => [d.id, d]));
-  const homeDecisions = decisions.filter((d) => !childIds.has(d.id));
-  const workers = sortInflight(ledgerChildRows(facts, ledger, decisionByChild).map((row) => ({ row }))).map((e) => e.row);
-  const mateRow = mateTask ? mainTaskRow(facts, mateTask) : null;
-  // The mate's own keyed decisions and blocker, relayed through its task record
-  // in the main home (hints.open_decisions / blocked_event); one the ledger
-  // already lists under the same id or key is not repeated.
+  const workers = sortInflight(ledgerChildRows(facts, ledger, decisions).map((row) => ({ row }))).map((e) => e.row);
+  // A decision on a listed child is drawn on that child's row; every other
+  // live decision (a queued item's captain hold, a decision on a child that
+  // is not listed) is a row of its own under the group.
+  const listed = new Set(workers.map((r) => r.name));
+  const homeDecisions = decisions.filter((d) => !listed.has(d.id));
+  // The delegate's own keyed decisions and blocker, relayed through its task
+  // record in the main home (hints.open_decisions / blocked_event); one the
+  // ledger already lists under the same id or key is not repeated.
   const relayedDecisions = (Array.isArray(mateTask && mateTask.hints && mateTask.hints.open_decisions) ? mateTask.hints.open_decisions : []).filter((d) => !decisions.some((x) => x.id === d.key || x.key === d.key));
   const relayed = mateTask ? taskDecisionRows(facts, mateTask, relayedDecisions, backlogById) : [];
-  const ranked = [...(mateRow ? [mateRow] : []), ...workers, ...relayed];
-  const worst = ranked.reduce((w, r) => (w === null || stateRank(r.tag) < stateRank(w.tag) ? r : w), null);
+  const decisionRows = [...homeDecisions.map((d) => decisionRow(ledger, d)), ...relayed];
   const live = workers.filter((r) => !TERMINAL_TAGS.has(r.tag)).length;
-  const flag = homeDecisions.length > 0 || relayed.length > 0 || workers.some((r) => FLAG_TAGS.has(r.tag));
-  const ages = workers.map((r) => r.ageSeconds).filter((a) => a !== null && a !== undefined);
+  const flag = decisionRows.length > 0 || workers.some((r) => FLAG_TAGS.has(r.tag));
+  const newest = (rows) => {
+    const ages = rows.map((r) => r.ageSeconds).filter((a) => a !== null && a !== undefined);
+    return ages.length ? Math.min(...ages) : null;
+  };
   const repos = [...new Set(workers.map((r) => r.repo).filter((r) => r && r !== '-'))];
+  const matePane = mateTask ? herdrColumn(facts, mateTask.endpoint && mateTask.endpoint.target).paneId : null;
   const groupRow = makeRow({
-    tag: worst ? worst.tag : 'idle',
+    tag: groupState([...workers, ...decisionRows]),
     extra: `${live} live`,
     id: `${flag ? '!' : ''}${expanded ? '▾' : '▸'} ${homeIdOf(ledger)}`,
     name: homeIdOf(ledger),
-    text: workers.length ? workers.map((r) => r.name).join(', ') : mateRow ? mateRow.text : 'no workers',
+    text: workers.length ? workers.map((r) => r.name).join(', ') : 'idle',
     repo: repos.length === 1 ? repos[0] : repos.length > 1 ? `${repos.length} repos` : '-',
     home: homeLabel(ledger),
     homeId: homeIdOf(ledger),
     hideKey: `inflight:${homeIdOf(ledger)}:home`,
-    ageSeconds: ages.length ? Math.min(...ages) : mateRow ? mateRow.ageSeconds : null,
-    paneId: mateRow ? mateRow.paneId : null,
+    ageSeconds: newest(workers) ?? newest(decisionRows),
+    paneId: matePane,
     focusable: false,
     group: key,
     expanded,
     flag,
   });
-  const children = expanded
-    ? [...(mateRow ? [mateRow] : []), ...workers, ...homeDecisions.map((d) => decisionRow(ledger, d)), ...relayed].map((r) => childMarker({ ...r, parent: key }))
-    : [];
+  const children = expanded ? [...workers, ...decisionRows].map((r) => childMarker({ ...r, parent: key })) : [];
   return { row: groupRow, children };
 }
 

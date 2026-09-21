@@ -112,6 +112,14 @@
 #   grouped.json    160x44, In flight grouping: two secondmate homes, one with
 #                   four children (a keyed decision, a blocked child with a hold
 #                   reason) plus live and dated captain holds, one quiet
+#   inflight-live.json  160x60, In flight from live work only: six delegate
+#                   homes whose own records all read done (no children; two
+#                   working children; endpoints only, one done, one unknown
+#                   on tmux, one unknown with its pane gone, one unknown with a
+#                   pane; one relayed decision; one ledger captain hold; one
+#                   failed child), a failed main-home task under a live captain
+#                   hold, a done one with an unmerged PR, and a merged one whose
+#                   record was cleaned up (Landed only)
 #   empty.json      120x40, every pane empty, no herdr block
 #   narrow.json     70x24, list mode with section headers, a cached local home
 #   lost.json       160x40, a main worker and a secondmate child whose panes
@@ -463,9 +471,9 @@ assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ decide +1 live 
 # In flight groups, expanded with --expand all (falsify: drop the children list in ledgerGroup, or
 # the etl-cutover decision from hyperion's decisions_open).
 frame_x=$(render populated.json --expand all --rows 48) || fail "populated --expand all: render exited non-zero"
-assert_contains "$frame_x" "In flight (13)" "expanding both groups adds the mate rows, children, home decisions and the relayed decision"
+assert_contains "$frame_x" "In flight (12)" "expanding both groups adds the children, the home decision and the relayed decision, never the delegate's own record"
 assert_row "$frame_x" '^│ decide +1 live +!▾ hyperion +child-one, child-failed +acme/etl +hyperion +1h │$' "expanded group row shows ▾"
-assert_row "$frame_x" '^│ working +idle +↳ hyperion +\(secondmate\) supervising two children +acme/etl +main +- │$' "expanded: the secondmate agent row is the first child"
+assert_no_row "$frame_x" '↳ hyperion +\(secondmate\)' "expanded: the delegate's own task record is not a child row (falsify: list mateRow among ledgerGroup's children)"
 assert_row "$frame_x" '^│ decide +etl-window +↳ hyperion +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "expanded: the relayed keyed decision lists under the group (falsify: drop relayed from ledgerGroup)"
 assert_row "$frame_x" '^│ working +working +↳ child-one +writing the loader +acme/etl +hyperion +3d │$' "expanded: active child with age from its home state file"
 assert_row "$frame_x" '^│ failed +pane lost +↳ child-failed +endpoint default:w2B:p2 \(run-step\) +- +hyperion +1h │$' "expanded: failed endpoint child whose pane is gone reads pane lost"
@@ -514,7 +522,7 @@ assert_row "$(render populated.json --keys "tab,tab")" '^ j/k move  tab pane  en
 frame_k=$(render populated.json --keys "j,j,j,j,l") || fail "keys l: render exited non-zero"
 assert_row "$frame_k" '^│ decide +1 live +!▾ hyperion ' "l on the fifth In flight row expands the hyperion group"
 assert_contains "$frame_k" "↳ child-one" "expanded by key: child rows appear"
-assert_contains "$frame_k" "In flight (12)" "expanded by key: only hyperion's rows are added"
+assert_contains "$frame_k" "In flight (11)" "expanded by key: only hyperion's rows are added"
 assert_not_contains "$frame_k" "▾ remote-sm" "expanded by key: the other group stays collapsed"
 frame_k=$(render populated.json --keys "j,j,j,j,l,j,h") || fail "keys h: render exited non-zero"
 assert_not_contains "$frame_k" "▾" "h from a child row collapses its group"
@@ -661,8 +669,8 @@ assert_not_contains "$frame_g" "↳" "grouped: collapsed by default"
 # Expanded (falsify: drop the decision text lookup or the hold text lookup in ledgerChildRows, or
 # the dated-hold filter in liveDecisions).
 frame_gx=$(render grouped.json --expand all) || fail "grouped --expand all: render exited non-zero"
-assert_contains "$frame_gx" "In flight (12)" "grouped expanded: 3 top rows + 6 under hyperion + 3 under notes"
-assert_row "$frame_gx" '^│ working +idle +↳ hyperion +\(secondmate\) supervising four children +hyperion +main +- │$' "expanded: mate agent row first"
+assert_contains "$frame_gx" "In flight (10)" "grouped expanded: 3 top rows + 5 under hyperion + 2 under notes"
+assert_not_contains "$frame_gx" "(secondmate)" "expanded: neither delegate's own record is a row (falsify: list mateRow among ledgerGroup's children)"
 assert_row "$frame_gx" '^│ working +working +↳ etl-loader +writing the loader +acme/etl +hyperion +3h │$' "expanded: working child with doing"
 assert_row "$frame_gx" '^│ working +working +↳ etl-schema +adding the schema migration +acme/etl +hyperion +20m │$' "expanded: second working child"
 assert_row "$frame_gx" '^│ decide +idle +↳ etl-cutover-runbook +Cut over Friday or Monday\? +acme/etl +hyperion +5m │$' "expanded: child with a keyed decision shows the decision text and tag decide"
@@ -688,6 +696,65 @@ assert_not_contains "$frame_ga" "etl-later" "--all-homes-needs: dated hold still
 # Geometry (falsify: change the fixture cols/rows).
 assert_widths "$frame_g" 160 "grouped frame lines are 160 columns"
 assert_lines "$frame_g" 44 "grouped frame is 44 lines"
+
+# ---------------------------------------------------------- inflight-live
+# In flight is built from live work only: a group's STATE, rows and count come from its live children
+# and its open decisions, never from the delegate's own task record, whose state is the last verb of
+# its own status log and reads done after any done relay (falsify: put mateRow back into ledgerGroup's
+# ranking or children, drop the done or the unknown-without-a-pane skip from the endpoint loop of
+# ledgerChildRows, drop the held branch from mainTaskRow, or give an unranked tag a rank in STATE_RANK).
+# Every delegate record in the fixture reads done with a done relay as its detail, so any row built from
+# one brings the word done into the pane.
+pane_lines() { # <frame> <pane key 1-6>: that pane's lines, title to bottom border
+  printf '%s\n' "$1" | sed -n "/^┌─ \[$2\]/,/^└/p"
+}
+frame_il=$(render inflight-live.json) || fail "inflight-live: render exited non-zero"
+inflight_il=$(pane_lines "$frame_il" 1)
+assert_contains "$frame_il" "In flight (8)" "inflight-live: six group rows and two main-home rows, none for the delegates' own records"
+assert_not_contains "$inflight_il" "done" "inflight-live: nothing in In flight reads done, in STATE or in WHAT"
+assert_not_contains "$inflight_il" "(secondmate)" "inflight-live: no delegate record row"
+assert_row "$frame_il" '^│ idle +0 live +▸ idle-home +idle +- +idle-home +- │$' "idle delegate: STATE idle, 0 live, WHAT idle, no age, no flag, although its record reads done"
+assert_row "$frame_il" '^│ working +2 live +▸ busy-home +child-a, child-b +acme/etl +busy-home +20m │$' "delegate with two working children and a stale done relay: working, 2 live, newest child 20m"
+assert_row "$frame_il" '^│ idle +1 live +▸ stale-home +peek +- +stale-home +1h │$' "delegate whose ledger lists only endpoints: the unknown one with a herdr pane counts as live, the done and paneless ones do not, and unknown does not rank"
+assert_row "$frame_il" '^│ decide +0 live +!▸ ask-home +idle +- +ask-home +1d │$' "delegate with no children and one relayed decision: decide, flagged, WHAT idle, AGE from the decision"
+assert_row "$frame_il" '^│ hold +0 live +!▸ held-home +idle +- +held-home +2d │$' "delegate with a ledger captain hold and no children: hold, flagged, AGE from the hold (falsify: leave homeDecisions out of groupState)"
+assert_row "$frame_il" '^│ idle +0 live +▸ failed-home +backfill +- +failed-home +1h │$' "delegate with one failed child: idle, 0 live, the child named in WHAT"
+assert_row "$frame_il" '^│ hold +idle +fix-checks +run failed +acme/firstmate +main +2d │$' "failed main-home task under a live captain hold reads hold, not failed"
+assert_row "$frame_il" '^│ awaiting merge +idle +ship-unmerged +PR https://github.com/acme/api/pull/9 checks green +acme/api +main +1m │$' "done main-home task with an unmerged PR and an open backlog row still reads awaiting merge"
+assert_not_contains "$inflight_il" "ship-merged" "done-and-merged main-home task whose record was cleaned up has no In flight row"
+assert_before "$frame_il" '▸ busy-home' '^│ hold +idle +fix-checks' "a working group sorts before the held main task"
+assert_before "$frame_il" '^│ hold +idle +fix-checks' '!▸ ask-home' "a held main-home row sorts with the decide and hold groups, main rows first"
+assert_before "$frame_il" '!▸ held-home' '▸ idle-home' "idle groups sort after the flagged ones"
+assert_before "$frame_il" '▸ failed-home' '^│ awaiting merge' "idle groups sort before awaiting merge"
+assert_row "$(render inflight-live.json --keys j)" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "the held failed task carries the card, its pane and both hold actions"
+frame_ilx=$(render inflight-live.json --expand all) || fail "inflight-live --expand all: render exited non-zero"
+inflight_ilx=$(pane_lines "$frame_ilx" 1)
+assert_contains "$frame_ilx" "In flight (14)" "expanded: two children, one unknown endpoint, one relayed decision, one ledger hold and one failed child join the eight rows"
+assert_not_contains "$inflight_ilx" "done" "expanded: still nothing reads done"
+assert_not_contains "$inflight_ilx" "(secondmate)" "expanded: no delegate record row among the children"
+assert_count "$inflight_ilx" "↳" 6 "expanded: six child rows in all"
+assert_count "$inflight_ilx" "↳ child-" 2 "expanded: exactly two rows under busy-home, its two children"
+assert_row "$frame_ilx" '^│ working +working +↳ child-a +writing the loader +acme/etl +busy-home +3h │$' "expanded: the first working child"
+assert_row "$frame_ilx" '^│ working +working +↳ child-b +adding the schema migration +acme/etl +busy-home +20m │$' "expanded: the second working child"
+assert_not_contains "$inflight_ilx" "stale-done" "expanded: a done endpoint is not listed"
+assert_not_contains "$inflight_ilx" "ghost-tmux" "expanded: an unknown endpoint on a tmux target, no herdr pane, is not listed"
+assert_not_contains "$inflight_ilx" "ghost-lost" "expanded: an unknown endpoint whose herdr pane is gone is not listed"
+assert_row "$frame_ilx" '^│ unknown +idle +↳ peek +endpoint default:w9C:p1 \(none\) +- +stale-home +1h │$' "expanded: an unknown endpoint with a herdr pane lists as unknown with that pane's status"
+assert_row "$frame_ilx" '^│ decide +vendor-pick +↳ ask-home +Which vendor for the address API\? +ask-home +main +1d │$' "expanded: the relayed decision lists under its group"
+assert_row "$frame_ilx" '^│ hold +- +↳ price-hold +Revisit the pricing tiers · Two quotes in the report +acme/billing +held-home +2d │$' "expanded: the ledger's captain hold lists under its group"
+assert_row "$frame_ilx" '^│ failed +pane lost +↳ backfill +endpoint default:w10A:p1 \(run-step\) +- +failed-home +1h │$' "expanded: the failed child lists under its idle group"
+assert_before "$frame_ilx" '▾ idle-home' '▾ stale-home' "expanded: the idle group is followed by the next group, with nothing under it"
+frame_ilk=$(render inflight-live.json --keys "j,j,j,j,l") || fail "inflight-live keys l: render exited non-zero"
+assert_contains "$frame_ilk" "▾ idle-home" "l on the idle group marks it expanded"
+assert_contains "$frame_ilk" "In flight (8)" "expanding a delegate with nothing live adds no row (falsify: list the delegate's record as a child)"
+assert_not_contains "$frame_ilk" "↳" "expanded idle group: no child rows"
+# Landed is the one place the finished children appear (falsify: filter Landed by the In flight rule).
+assert_contains "$frame_il" "Landed (4)" "inflight-live: the cleaned-up main task and the three delegate landed entries"
+assert_row "$frame_il" '^│ merged +09-20 +ship-merged +Add the widget cache · https://github.com/acme/widgets/pull/41 +acme/widgets +main +1d │$' "Landed: the cleaned-up merged task lists from its backlog record"
+assert_row "$frame_il" '^│ merged +09-20 +stale-done +Ship the loader · https://github.com/acme/etl/pull/14 +acme/etl +stale-home +1d │$' "Landed: the delegate's done endpoint lists from its ledger's landed entries"
+assert_row "$frame_il" '^│ merged +09-19 +child-c +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +busy-home +2d │$' "Landed: the busy delegate's finished child"
+assert_widths "$frame_il" 160 "inflight-live frame lines are 160 columns"
+assert_lines "$frame_il" 60 "inflight-live frame is 60 lines"
 assert_widths "$frame_gx" 160 "grouped expanded frame lines are 160 columns"
 
 
@@ -1000,7 +1067,9 @@ assert_row "$frame_h" '^│ paused +idle +held-worker +paused: awaiting the capt
 assert_row "$frame_h" '^│ answered +09-14 +landed-hold +Rename the widget table +acme/widgets +main +2d │$' "holds: the finished hold lists in Landed as usual"
 assert_row "$(render_hold "tab")" '^ j/k move  tab pane  enter card  f focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
 assert_row "$(render_hold "tab,j")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
-assert_row "$(render_hold "j,j")" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "holds footer: the held worker in In flight has the card, the focus and both actions"
+# held-worker is the fourth In flight row: the remote home's captain hold ranks its group as hold, so it sorts
+# ahead of the paused worker (falsify: leave homeDecisions out of groupState).
+assert_row "$(render_hold "j,j,j")" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "holds footer: the held worker in In flight has the card, the focus and both actions"
 assert_row "$(render_hold "tab,j,j,j")" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
 assert_row "$(render_hold "tab,tab,tab,tab,j")" '^ j/k move  tab pane  enter card  x hide ' "holds footer: the finished hold in Landed has its card, no pane and nothing to act on"
 assert_widths "$frame_h" 160 "holds frame lines are 160 columns"
@@ -1068,7 +1137,7 @@ assert_contains "$frame_h" "viewed the hold card of decide-task (viewer-cmd)" "c
 assert_contains "$(card)" "| hold kind | - |" "card decision: a task without a hold reads - for the hold kind"
 assert_row "$(card)" '^no hold reason recorded$' "card decision: the empty reason line"
 assert_row "$(card)" '^Cache the widget lookups; the vendor question gates the design\.$' "card decision: the body comes from the backlog record"
-frame_h=$(render_hold "j,j,enter") || fail "holds card worker: render exited non-zero"
+frame_h=$(render_hold "j,j,j,enter") || fail "holds card worker: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of held-worker (viewer-cmd)" "card worker: enter on the In flight row whose record is a dated hold shows the card, not a focus"
 assert_contains "$(card)" "| bucket | dated |" "card worker: the dated bucket"
 assert_contains "$(card)" "| until | 2026-10-01 |" "card worker: the until date"
@@ -1285,7 +1354,7 @@ assert_contains "$frame_h" "Landed (4)" "X: all four Landed rows are back"
 assert_file_contains "$vs" '"hidden": []' "X empties the hidden list in the file"
 # A hidden group takes its children with it (falsify: drop the parent lookup in applyHidden).
 frame_h=$(render populated.json --rows 48 --keys "j,j,j,j,l,x") || fail "hide group: render exited non-zero"
-assert_contains "$frame_h" "In flight (6, 6 hidden)" "hiding the expanded hyperion group hides its five children too"
+assert_contains "$frame_h" "In flight (6, 5 hidden)" "hiding the expanded hyperion group hides its four children too"
 assert_not_contains "$frame_h" "↳ child-one" "hidden group: children are out of view"
 # A fixture render without --view-state loads and saves nothing (falsify: drop the fixture guard in viewStateFor).
 fake_home_dir="$SCRATCH/home"
@@ -3332,7 +3401,7 @@ frame_m=$(render_mouse populated.json "click:30,22 click:30,23 click:30,23 click
 assert_not_opened "clicks alternating between rows never make a double-click"
 frame_m=$(render_mouse populated.json "dblclick:30,7") || fail "mouse dblclick group: render exited non-zero"
 assert_row "$frame_m" '^│ decide +1 live +!▾ hyperion ' "double-click on the hyperion group row expands it"
-assert_contains "$frame_m" "In flight (12)" "double-click on a group: only that group's rows are added"
+assert_contains "$frame_m" "In flight (11)" "double-click on a group: only that group's rows are added"
 assert_not_opened "double-click on a group row opens no PR"
 frame_m=$(render_mouse populated.json "dblclick:30,7 dblclick:30,7") || fail "mouse dblclick group twice: render exited non-zero"
 assert_row "$frame_m" '^│ decide +1 live +!▸ hyperion ' "a second double-click on the group row collapses it again"

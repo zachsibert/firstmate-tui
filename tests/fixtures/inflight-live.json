@@ -1,0 +1,282 @@
+{
+  "_comment": "In flight from live work only. Six delegate homes whose own task records all read done (their last status line was a done relay; every mate detail below carries the word done so a leaked mate row fails the no-done check): idle-home has no children and no decisions (one idle group row, nothing on expansion); busy-home has two working children (working, 2 live, exactly two child rows); stale-home lists only endpoints, a done one, an unknown one on a tmux target, an unknown one whose herdr pane is gone and an unknown one whose pane herdr shows (only peek lists, as unknown); ask-home has no children and one relayed needs-decision (decide, flagged); held-home has a ledger captain hold on a queued item (hold, flagged); failed-home has one failed endpoint child whose pane is gone (idle, the child lists on expansion). Main home: fix-checks failed under a live captain hold (reads hold, carries the card), ship-unmerged done with an open backlog row and PR 9 (awaiting merge), and ship-merged, done and merged and cleaned up, so it has a backlog record and no task record (Landed only). now is 2026-09-21T12:00:00Z = epoch 1789992000. Ages: child-a 3h, child-b 20m, peek 1h, backfill 1h, fix-checks 2d, ship-unmerged 1m, ask-home's relay 1d, price-hold 2d.",
+  "now": "2026-09-21T12:00:00Z",
+  "cols": 160,
+  "rows": 60,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-21T11:59:48Z",
+    "tasks": [
+      {
+        "id": "fix-checks",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/firstmate",
+        "mode": "no-mistakes",
+        "backend": "herdr",
+        "current_state": { "state": "failed", "source": "run-step", "detail": "run failed", "observed_at": "2026-09-21T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w6A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "run failed" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/fix-checks.status", "present": true, "kind": "event_history", "last_event": { "state": "failed", "note": "run failed", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Judge only the newest run of each check", "repo": "acme/firstmate" }
+      },
+      {
+        "id": "ship-unmerged",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "PR https://github.com/acme/api/pull/9 checks green", "observed_at": "2026-09-21T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w6B:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": "https://github.com/acme/api/pull/9", "source": "meta", "head": "fm/ship-unmerged" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-unmerged.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "acme/api" }
+      },
+      {
+        "id": "idle-home",
+        "kind": "secondmate",
+        "project": "/fixture/homes/idle-home",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "corr=0a1b done: noted, nothing queued", "observed_at": "2026-09-21T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7A:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "corr=0a1b done: noted, nothing queued" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/idle-home.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "corr=0a1b done: noted, nothing queued", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      },
+      {
+        "id": "busy-home",
+        "kind": "secondmate",
+        "project": "/fixture/homes/busy-home",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "corr=1c2d done: the vendor sweep merged", "observed_at": "2026-09-21T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7B:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "corr=1c2d done: the vendor sweep merged" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/busy-home.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "corr=1c2d done: the vendor sweep merged", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      },
+      {
+        "id": "stale-home",
+        "kind": "secondmate",
+        "project": "/fixture/homes/stale-home",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "corr=2e3f done: the loader shipped", "observed_at": "2026-09-21T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7C:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "corr=2e3f done: the loader shipped" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/stale-home.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "corr=2e3f done: the loader shipped", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      },
+      {
+        "id": "ask-home",
+        "kind": "secondmate",
+        "project": "/fixture/homes/ask-home",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "corr=3a4b done: relayed the vendor question", "observed_at": "2026-09-21T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": true, "blocked_event": false, "open_decisions": [{ "key": "vendor-pick", "verb": "needs-decision", "summary": "Which vendor for the address API?" }], "scout_report_present": false, "last_event_text": "corr=3a4b done: relayed the vendor question" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ask-home.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "corr=3a4b done: relayed the vendor question", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      },
+      {
+        "id": "held-home",
+        "kind": "secondmate",
+        "project": "/fixture/homes/held-home",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "corr=4c5d done: parked the pricing item", "observed_at": "2026-09-21T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7E:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "corr=4c5d done: parked the pricing item" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/held-home.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "corr=4c5d done: parked the pricing item", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      },
+      {
+        "id": "failed-home",
+        "kind": "secondmate",
+        "project": "/fixture/homes/failed-home",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "corr=5e6f done: the backfill failed and was cleaned up", "observed_at": "2026-09-21T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w7F:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "corr=5e6f done: the backfill failed and was cleaned up" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/failed-home.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "corr=5e6f done: the backfill failed and was cleaned up", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "fix-checks", "state": "in_flight", "title": "Judge only the newest run of each check", "repo": "acme/firstmate", "kind": "ship", "hold_kind": "captain", "hold_reason": "The fix is ready but cannot be pushed: pull-only access to the upstream repository", "hold_until": null, "hold_set": "2026-09-19T12:00:00Z", "hold_bucket": "live", "hold_age_days": 2, "captain_actionable": true, "since": "2026-09-19", "pr_url": null, "report_path": null, "body_lines": ["Captain hold set: 2026-09-19T12:00:00Z"], "links": [], "completion": { "verb": null, "date": null } },
+        { "id": "ship-unmerged", "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "acme/api", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-21", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "ship-merged", "state": "done", "title": "Add the widget cache", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-18", "pr_url": "https://github.com/acme/widgets/pull/41", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-20" } }
+      ]
+    },
+    "scout_reports": [],
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "ledgers": [
+    {
+      "id": "idle-home",
+      "home": "/fixture/homes/idle-home",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789991880,
+        "active_children": [],
+        "endpoints": [],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [
+          { "id": "idle-done", "title": "Rename the widget table", "pr_url": "https://github.com/acme/widgets/pull/30", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-18" } }
+        ],
+        "queued": []
+      }
+    },
+    {
+      "id": "busy-home",
+      "home": "/fixture/homes/busy-home",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789991880,
+        "active_children": [
+          { "id": "child-a", "kind": "ship", "state": "working", "repo": "acme/etl", "source": "pane", "doing": "writing the loader" },
+          { "id": "child-b", "kind": "ship", "state": "working", "repo": "acme/etl", "source": "pane", "doing": "adding the schema migration" }
+        ],
+        "endpoints": [
+          { "id": "child-a", "state": "working", "source": "pane", "endpoint": { "target": "default:w8A:p1", "exists": true } },
+          { "id": "child-b", "state": "working", "source": "pane", "endpoint": { "target": "default:w8B:p1", "exists": true } }
+        ],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [
+          { "id": "child-c", "title": "Add the ETL index", "pr_url": "https://github.com/acme/etl/pull/12", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-19" } }
+        ],
+        "queued": []
+      }
+    },
+    {
+      "id": "stale-home",
+      "home": "/fixture/homes/stale-home",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789991880,
+        "active_children": [],
+        "endpoints": [
+          { "id": "stale-done", "state": "done", "source": "status-log", "endpoint": { "target": "default:w9A:p1", "exists": false } },
+          { "id": "ghost-tmux", "state": "unknown", "source": "none", "endpoint": { "target": "0:fm-ghost-tmux", "exists": false } },
+          { "id": "ghost-lost", "state": "unknown", "source": "none", "endpoint": { "target": "default:w9B:p1", "exists": false } },
+          { "id": "peek", "state": "unknown", "source": "none", "endpoint": { "target": "default:w9C:p1", "exists": true } }
+        ],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [
+          { "id": "stale-done", "title": "Ship the loader", "pr_url": "https://github.com/acme/etl/pull/14", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-20" } }
+        ],
+        "queued": []
+      }
+    },
+    {
+      "id": "ask-home",
+      "home": "/fixture/homes/ask-home",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789991880,
+        "active_children": [],
+        "endpoints": [],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [],
+        "queued": []
+      }
+    },
+    {
+      "id": "held-home",
+      "home": "/fixture/homes/held-home",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789991880,
+        "active_children": [],
+        "endpoints": [],
+        "holds": [],
+        "decisions_open": [
+          { "id": "price-hold", "key": "price-hold", "verb": "captain-hold", "summary": "Revisit the pricing tiers", "reason": "Two quotes in the report", "hold_until": null, "hold_bucket": "live", "hold_age_days": 2, "source": "backlog" }
+        ],
+        "landed": [],
+        "queued": [
+          { "id": "price-hold", "title": "Revisit the pricing tiers", "repo": "acme/billing", "kind": "task", "hold_kind": "captain", "hold_bucket": "live", "hold_age_days": 2, "captain_actionable": true }
+        ]
+      }
+    },
+    {
+      "id": "failed-home",
+      "home": "/fixture/homes/failed-home",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789991880,
+        "active_children": [],
+        "endpoints": [
+          { "id": "backfill", "state": "failed", "source": "run-step", "endpoint": { "target": "default:w10A:p1", "exists": false } }
+        ],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [],
+        "queued": []
+      }
+    }
+  ],
+  "herdr": {
+    "agents": [
+      { "pane_id": "w6A:p1", "agent_status": "idle", "terminal_title_stripped": "fix-checks" },
+      { "pane_id": "w6B:p1", "agent_status": "idle", "terminal_title_stripped": "ship-unmerged" },
+      { "pane_id": "w7A:p1", "agent_status": "idle", "terminal_title_stripped": "idle-home" },
+      { "pane_id": "w7B:p1", "agent_status": "idle", "terminal_title_stripped": "busy-home" },
+      { "pane_id": "w7C:p1", "agent_status": "idle", "terminal_title_stripped": "stale-home" },
+      { "pane_id": "w7D:p1", "agent_status": "idle", "terminal_title_stripped": "ask-home" },
+      { "pane_id": "w7E:p1", "agent_status": "idle", "terminal_title_stripped": "held-home" },
+      { "pane_id": "w7F:p1", "agent_status": "idle", "terminal_title_stripped": "failed-home" },
+      { "pane_id": "w8A:p1", "agent_status": "working", "terminal_title_stripped": "child-a" },
+      { "pane_id": "w8B:p1", "agent_status": "working", "terminal_title_stripped": "child-b" },
+      { "pane_id": "w9C:p1", "agent_status": "idle", "terminal_title_stripped": "peek" }
+    ]
+  },
+  "prs": null,
+  "mtimes": {
+    "/fixture/firstmate/state/fix-checks.status": 1789819200,
+    "/fixture/firstmate/state/ship-unmerged.status": 1789991940,
+    "/fixture/firstmate/state/ask-home.status": 1789905600,
+    "/fixture/homes/busy-home/state/child-a.status": 1789981200,
+    "/fixture/homes/busy-home/state/child-b.status": 1789990800,
+    "/fixture/homes/stale-home/state/peek.status": 1789988400,
+    "/fixture/homes/failed-home/state/backfill.status": 1789988400
+  }
+}
