@@ -6,7 +6,9 @@
 // offset, so a relaunch puts him on the same row. Hiding is view state,
 // not firstmate state: firstmate retires Done rows on its own (done_keep per
 // home, archived to data/done-archive.md), so nothing here is ever written
-// into FM_HOME, a project or a state directory.
+// into FM_HOME, a project or a state directory. The holds dismissed by d or
+// D (view.dismissed, lib/model.mjs) are not here either: firstmate's own
+// state already carries the answer, so that set lives for the session only.
 //
 // Location, first match wins:
 //   --view-state <path>                                  (the wrapper passes

@@ -1035,6 +1035,43 @@ node -e '
 # shellcheck disable=SC2016 # the fake expands $FM_HOME and $FM_BOARD_TEST_HOLD_LOG at run time, not here
 printf '#!/usr/bin/env bash\n[ -z "${FM_BOARD_TEST_HOLD_LOG:-}" ] || echo "snapshot FM_HOME=$FM_HOME" >> "$FM_BOARD_TEST_HOLD_LOG"\nif [ -n "${FAKE_SNAPSHOT_FAIL:-}" ]; then echo "fm-fleet-snapshot: jq not found" >&2; exit 1; fi\ncat "%s"\n' "$HOLD_DELEGATE/snapshot.json" > "$HOLD_DELEGATE/bin/fm-fleet-snapshot.sh"
 chmod +x "$HOLD_HOME/bin/fm-captain-hold.sh" "$HOLD_DELEGATE/bin/fm-captain-hold.sh" "$HOLD_DELEGATE/bin/fm-fleet-snapshot.sh"
+# HOLD_LIVE: a stand-in main home for the live-render checks of a dismissal followed by the refresh a
+# success starts. Its bin/fm-fleet-snapshot.sh logs `snapshot FM_HOME=<home>` to HOLD_LOG on every call
+# and prints the holds fixture's snapshot (main-hold live, no secondmate records) on the first call of a
+# render, and on later calls the file HOLD_LIVE_SECOND names, else the same snapshot again; a counter
+# file under the home tells the calls apart and is reset before each render. snapshot-answered.json is
+# the same snapshot with main-hold done (completion answered), as firstmate leaves a discarded item.
+HOLD_LIVE="$SCRATCH/holds-live"
+mkdir -p "$HOLD_LIVE/bin"
+cp "$ROOT/tests/fake-captain-hold.sh" "$HOLD_LIVE/bin/fm-captain-hold.sh"
+# shellcheck disable=SC2016 # the template literal is node's, not the shell's
+node -e '
+  const fs = require("fs");
+  const [fixture, home] = process.argv.slice(1);
+  const snap = JSON.parse(fs.readFileSync(fixture, "utf8").split("/fixture/holds-main").join(home)).snapshot;
+  snap.fm_home = home;
+  snap.secondmate_current = { records: [] };
+  fs.writeFileSync(`${home}/snapshot-held.json`, JSON.stringify(snap));
+  const rec = snap.backlog.records.find((r) => r.id === "main-hold");
+  Object.assign(rec, { state: "done", hold_bucket: null, captain_actionable: false, completion: { verb: "answered", date: "2026-09-21" } });
+  fs.writeFileSync(`${home}/snapshot-answered.json`, JSON.stringify(snap));
+' "$FIX/holds.json" "$HOLD_LIVE"
+# shellcheck disable=SC2016 # the fake expands its variables at run time, not here
+printf '%s\n' '#!/usr/bin/env bash' \
+  '[ -z "${FM_BOARD_TEST_HOLD_LOG:-}" ] || echo "snapshot FM_HOME=$FM_HOME" >> "$FM_BOARD_TEST_HOLD_LOG"' \
+  'n=$(cat "$FM_HOME/calls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$FM_HOME/calls"' \
+  'if [ "$n" -gt 1 ] && [ -n "${HOLD_LIVE_SECOND:-}" ]; then cat "$HOLD_LIVE_SECOND"; else cat "$FM_HOME/snapshot-held.json"; fi' > "$HOLD_LIVE/bin/fm-fleet-snapshot.sh"
+chmod +x "$HOLD_LIVE/bin/fm-captain-hold.sh" "$HOLD_LIVE/bin/fm-fleet-snapshot.sh"
+HOLD_LIVE_REAL=$(cd "$HOLD_LIVE" && pwd -P)
+# render_hold_live <second snapshot file or empty> <keys>: a live one-shot render of HOLD_LIVE with the
+# PR fetch off (so gh is never asked; the fake gh is first on PATH all the same), its own view-state file,
+# the hold log and the call counter reset first.
+render_hold_live() {
+  local second=$1 keys=$2
+  rm -f "${HOLD_LOG:?}" "${HOLD_LIVE:?}/calls"
+  HOLD_LIVE_SECOND="$second" FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" FM_HOME="$HOLD_LIVE" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" \
+    "$BOARD" --render-once --no-herdr --no-prs --keys "$keys" --view-state "$SCRATCH/holds-live-view-state.json"
+}
 # render_hold <keys> [flags]: HOLD_FIX with every fake wired and every log reset first; the fake viewer
 # copies the file it is given to HOLD_CARD, since the board removes a card's temp file as soon as the
 # viewer exits.
@@ -1219,6 +1256,48 @@ assert_row "$(cat "$HOLD_LOG")" '^argv=answer main-hold --decision-file /.*/firs
 if [ -e "$(grep -o -- '--decision-file .*' "$HOLD_LOG" | cut -d' ' -f2)" ]; then fail "d,y: the decision file is still there after the command exited"; else pass; fi
 assert_contains "$frame_h" "discarded main-hold · answered: main-hold" "d,y: the footer names the discard and the command's first output line"
 assert_not_contains "$frame_h" "y to discard" "d,y: the prompt is gone from the footer"
+# The row leaves the same frame the command succeeded in, before any refresh: it is out of Needs you,
+# the pane count is one less, it is not counted hidden, and the cursor sits on the row that took its
+# place (falsify: drop applyDismissed from buildModel, drop dismissRow from holdDiscard, or add the hide
+# key to view.hidden instead, which counts it hidden and lets H bring it back).
+assert_contains "$frame_h" "Needs you (3)" "d,y: the pane count drops by one in the same frame"
+assert_no_row "$frame_h" '^│ hold +- +main-hold ' "d,y: the discarded hold row is gone from Needs you at once"
+assert_not_contains "$frame_h" "hidden" "d,y: the dismissed row is not counted as hidden"
+assert_row "$frame_h" '^│ hold +- +bare-hold ' "d,y: the other hold stays"
+tags_h=$(render_hold "tab,j,d,y" --tags) || fail "holds d,y --tags: render exited non-zero"
+assert_row "$tags_h" "${SEL}hold +${SEL_END}${SEL} +${SEL_END}${SEL}- +${SEL_END}${SEL} +${SEL_END}${SEL}bare-hold +${SEL_END}" "d,y: the selection lands on bare-hold, the row that took the discarded one's place"
+assert_no_row "$tags_h" "${SEL}[^{]*main-hold" "d,y: the discarded row is not the selection"
+frame_h=$(render_hold "tab,j,d,y,H") || fail "holds d,y,H: render exited non-zero"
+assert_contains "$frame_h" "showing hidden rows (greyed); H hides them again" "d,y,H: H toggles as usual"
+assert_contains "$frame_h" "Needs you (3)" "d,y,H: the dismissed row is not among the hidden rows H shows (falsify: dismiss through view.hidden)"
+assert_not_contains "$frame_h" "(hidden) Pick the vendor" "d,y,H: the dismissed row is not drawn greyed"
+assert_no_row "$frame_h" '^│ hold +- +main-hold ' "d,y,H: the dismissed row stays out under H"
+# The same task listed in In flight as well: a variant whose held-worker is a live, actionable hold, so
+# Needs you lists it (second row, ahead of main-hold in backlog order) and its In flight row carries the
+# same card. Discarding it from Needs you drops both rows in the same frame (falsify: match the dismissal
+# on the Needs you pane alone, or on the hide key, which differs per pane).
+node -e '
+  const fs = require("fs");
+  const [src, dst] = process.argv.slice(1);
+  const fx = JSON.parse(fs.readFileSync(src, "utf8"));
+  const rec = fx.snapshot.backlog.records.find((r) => r.id === "held-worker");
+  Object.assign(rec, { hold_bucket: "live", hold_until: null, captain_actionable: true });
+  fs.writeFileSync(dst, JSON.stringify(fx));
+' "$HOLD_FIX" "$SCRATCH/holds-inflight.json"
+frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-inflight.json" --no-herdr --keys "tab,j") || fail "holds inflight: render exited non-zero"
+assert_contains "$frame_h" "Needs you (5)" "holds inflight: the live held worker joins Needs you"
+assert_contains "$frame_h" "In flight (5)" "holds inflight: In flight lists it as before"
+assert_row "$frame_h" '^│ hold +- +held-worker +Move the cache to the new vendor · Waiting for the vendor contract before the cache lands ' "holds inflight: the held worker's Needs you row"
+assert_row "$frame_h" '^│ paused +idle +held-worker +paused: awaiting the captain.s go-ahead ' "holds inflight: the held worker's In flight row"
+assert_row "$frame_h" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds inflight: tab,j selects the held worker's Needs you row, a hold row built from the backlog record and so without the worker's pane"
+rm -f "${HOLD_LOG:?}"
+frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-inflight.json" --no-herdr --keys "tab,j,d,y") || fail "holds inflight d,y: render exited non-zero"
+assert_file_contains "$HOLD_LOG" "argv=answer held-worker --decision-file" "holds inflight d,y: the command ran for the held worker"
+assert_contains "$frame_h" "discarded held-worker · answered: held-worker" "holds inflight d,y: the footer names the discard"
+assert_contains "$frame_h" "Needs you (4)" "holds inflight d,y: Needs you drops the hold row"
+assert_contains "$frame_h" "In flight (4)" "holds inflight d,y: In flight drops the same task's row in the same frame"
+assert_no_row "$frame_h" '^│ [^│]*held-worker' "holds inflight d,y: no pane lists the task any more (the footer notice alone names it)"
+assert_row "$frame_h" '^│ hold +- +main-hold ' "holds inflight d,y: the other holds stay"
 frame_h=$(render_hold "tab,j,d,escape") || fail "holds d,escape: render exited non-zero"
 assert_no_hold "d,escape runs nothing"
 assert_contains "$frame_h" "cancelled; main-hold is unchanged" "d,escape: the footer says cancelled"
@@ -1233,6 +1312,8 @@ frame_h=$(FAKE_HOLD_FAIL=1 render_hold "tab,j,d,y") || fail "holds d fail: rende
 assert_contains "$frame_h" "fm-captain-hold: task main-hold is not held for the captain; hold it first or name the right task" "a refusing command's stderr line is the footer, verbatim"
 assert_not_contains "$frame_h" "discarded" "a refused discard is not reported as done"
 assert_file_contains "$HOLD_LOG" "argv=answer main-hold --decision-file" "the refused command did run once"
+assert_contains "$frame_h" "Needs you (4)" "a refused discard leaves the pane count as it was (falsify: dismiss before the exit status is known)"
+assert_row "$frame_h" '^│ hold +- +main-hold ' "a refused discard leaves the row on the board"
 tags_h=$(FAKE_HOLD_FAIL=1 FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$HOLD_FIX" --no-herdr --keys "tab,j,d,y" --tags) || fail "holds d fail --tags: render exited non-zero"
 assert_row "$tags_h" '\{red-fg\}[^{]*fm-captain-hold: task main-hold is not held for the captain' "the refusal is red (falsify: pass bad=false on a failed run)"
 frame_h=$(render_hold "tab,j,j,j,d") || fail "holds d review: render exited non-zero"
@@ -1270,6 +1351,12 @@ assert_hold_log "FM_HOME=$HOLD_HOME
 cwd=$HOLD_HOME_REAL
 argv=hold main-hold --reason Two quotes arrived; pick the vendor for the address API --until $PLUS14" "D,enter runs fm-captain-hold.sh hold once in the hold's home with the record's full reason and the default date"
 assert_contains "$frame_h" "deferred main-hold until $PLUS14 · main-hold" "D,enter: the footer names the deferral and the command's output"
+# A deferral leaves the frame the same way a discard does (falsify: drop dismissRow from holdDefer).
+assert_contains "$frame_h" "Needs you (3)" "D,enter: the pane count drops by one in the same frame"
+assert_no_row "$frame_h" '^│ hold +- +main-hold ' "D,enter: the deferred hold row is gone from Needs you at once"
+assert_not_contains "$frame_h" "hidden" "D,enter: the dismissed row is not counted as hidden"
+tags_h=$(render_hold "tab,j,D,enter" --tags) || fail "holds D,enter --tags: render exited non-zero"
+assert_row "$tags_h" "${SEL}hold +${SEL_END}${SEL} +${SEL_END}${SEL}- +${SEL_END}${SEL} +${SEL_END}${SEL}bare-hold +${SEL_END}" "D,enter: the selection lands on the row that took the deferred one's place"
 frame_h=$(render_hold "tab,j,D,$CLEAR,$(spell 2027-01-15),enter") || fail "holds D typed: render exited non-zero"
 assert_hold_log "FM_HOME=$HOLD_HOME
 cwd=$HOLD_HOME_REAL
@@ -1291,6 +1378,8 @@ assert_contains "$frame_h" "cancelled; main-hold is unchanged" "D,escape: the fo
 frame_h=$(FAKE_HOLD_FAIL=1 render_hold "tab,j,D,enter") || fail "holds D fail: render exited non-zero"
 assert_contains "$frame_h" "fm-captain-hold: task main-hold is not held for the captain" "a refused defer shows the command's stderr verbatim"
 assert_not_contains "$frame_h" "deferred" "a refused defer is not reported as done"
+assert_contains "$frame_h" "Needs you (4)" "a refused defer leaves the pane count as it was"
+assert_row "$frame_h" '^│ hold +- +main-hold ' "a refused defer leaves the row on the board"
 frame_h=$(render_hold "tab,j,j,j,D") || fail "holds D review: render exited non-zero"
 assert_contains "$frame_h" "ship-review: no captain hold to defer" "D on a review row is refused with a notice"
 assert_no_hold "D on a review row runs nothing"
@@ -1304,6 +1393,42 @@ frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "tab,j,j,j,D" --all-homes-needs) || f
 assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "D on a delegate hold whose snapshot fails runs no hold command"
 assert_contains "$frame_h" "delegate-hold: the full hold reason is not readable (exit 1: fm-fleet-snapshot: jq not found); defer it from delegate itself" "D delegate fail: the defer is refused rather than passing the ledger's cut reason"
 assert_not_contains "$frame_h" "defer delegate-hold until" "D delegate fail: no prompt opens"
+
+# The refresh a success starts, against the live stand-in HOLD_LIVE: the hold log reads the first
+# snapshot (the render's facts), then the answer call, then a second snapshot, the refresh the discard
+# started, all in one render. The refresh's snapshot still lists main-hold as live, so the dismissal
+# stays and the row stays gone (falsify: clear the dismissed set on every refresh, or forget the refresh
+# after a success). The decision line names whatever login this host resolves, so it is left out of the
+# comparison.
+hold_log_sans_decision() { grep -v '^decision=' "$HOLD_LOG" 2>/dev/null || echo '<absent>'; }
+frame_h=$(render_hold_live "" "tab,j,d,y") || fail "holds live d,y: render exited non-zero"
+if [ "$(hold_log_sans_decision)" = "snapshot FM_HOME=$HOLD_LIVE
+FM_HOME=$HOLD_LIVE
+cwd=$HOLD_LIVE_REAL
+argv=answer main-hold --decision-file $(grep -o -- '--decision-file .*' "$HOLD_LOG" 2>/dev/null | cut -d' ' -f2)
+snapshot FM_HOME=$HOLD_LIVE" ]; then pass; else fail "holds live d,y: the answer call is not followed by the refresh's snapshot; the log is '$(hold_log_sans_decision | tr '\n' '|')'"; fi
+assert_contains "$frame_h" "discarded main-hold" "holds live d,y: the footer keeps the discard notice through the refresh"
+assert_contains "$frame_h" "Needs you (3)" "holds live d,y: the pane count stays one less after a refresh whose snapshot still lists the hold"
+assert_no_row "$frame_h" '^│ hold +- +main-hold ' "holds live d,y: a stale snapshot does not bring the discarded row back"
+assert_contains "$frame_h" "Landed (2)" "holds live d,y: Landed is as the snapshot has it"
+# The same with a refresh whose snapshot has firstmate's answer (main-hold done, completion answered): the
+# entry is cleared, so the Landed row that task now has, which carries the same card, is drawn (falsify:
+# keep an entry for a task the snapshot no longer lists as live, and Landed stays at 2).
+frame_h=$(render_hold_live "$HOLD_LIVE/snapshot-answered.json" "tab,j,d,y") || fail "holds live d,y answered: render exited non-zero"
+assert_contains "$frame_h" "Needs you (3)" "holds live answered: the hold is out of Needs you"
+assert_no_row "$frame_h" '^│ hold +- +main-hold ' "holds live answered: no hold row"
+assert_contains "$frame_h" "Landed (3)" "holds live answered: Landed gains the answered item"
+assert_row "$frame_h" '^│ answered +09-21 +main-hold +Pick the vendor for the address API ' "holds live answered: the dismissal is cleared, so the task's Landed row is drawn"
+# A refusal in a live render refreshes nothing: one snapshot, the refused call, no second snapshot
+# (falsify: refresh on any exit status).
+frame_h=$(FAKE_HOLD_FAIL=1 render_hold_live "" "tab,j,d,y") || fail "holds live d fail: render exited non-zero"
+assert_count "$(cat "$HOLD_LOG")" "snapshot FM_HOME=" 1 "holds live d fail: a refused command starts no refresh"
+assert_row "$frame_h" '^│ hold +- +main-hold ' "holds live d fail: the row stays"
+# r after a dismissal takes the same path: a stale snapshot keeps the row out, an answered one clears the
+# entry (falsify: prune only in the hold's own refresh).
+frame_h=$(render_hold_live "$HOLD_LIVE/snapshot-answered.json" "tab,j,d,y,r") || fail "holds live d,y,r: render exited non-zero"
+assert_count "$(cat "$HOLD_LOG")" "snapshot FM_HOME=" 3 "holds live d,y,r: the start, the discard's refresh and r each ran the snapshot"
+assert_contains "$frame_h" "Landed (3)" "holds live d,y,r: the answered item is in Landed after r"
 
 # The pure pieces, straight from lib/card.mjs (falsify: change any of them).
 pure_h=$(node --input-type=module -e "
@@ -4159,9 +4284,13 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   # key: the backspaces then do nothing, the full value refuses every digit and enter defers to the
   # default date). Only the prompt's `(YYYY-MM-DD):` is waited for on screen: its cells all differ
   # from the hint they replace, while the letters of a notice drawn over an earlier one of the same
-  # length can reach the driver missing; the log, not the screen, proves the rest.
-  run_pty xterm-256color hold-prompt "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:D" "wait:(YYYY-MM-DD):" "send:\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f" "sleep:0.4" "send:2027-01-15" "sleep:0.6" "send:\r" "sleep:1.5" "send:q" exit
-  pty_ok hold-prompt "pty: the D prompt opens on a real terminal and the board exits on q"
+  # length can reach the driver missing; the log, not the screen, proves the rest. After the carriage
+  # return the deferred row leaves Needs you at once: the review row below it, ship-gamma, moves up
+  # onto its line, and every cell of that row differs from the hold row it replaces, so the driver
+  # sees the id repainted (falsify: drop dismissRow from holdDefer in lib/app.mjs, and the rows stay
+  # where they were until the refresh lands, which the unchanged stand-in snapshot never moves them).
+  run_pty xterm-256color hold-prompt "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:D" "wait:(YYYY-MM-DD):" "send:\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f" "sleep:0.4" "send:2027-01-15" "sleep:0.6" "send:\r" "wait:ship-gamma" "sleep:1.0" "send:q" exit
+  pty_ok hold-prompt "pty: the D prompt opens on a real terminal, the deferred row leaves at once and the board exits on q"
   if [ -f "$HOLD_LOG" ]; then pass; else fail "pty: the D prompt's enter ran no hold command; the driver reported: $(tr '\n' ';' < "$SCRATCH/pty-hold-prompt.out")"; fi
   assert_hold_log "FM_HOME=$FAKE_HOME
 cwd=$FAKE_HOME_REAL

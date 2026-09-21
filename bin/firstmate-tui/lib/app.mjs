@@ -78,11 +78,18 @@
 //
 // The two writes, d (discard) and D (defer), run firstmate's own
 // fm-captain-hold.sh in the hold's home through lib/hold.mjs once the footer
-// prompt is confirmed (lib/controller.mjs); the result is the footer notice,
-// a success starts a refresh so the row leaves the board, and a failure
-// shows the command's own words in red and changes nothing else. The
-// refresh's own start and clear notices are weak (below), so they never
-// paint over a result the captain has not read yet.
+// prompt is confirmed (lib/controller.mjs); the result is the footer notice.
+// A success dismisses the row at once (dismissRow: view.dismissed, the
+// session-only set lib/model.mjs applyDismissed reads beside view.hidden, so
+// every row of that task in Needs you, In flight and Landed leaves the frame
+// and the cursor lands on the row that took its place) and starts a refresh
+// so the durable state catches up; the entry is cleared by the first clean
+// refresh whose facts no longer list the task as a live hold (lib/model.mjs
+// pruneDismissed), never by one that still does, so a stale snapshot cannot
+// bring the row back for a tick. Nothing of this reaches the view-state file
+// or H. A failure shows the command's own words in red and changes nothing
+// else. The refresh's own start and clear notices are weak (below), so they
+// never paint over a result the captain has not read yet.
 //
 // The Settings page (`.`, lib/settings.mjs) fetches the GitHub releases API
 // through --curl-cmd when it opens and on r inside it, never on the tick; a
@@ -92,7 +99,7 @@
 // the copy at the same path again (Node cannot exec in place).
 
 import { userInfo } from 'node:os';
-import { buildModel, initialPrs, mergePrs, parseTarget, prsFailureText } from './model.mjs';
+import { buildModel, dismissKey, initialPrs, mergePrs, parseTarget, prsFailureText, pruneDismissed } from './model.mjs';
 import { renderFrame } from './render.mjs';
 import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
@@ -180,6 +187,7 @@ export async function runApp(opts) {
       expanded: loaded.state.expanded,
       hidden: loaded.state.hidden,
       hiddenPanes: loaded.state.hiddenPanes,
+      dismissed: new Set(), // the holds discarded or deferred this session, by lib/model.mjs dismissKey; never saved (dismissRow, the header)
       columns: loaded.state.columns, // dragged column widths by pane id and column key (view state)
       drag: null, // the column boundary being dragged, or null (lib/controller.mjs)
       showHidden: false,
@@ -242,6 +250,7 @@ export async function runApp(opts) {
       hidden: state.view.hidden,
       showHidden: state.view.showHidden,
       hiddenPanes: state.view.hiddenPanes,
+      dismissed: state.view.dismissed,
     });
     syncSpinner();
     return state.model;
@@ -435,6 +444,10 @@ export async function runApp(opts) {
       state.snapshotError = snap.error || 'snapshot failed';
     }
     state.ledgers = collectLedgers(state.snapshot, state.homes);
+    // A snapshot that landed: the holds dismissed by d or D whose task it no
+    // longer lists as live are forgotten (the header's clearing rule); a
+    // failed snapshot keeps the previous data and every entry with it.
+    if (!state.snapshotError && state.view.dismissed.size) pruneDismissed(state.view.dismissed, facts());
     // The identity: once per session, again on r only while it is unknown.
     // Pending (null) while the rungs are asked, so the PR panes spin on it
     // instead of keeping the identity row; the draw starts the spinner. PR
@@ -654,10 +667,25 @@ export async function runApp(opts) {
     return r;
   };
 
+  // The row whose hold a command just changed leaves the board now, not at
+  // the refresh: its task goes into the session's dismissed set, the model is
+  // rebuilt without every row of that task, and the cursor is clamped onto
+  // the row that took the removed one's place (the last row when it was
+  // last, the pane's empty text when none is left). The notice that follows
+  // draws the result.
+  const dismissRow = (hold) => {
+    state.view.dismissed.add(dismissKey(hold.homeId, hold.id));
+    rebuild();
+    const v = moveSelection(state.model, state.view, null);
+    state.view.pane = v.pane;
+    state.view.row = v.row;
+  };
+
   const holdDiscard = async (row) => {
     const who = holdLogin();
     const r = await runHold(row, 'discarding', (hold) => discardHold({ home: hold.home, id: hold.id, login: who.login, timeoutMs: HOLD_TIMEOUT_MS }));
     if (!r) return;
+    dismissRow(row.hold);
     const said = firstLine(r.stdout);
     notice(`discarded ${row.hold.id}${who.os ? ` as OS user ${who.login} (GitHub login unknown)` : ''}${said ? ` · ${said}` : ''}`, false, 15000);
     refresh('discard');
@@ -666,6 +694,7 @@ export async function runApp(opts) {
   const holdDefer = async (row, { reason, until }) => {
     const r = await runHold(row, 'deferring', (hold) => deferHold({ home: hold.home, id: hold.id, reason, until, timeoutMs: HOLD_TIMEOUT_MS }));
     if (!r) return;
+    dismissRow(row.hold);
     const said = firstLine(r.stdout);
     notice(`deferred ${row.hold.id} until ${until}${said ? ` · ${said}` : ''}`, false, 15000);
     refresh('defer');

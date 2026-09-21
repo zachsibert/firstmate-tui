@@ -54,6 +54,10 @@
 //           While either prompt is up (view.prompt, lib/card.mjs) every other
 //           key is ignored and the mouse does nothing; ctrl-c still quits.
 //           A row without a captain hold in a readable home gets a notice.
+//           When the command succeeds the host drops every row of that task
+//           from the frame at once (view.dismissed, a session-only set
+//           lib/model.mjs reads beside view.hidden; never view state, never
+//           shown by H) and starts a refresh; a failure leaves the row.
 //   l/right expand the selected group      h/left collapse it (from the group
 //           row or from one of its children; the selection lands on the group)
 //   x       hide the row (view state); on a hidden row shown by H: unhide it
@@ -515,8 +519,9 @@ function applySettingsAction(ctx, action) {
 //        persist(), settingsFetch(), settingsUpgrade(running), relaunch(),
 //        quit() }.
 // rebuild() must replace ctx.model from the current view (the expanded set,
-// the hidden set and the hidden panes change which rows and panes exist);
-// persist() saves view.hidden, view.hiddenPanes and view.columns. The three
+// the hidden set, the dismissed set and the hidden panes change which rows
+// and panes exist); persist() saves view.hidden, view.hiddenPanes and
+// view.columns, never view.dismissed. The three
 // hold effects run firstmate's command or read a delegate home (lib/hold.mjs)
 // and set view.busy to a short text meanwhile, which the actions here
 // refuse to start over; holdReason(row) reads a delegate hold's full reason
