@@ -127,7 +127,12 @@ belong to later milestones.
 - In flight groups secondmate work by home, not by delegated item, because
   the ledger carries no per-child parent field (the comment above
   `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it
-  before changing the grouping.
+  before changing the grouping. A group is built from the home's live
+  children and open decisions only (`ledgerGroup`, `ledgerChildRows`,
+  `groupState`); the delegate's own task record lends it a pane and its
+  relayed decisions and nothing else, because that record's state is the
+  last verb of the delegate's own status log and reads done after any
+  done relay. Do not rank or list it again.
 - `FM_HOME` is explicit, never inferred from the current directory. The
   launcher's FM_HOME error may name a home it finds above the working
   directory as the command to run, but it never adopts one (`die_no_home`
