@@ -59,6 +59,22 @@
 //   hidden        Set of row hide keys the captain hid with `x` (view state)
 //   showHidden    list hidden rows anyway, marked "(hidden)" (the `H` toggle)
 //   hiddenPanes   Set of pane ids switched off with `1`-`6`
+//   dismissed     Set of dismiss keys (`<home id>:<task id>`, dismissKey) of
+//                 the holds discarded or deferred in this session: every row
+//                 carrying that task's card (Needs you's hold, decide and
+//                 blocked rows, an In flight or Landed row whose task is the
+//                 hold, a delegate's decision row) is dropped before the
+//                 hidden rows are marked (applyDismissed), so the row leaves
+//                 the frame the moment the command succeeds, before the
+//                 refresh it starts has landed. Session state only: never
+//                 written to the view-state file, never counted or listed by
+//                 H. The host clears an entry (pruneDismissed) on a clean
+//                 refresh only when the new facts no longer list the task as
+//                 a live hold (liveHoldKeys: what Needs you would list with
+//                 row.hold, every home's); an entry whose task is still
+//                 listed stays dismissed until a later refresh agrees, so a
+//                 stale or cached snapshot cannot bring the row back for a
+//                 tick
 //
 // Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading, cached } x6 ], meta },
 // where header is `Title (count[, n hidden])` plus ` (stale)` when that pane's
@@ -1606,15 +1622,51 @@ function applyHidden(paneId, rows, opts) {
   return { rows: listed, hiddenCount };
 }
 
-export function buildModel(facts, options = {}) {
-  const opts = {
-    expanded: asSet(options.expanded),
-    allHomesNeeds: Boolean(options.allHomesNeeds),
-    hidden: asSet(options.hidden),
-    showHidden: Boolean(options.showHidden),
-    hiddenPanes: asSet(options.hiddenPanes),
-  };
-  const f = {
+// Dismissed holds (the `dismissed` option in the header): the key of one
+// task in one home, and the key a row answers to, its card's task (null for
+// a row without a card, which no dismissal can match: review, PR, Findings
+// and group rows). The home id is part of the key so two homes' tasks with
+// one id never collide.
+export function dismissKey(homeId, id) {
+  return `${homeId}:${id}`;
+}
+
+export function rowDismissKey(row) {
+  return row && row.card ? dismissKey(row.card.homeId, row.card.id) : null;
+}
+
+// The rows of one pane less every row whose task was dismissed: the filter
+// step beside applyHidden, run first so a dismissed row is never marked or
+// counted hidden. The pane count and header follow the rows that are left.
+function applyDismissed(rows, opts) {
+  if (!opts.dismissed.size) return rows;
+  return rows.filter((r) => !opts.dismissed.has(rowDismissKey(r)));
+}
+
+// The dismiss keys of every live captain hold the facts carry: what Needs
+// you lists with row.hold, every home's included (a delegate's hold can be
+// discarded from its In flight group, --all-homes-needs or not). The
+// clearing rule reads this set: an entry stays dismissed while its key is
+// here, a stale snapshot still listing the hold included, and goes the first
+// time it is not.
+export function liveHoldKeys(facts) {
+  const rows = needsRows(normalizeFacts(facts), { allHomesNeeds: true });
+  return new Set(rows.filter((r) => r.hold).map((r) => rowDismissKey(r)));
+}
+
+// Drop from `dismissed` every entry whose task the (new) facts no longer
+// list as a live hold. Mutates the set and returns it; the host calls it
+// once per refresh that landed cleanly.
+export function pruneDismissed(dismissed, facts) {
+  const live = liveHoldKeys(facts);
+  for (const key of [...dismissed]) if (!live.has(key)) dismissed.delete(key);
+  return dismissed;
+}
+
+// The facts with every optional field given its default, so the builders
+// never test for absence.
+function normalizeFacts(facts) {
+  return {
     now: facts.now,
     fmHome: facts.fmHome || '',
     snapshot: facts.snapshot || null,
@@ -1628,9 +1680,21 @@ export function buildModel(facts, options = {}) {
     mtime: typeof facts.mtime === 'function' ? facts.mtime : () => null,
     statusVerbs: typeof facts.statusVerbs === 'function' ? facts.statusVerbs : () => null,
   };
+}
+
+export function buildModel(facts, options = {}) {
+  const opts = {
+    expanded: asSet(options.expanded),
+    allHomesNeeds: Boolean(options.allHomesNeeds),
+    hidden: asSet(options.hidden),
+    showHidden: Boolean(options.showHidden),
+    hiddenPanes: asSet(options.hiddenPanes),
+    dismissed: asSet(options.dismissed),
+  };
+  const f = normalizeFacts(facts);
   const builders = { needs: needsRows, mine: mineRows, inflight: inflightRows, findings: findingsRows, landed: landedRows, toreview: toReviewRows };
   const panes = PANES.map((p, i) => {
-    const { rows, hiddenCount } = applyHidden(p.id, builders[p.id](f, opts), opts);
+    const { rows, hiddenCount } = applyHidden(p.id, applyDismissed(builders[p.id](f, opts), opts), opts);
     const empty = PR_PANE_IDS.has(p.id) ? prPaneEmpty(f, p) : p.empty;
     const cached = paneCached(f, p, f.cached);
     return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden, cached), loading: paneLoading(f, p), cached };

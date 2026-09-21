@@ -248,8 +248,8 @@ The bottom line lists the keys, and `?` shows them all.
 | `tab` / `shift-tab` | next / previous pane |
 | `enter`, or a double-click | act on the row: open its pull request in your browser; on a Needs you hold, decision or blocked row, or on an In flight or Landed row whose task is a captain hold, show its hold card in the terminal viewer; on a Findings row show the report; on an In flight group expand or collapse it; on an agent row focus its herdr pane; on a Landed row without a pull request show its report, else focus its pane |
 | `f` | focus the selected row's herdr pane, whatever the pane; a row without one says so |
-| `d` | discard the selected hold: the footer asks `y to discard, esc to cancel`, then firstmate's `fm-captain-hold.sh answer` closes the task in its home with the decision `Discarded by <your GitHub login> from firstmate-tui on <date>: no action; closed as not wanted.`; the row leaves on the refresh that follows, and a refusal from the command shows in red and changes nothing |
-| `D` | defer the selected hold: the footer takes a date (`YYYY-MM-DD`, prefilled with today plus 14 days; digits and dashes edit it, `enter` defers, `esc` cancels), then `fm-captain-hold.sh hold --until <date>` records it in the hold's home with the hold's own reason; a hold in a delegate home is deferred only when that home's full reason is readable here |
+| `d` | discard the selected hold: the footer asks `y to discard, esc to cancel`, then firstmate's `fm-captain-hold.sh answer` closes the task in its home with the decision `Discarded by <your GitHub login> from firstmate-tui on <date>: no action; closed as not wanted.`; the task's rows leave the board at once, the cursor moves to the next row and a refresh follows so firstmate's own state catches up; a refusal from the command shows in red and changes nothing |
+| `D` | defer the selected hold: the footer takes a date (`YYYY-MM-DD`, prefilled with today plus 14 days; digits and dashes edit it, `enter` defers, `esc` cancels), then `fm-captain-hold.sh hold --until <date>` records it in the hold's home with the hold's own reason and the row leaves Needs you at once, as after `d`; a hold in a delegate home is deferred only when that home's full reason is readable here |
 | `l` / `right`, `h` / `left` | expand / collapse the selected In flight group |
 | `x`, `X`, `H` | hide the selected row; unhide every row in the pane; show hidden rows greyed and marked `(hidden)` |
 | `1` to `6`, `0` | show or hide that pane; show every pane (with all six hidden the board lists these keys, and `r`, `.`, `?` and `q`) |
@@ -357,6 +357,7 @@ The board does not change or copy the script: it lives in firstmate's repository
 
 The view state remembers what you hid and how you sized the columns: hidden rows (by pane, home and id, plus the completion date for Landed, so an item that lands again reappears), hidden panes, and every column width you dragged.
 firstmate retires done rows on its own, so hiding a row is the board's business and never a firstmate write.
+A hold you discarded or deferred is not a hidden row: it leaves the board for the rest of the session because firstmate's own state now carries the answer, so it is not in this file and `H` does not show it.
 `=` resets every column width, and the Settings page has a `Reset column widths` entry that does the same.
 Since 0.5.0 the file also remembers where you were: the focused pane, the selected row, the expanded In flight groups and each pane's scroll offset.
 The board saves them whenever it saves the file anyway, about 1.5 seconds after your last key or click, and when you quit.

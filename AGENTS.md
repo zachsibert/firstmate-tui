@@ -97,8 +97,13 @@ belong to later milestones.
   --until <date>`; a delegate hold's full reason is read from its home first
   and the defer is refused rather than passing the ledger's 160-character
   cut), both argv spawns of `bash <home>/bin/fm-captain-hold.sh` with
-  `FM_HOME=<home>` and cwd there, a success starting a refresh and a failure
-  showing the command's stderr verbatim in red and changing nothing;
+  `FM_HOME=<home>` and cwd there, a success dropping every row of that task
+  from the frame at once (`view.dismissed`, a session-only set beside
+  `view.hidden` that `applyDismissed` in `lib/model.mjs` reads; never view
+  state, never shown by `H`; an entry is cleared only by a clean refresh
+  whose facts no longer list the task as a live hold, `pruneDismissed`) and
+  starting a refresh, and a failure showing the command's stderr verbatim in
+  red and changing nothing;
   a remote home's hold gets a notice and no prompt;
   refreshing its own data (`r`: the snapshot, then the live PR fetch
   unless `--no-prs`; that fetch is the board's own read-only GitHub search

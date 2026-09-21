@@ -24,7 +24,13 @@
 //                  same way, from a temp file removed afterwards; d,y and
 //                  D,enter really run bash <home>/bin/fm-captain-hold.sh in
 //                  the hold's home, awaited before the frame, so a test points
-//                  the fixture's homes at scratch directories holding a fake);
+//                  the fixture's homes at scratch directories holding a fake;
+//                  a success drops every row of that task from the frame at
+//                  once, as the app does (lib/model.mjs `dismissed`), and
+//                  against a live home then re-reads the snapshot the way r
+//                  does, the dismissal cleared only when the new snapshot no
+//                  longer lists the hold as live; a fixture has nothing to
+//                  re-read, so its frame shows the dismissal alone);
 //                  --expand <all|ids>
 //                  expands In flight groups; --tags prints the color tags;
 //                  --view-state <file> loads hidden rows, hidden panes,
@@ -124,12 +130,12 @@
 import { readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { parseArgs, USAGE } from './lib/args.mjs';
-import { buildModel, initialPrs, mergePrs, prsFailureText } from './lib/model.mjs';
+import { buildModel, dismissKey, initialPrs, mergePrs, prsFailureText, pruneDismissed } from './lib/model.mjs';
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
 import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
-import { focusFromSaved, focusProblem, handleKey, handleMouse, openDeferPrompt, scrollFromSaved, viewProblem } from './lib/controller.mjs';
+import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openDeferPrompt, scrollFromSaved, viewProblem } from './lib/controller.mjs';
 import { deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, prepareHoldCard, removeTempDir } from './lib/hold.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './lib/viewer.mjs';
@@ -371,12 +377,42 @@ async function driveOnce(facts, opts, size, cfg) {
     config: settingsConfig(cfg),
     prSource: opts.prs ? { enabled: true, ...(facts.prSource || plannedPrSource(cfg.config, process.env)) } : { enabled: false },
   });
-  const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, prompt: null, busy: null, page: 'board', settings };
+  const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, dismissed: new Set(), columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, prompt: null, busy: null, page: 'board', settings };
   // The login a discard names: the fixture's or the live identity, else the OS user.
   const identity = facts.identity || (facts.prs && facts.prs.identity) || null;
   const holdLogin = () => (identityKnown(identity) ? { login: identity.login, os: false } : { login: userInfo().username, os: true });
-  const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes });
+  const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes, dismissed: view.dismissed });
   let model = build();
+  // The cursor onto a row that still exists, as the app clamps it on every draw.
+  const clamp = () => {
+    const v = moveSelection(model, view, null);
+    view.pane = v.pane;
+    view.row = v.row;
+  };
+  // A hold the command just changed, as the app's dismissRow: its task into
+  // the session's dismissed set, the model rebuilt without that task's rows,
+  // the cursor onto the row that took the removed one's place.
+  const dismissRow = (hold) => {
+    view.dismissed.add(dismissKey(hold.homeId, hold.id));
+    model = build();
+    clamp();
+  };
+  // The r key's refresh against the live home (refreshLive: the snapshot,
+  // then the PR fetch), then the dismissed set pruned when the snapshot
+  // landed, the Settings page's identity and PR source lines brought up to
+  // date and the model rebuilt. Resolves to the footer text for r.
+  const liveRefresh = async () => {
+    const text = await refreshLive(facts, opts, cfg);
+    if (!facts.snapshotError && view.dismissed.size) pruneDismissed(view.dismissed, facts);
+    settings.identity = facts.identity || settings.identity;
+    if (facts.prSource) settings.prSource = { enabled: true, ...facts.prSource };
+    model = build();
+    clamp();
+    return text;
+  };
+  // The refresh a hold command's success starts in the app; a fixture has no
+  // home to re-read. The footer keeps the command's result either way.
+  const refreshAfterHold = () => (opts.fixture ? null : liveRefresh().then(() => null));
   if (opts.expand.length) {
     const inflight = model.panes.find((p) => p.id === 'inflight');
     for (const row of inflight.rows) {
@@ -463,7 +499,10 @@ async function driveOnce(facts, opts, size, cfg) {
     },
     // The two writes, for real, against the home the row names: a fixture
     // points its homes at scratch directories holding a fake fm-captain-hold.sh.
-    // A one-shot render refreshes nothing afterwards; the footer says what ran.
+    // A success dismisses the row as the app does (dismissRow) and, against
+    // a live home, re-reads the snapshot the way r does; view.busy stays set
+    // through that refresh so a key list reads in order. The footer keeps
+    // the command's result, as the app's weak refresh notices leave it.
     holdDiscard: (row) => {
       const { hold } = row;
       const who = holdLogin();
@@ -473,10 +512,12 @@ async function driveOnce(facts, opts, size, cfg) {
           .then((r) => {
             if (!r.ok) {
               ctx.notice(holdFailureText(r), true);
-              return;
+              return null;
             }
+            dismissRow(hold);
             const said = firstLine(r.stdout);
             ctx.notice(`discarded ${hold.id}${who.os ? ` as OS user ${who.login} (GitHub login unknown)` : ''}${said ? ` · ${said}` : ''}`);
+            return refreshAfterHold();
           })
           .finally(() => {
             view.busy = null;
@@ -491,10 +532,12 @@ async function driveOnce(facts, opts, size, cfg) {
           .then((r) => {
             if (!r.ok) {
               ctx.notice(holdFailureText(r), true);
-              return;
+              return null;
             }
+            dismissRow(hold);
             const said = firstLine(r.stdout);
             ctx.notice(`deferred ${hold.id} until ${until}${said ? ` · ${said}` : ''}`);
+            return refreshAfterHold();
           })
           .finally(() => {
             view.busy = null;
@@ -544,15 +587,7 @@ async function driveOnce(facts, opts, size, cfg) {
         ctx.notice('refresh is not available with --fixture', true);
         return;
       }
-      pending.push(
-        refreshLive(facts, opts, cfg)
-          .then((text) => ctx.notice(text))
-          .then(() => {
-            settings.identity = facts.identity || settings.identity;
-            if (facts.prSource) settings.prSource = { enabled: true, ...facts.prSource };
-            ctx.rebuild();
-          }),
-      );
+      pending.push(liveRefresh().then((text) => ctx.notice(text)));
     },
     persist: () => {
       if (!vs.path) return;
