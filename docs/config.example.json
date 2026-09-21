@@ -6,7 +6,7 @@
   "review": {
     "default_labels": [],
     "repos": {
-      "MatthewsREIS/gemini": {
+      "example-corp/portal": {
         "labels": [
           "ready-to-merge"
         ]

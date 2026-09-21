@@ -277,8 +277,13 @@ belong to later milestones.
   proves) and fails on `pr list`, so the old per-repository fetch cannot come
   back unnoticed; it logs a search with the `closed:>=` stamp replaced by
   `<since>` so the suite compares whole logs. A live render also writes the
-  example config into its `XDG_CONFIG_HOME`, which is how the gemini rule
-  reaches the Teammates' PRs scope in those checks. The identity chain is tested
+  example config into its `XDG_CONFIG_HOME`, which is how the example's
+  placeholder rule (`example-corp/portal`) reaches the Teammates' PRs scope
+  in those checks. Names in the README, `docs/`, the shipped example, code
+  comments and the fixtures are placeholders (`example-corp/portal`,
+  `acme/...`, the delegate home `delegate-a`): never name a real
+  organisation, repository or product there; `docs/scout-report-*.md` is a
+  historical record and is left as written. The identity chain is tested
   with a fake `git` that answers `config --get github.user` alone and hands
   every other call to the real one, because `candidateRepos` runs git too.
   `populated.json` and `pr-status.json` are 160x44, not 40: six panes need

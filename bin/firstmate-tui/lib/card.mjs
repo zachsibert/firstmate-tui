@@ -137,7 +137,7 @@ function fenced(lines) {
 // input:
 //   id          the task id
 //   home        the home path the record and files belong to
-//   homeLabel   the home's label on the board (main, hyperion, remote-sm (remote))
+//   homeLabel   the home's label on the board (main, delegate-a, remote-sm (remote))
 //   record      the backlog record (fm-fleet-snapshot.v1 backlog.records[]), or
 //               a ledger-shaped stand-in, or null when no record was found
 //   partial     null, or one sentence saying why the record is not the home's

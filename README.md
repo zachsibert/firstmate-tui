@@ -320,7 +320,7 @@ When no file exists at startup, the board writes this example, [`docs/config.exa
   "review": {
     "default_labels": [],
     "repos": {
-      "MatthewsREIS/gemini": {
+      "example-corp/portal": {
         "labels": [
           "ready-to-merge"
         ]
@@ -341,6 +341,8 @@ When no file exists at startup, the board writes this example, [`docs/config.exa
 | `review.repos` | one entry per repository, `"owner/name": { "labels": [...] }`. Each named repository is searched even when firstmate has no work in it, and its `labels` list is its own rule; an empty list means no filter there whatever `default_labels` says |
 | `prs.source` | where the pull request panes get their data. `board` (the default, and what a file without the key means) is the board's own GitHub fetch described under [Using the board](#using-the-board), which still falls back to firstmate's script when gh is not on `PATH`. `firstmate` runs firstmate's own `FM_HOME/bin/fm-bearings-snapshot.sh --include-prs` on every refresh instead, whether or not gh is there. That script lists open pull requests only, in the repositories firstmate works in, without titles, base branches, creation times, authors or labels, so a row shows the recorded task's title or the URL, `-` under BASE and the task's status-log age marked `~` under AGE; its CHECKS word is the script's own verdict; and Teammates' PRs reads `config prs.source = firstmate: Teammates' PRs needs the board's own fetch`. The script calls gh itself, so this source needs gh on `PATH` and logged in exactly as the default does |
 
+The example's `example-corp/portal` entry is a placeholder, not a real repository.
+To add your own rule, replace it with the repository as GitHub spells it, `owner/name`, and list the labels a pull request there must carry one of; add one entry per repository, or delete the entry to search only the repositories firstmate works in.
 Unknown keys are ignored.
 A malformed file (bad JSON, a wrong type, a repository name that is not `owner/name`, a `prs.source` other than the two words) is reported once in the footer and on the Settings page, and the board runs with the defaults: no login from the file, no label rules, no extra repositories, the `board` source.
 The Settings page (`.`) shows the identity and where it came from, such as `Identity  zachsibert  (from gh api user)`, the config file's path with `(created from the example)` or `(using defaults: <reason>)` when that applies, the PR source the last refresh used and why (`PR source  board: the board's own GitHub fetch (default)`, `(config)` when the file set it, `firstmate: fm-bearings-snapshot.sh (config prs.source)`, or `(gh not on PATH; the script needs gh too, so both sources fail the same way)` when gh is missing whatever the file says), and the label rules in effect.

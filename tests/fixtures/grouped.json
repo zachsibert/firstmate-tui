@@ -1,5 +1,5 @@
 {
-  "_comment": "In flight grouping. Two secondmate homes given as explicit ledgers: hyperion with four children (two working, one keyed needs-decision, one blocked with a hold reason) plus a live captain hold and a dated one on queued items; notes with two working children and no decisions. One main-home worker (ship-alpha) stays a plain row. now is 2026-09-16T12:00:00Z = epoch 1789560000. Ages: etl-loader 3h, etl-schema 20m, etl-cutover-runbook 5m, etl-backfill 1h, brag-week-37 2h, notes-monday 40m, ship-alpha 5m.",
+  "_comment": "In flight grouping. Two secondmate homes given as explicit ledgers: delegate-a with four children (two working, one keyed needs-decision, one blocked with a hold reason) plus a live captain hold and a dated one on queued items; notes with two working children and no decisions. One main-home worker (ship-alpha) stays a plain row. now is 2026-09-16T12:00:00Z = epoch 1789560000. Ages: etl-loader 3h, etl-schema 20m, etl-cutover-runbook 5m, etl-backfill 1h, brag-week-37 2h, notes-monday 40m, ship-alpha 5m.",
   "now": "2026-09-16T12:00:00Z",
   "cols": 160,
   "rows": 44,
@@ -24,16 +24,16 @@
         "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets" }
       },
       {
-        "id": "hyperion",
+        "id": "delegate-a",
         "kind": "secondmate",
-        "project": "/fixture/homes/hyperion",
+        "project": "/fixture/homes/delegate-a",
         "mode": "secondmate",
         "backend": "herdr",
         "current_state": { "state": "working", "source": "pane", "detail": "supervising four children", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
         "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
         "pr": { "url": null, "source": "absent" },
         "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
-        "paths": { "status_log": { "path": "/fixture/firstmate/state/hyperion.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/delegate-a.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
         "remote": null,
         "backlog": null
       },
@@ -63,8 +63,8 @@
   },
   "ledgers": [
     {
-      "id": "hyperion",
-      "home": "/fixture/homes/hyperion",
+      "id": "delegate-a",
+      "home": "/fixture/homes/delegate-a",
       "remote": false,
       "cached": false,
       "summary": {
@@ -122,7 +122,7 @@
   "herdr": {
     "agents": [
       { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-alpha" },
-      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "hyperion" },
+      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "delegate-a" },
       { "pane_id": "w1E:p1", "agent_status": "idle", "terminal_title_stripped": "notes" },
       { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "etl-loader" },
       { "pane_id": "w2C:p2", "agent_status": "working", "terminal_title_stripped": "etl-schema" },
@@ -135,10 +135,10 @@
   "prs": null,
   "mtimes": {
     "/fixture/firstmate/state/ship-alpha.status": 1789559700,
-    "/fixture/homes/hyperion/state/etl-loader.status": 1789549200,
-    "/fixture/homes/hyperion/state/etl-schema.status": 1789558800,
-    "/fixture/homes/hyperion/state/etl-cutover-runbook.status": 1789559700,
-    "/fixture/homes/hyperion/state/etl-backfill.status": 1789556400,
+    "/fixture/homes/delegate-a/state/etl-loader.status": 1789549200,
+    "/fixture/homes/delegate-a/state/etl-schema.status": 1789558800,
+    "/fixture/homes/delegate-a/state/etl-cutover-runbook.status": 1789559700,
+    "/fixture/homes/delegate-a/state/etl-backfill.status": 1789556400,
     "/fixture/homes/notes/state/brag-week-37.status": 1789552800,
     "/fixture/homes/notes/state/notes-monday.status": 1789557600
   }

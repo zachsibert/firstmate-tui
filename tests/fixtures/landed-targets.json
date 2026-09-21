@@ -1,5 +1,5 @@
 {
-  "_comment": "Landed rows with every target shape, for the enter fallback (PR, else report, else worker pane, else nothing). now is 2026-09-16T12:00:00Z = epoch 1789560000. Main home done rows: ship-old has a PR and a lost pane (w1G:p1 absent from herdr), old-scout a report only, ship-done a live pane only (its done task's pane w1F:p1 is in the herdr block), plain-done nothing. hyperion (local secondmate) landed: etl-index a PR, etl-report a report, etl-pane a live pane only (its ledger endpoint w2C:p2 is in the herdr block), etl-none nothing. remote-sm (remote) landed: mobile-fix a report only, unreachable from here. Completion dates are one day apart so the Landed order is fixed: etl-index 1d, ship-done 2d, etl-pane 3d, ship-old 4d, etl-report 5d, plain-done 6d, mobile-fix 7d, etl-none 8d, old-scout 10d. The other panes hold one or a few rows each so tab reaches Landed in four presses: Needs you ship-alpha's decision, Ready for review PR 41, In flight ship-alpha, ship-done, ship-old and the hyperion group, Findings etl-report (5d), mobile-fix (7d) and old-scout (10d).",
+  "_comment": "Landed rows with every target shape, for the enter fallback (PR, else report, else worker pane, else nothing). now is 2026-09-16T12:00:00Z = epoch 1789560000. Main home done rows: ship-old has a PR and a lost pane (w1G:p1 absent from herdr), old-scout a report only, ship-done a live pane only (its done task's pane w1F:p1 is in the herdr block), plain-done nothing. delegate-a (local secondmate) landed: etl-index a PR, etl-report a report, etl-pane a live pane only (its ledger endpoint w2C:p2 is in the herdr block), etl-none nothing. remote-sm (remote) landed: mobile-fix a report only, unreachable from here. Completion dates are one day apart so the Landed order is fixed: etl-index 1d, ship-done 2d, etl-pane 3d, ship-old 4d, etl-report 5d, plain-done 6d, mobile-fix 7d, etl-none 8d, old-scout 10d. The other panes hold one or a few rows each so tab reaches Landed in four presses: Needs you ship-alpha's decision, Ready for review PR 41, In flight ship-alpha, ship-done, ship-old and the delegate-a group, Findings etl-report (5d), mobile-fix (7d) and old-scout (10d).",
   "now": "2026-09-16T12:00:00Z",
   "cols": 160,
   "rows": 44,
@@ -58,16 +58,16 @@
         "backlog": { "state": "done", "title": "Rename the widget table", "repo": "acme/widgets" }
       },
       {
-        "id": "hyperion",
+        "id": "delegate-a",
         "kind": "secondmate",
-        "project": "/fixture/homes/hyperion",
+        "project": "/fixture/homes/delegate-a",
         "mode": "secondmate",
         "backend": "herdr",
         "current_state": { "state": "working", "source": "pane", "detail": "supervising one child", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
         "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
         "pr": { "url": null, "source": "absent" },
         "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
-        "paths": { "status_log": { "path": "/fixture/firstmate/state/hyperion.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/delegate-a.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
         "remote": null,
         "backlog": null
       }
@@ -87,8 +87,8 @@
     "secondmate_current": {
       "records": [
         {
-          "id": "hyperion",
-          "home": "/fixture/homes/hyperion",
+          "id": "delegate-a",
+          "home": "/fixture/homes/delegate-a",
           "host": null,
           "remote": false,
           "registered": true,
@@ -126,10 +126,10 @@
     },
     "secondmate_landed": {
       "records": [
-        { "id": "etl-index", "title": "Add the ETL index", "pr_url": "https://github.com/acme/etl/pull/12", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-15" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" },
-        { "id": "etl-pane", "title": "Backfill the ETL audit table", "pr_url": null, "report_path": null, "local_note": null, "completion": { "verb": "done", "date": "2026-09-13" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" },
-        { "id": "etl-report", "title": "Scout: warehouse index options", "pr_url": null, "report_path": "data/etl-report/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-11" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" },
-        { "id": "etl-none", "title": "Rotate the warehouse credentials", "pr_url": null, "report_path": null, "local_note": null, "completion": { "verb": "done", "date": "2026-09-08" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" },
+        { "id": "etl-index", "title": "Add the ETL index", "pr_url": "https://github.com/acme/etl/pull/12", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-15" }, "home": "/fixture/homes/delegate-a", "home_id": "delegate-a" },
+        { "id": "etl-pane", "title": "Backfill the ETL audit table", "pr_url": null, "report_path": null, "local_note": null, "completion": { "verb": "done", "date": "2026-09-13" }, "home": "/fixture/homes/delegate-a", "home_id": "delegate-a" },
+        { "id": "etl-report", "title": "Scout: warehouse index options", "pr_url": null, "report_path": "data/etl-report/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-11" }, "home": "/fixture/homes/delegate-a", "home_id": "delegate-a" },
+        { "id": "etl-none", "title": "Rotate the warehouse credentials", "pr_url": null, "report_path": null, "local_note": null, "completion": { "verb": "done", "date": "2026-09-08" }, "home": "/fixture/homes/delegate-a", "home_id": "delegate-a" },
         { "id": "mobile-fix", "title": "Fix the crash on launch", "pr_url": null, "report_path": "data/mobile-fix/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-09" }, "home": "/fixture/homes/remote-sm", "home_id": "remote-sm" }
       ]
     }
@@ -137,7 +137,7 @@
   "herdr": {
     "agents": [
       { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-alpha" },
-      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "hyperion" },
+      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "delegate-a" },
       { "pane_id": "w1F:p1", "agent_status": "done", "terminal_title_stripped": "ship-done" },
       { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "child-one" },
       { "pane_id": "w2C:p2", "agent_status": "done", "terminal_title_stripped": "etl-pane" }
@@ -152,8 +152,8 @@
     "/fixture/firstmate/state/ship-alpha.status": 1789559700,
     "/fixture/firstmate/state/ship-done.status": 1789387200,
     "/fixture/firstmate/state/ship-old.status": 1789214400,
-    "/fixture/homes/hyperion/state/child-one.status": 1789300800,
+    "/fixture/homes/delegate-a/state/child-one.status": 1789300800,
     "/fixture/firstmate/data/old-scout/report.md": 1788696000,
-    "/fixture/homes/hyperion/data/etl-report/report.md": 1789128000
+    "/fixture/homes/delegate-a/data/etl-report/report.md": 1789128000
   }
 }

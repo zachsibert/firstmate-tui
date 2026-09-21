@@ -45,12 +45,15 @@ export const CONFIG_SCHEMA = 'firstmate-tui-config.v1';
 export const PR_SOURCES = ['board', 'firstmate'];
 
 // The documented example, byte for byte what docs/config.example.json holds
-// and what the board writes on a first launch: the captain's rule for the
-// gemini repository, and the default PR source spelled out.
+// and what the board writes on a first launch: one placeholder repository
+// rule (example-corp/portal is not a real repository; the README says how a
+// user puts their own in its place) and the default PR source spelled out.
+// No real organisation, repository or product is named here or anywhere in
+// this repository's examples, comments and fixtures.
 export const EXAMPLE_CONFIG = {
   schema: CONFIG_SCHEMA,
   identity: { github_login: null },
-  review: { default_labels: [], repos: { 'MatthewsREIS/gemini': { labels: ['ready-to-merge'] } } },
+  review: { default_labels: [], repos: { 'example-corp/portal': { labels: ['ready-to-merge'] } } },
   prs: { source: 'board' },
 };
 
@@ -162,8 +165,8 @@ export function prSourceInEffect(config, ghOnPath) {
 // an empty list when it is unfiltered: the repository's own entry when the
 // file has one (its empty list means unfiltered even with default labels
 // set), else review.default_labels. Repository names compare without case,
-// as GitHub treats them, so `matthewsreis/gemini` in the file still rules
-// the PRs GitHub reports under `MatthewsREIS/gemini`.
+// as GitHub treats them, so `Example-Corp/Portal` in the file still rules
+// the PRs GitHub reports under `example-corp/portal`.
 export function labelsFor(config, repo) {
   const repos = config && config.review && config.review.repos ? config.review.repos : {};
   const want = String(repo || '').toLowerCase();

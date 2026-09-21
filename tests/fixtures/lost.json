@@ -1,5 +1,5 @@
 {
-  "_comment": "Lost panes and reports for M2. now is 2026-09-16T12:00:00Z = epoch 1789560000. Main worker ship-alpha has a live pane (w1A:p1, working, keyed decision); ship-lost's pane w1L:p1 is absent from the herdr block, so its Needs you and In flight rows are lost; hyperion's child-one is live and child-lost's pane w2L:p2 is absent. Findings: a main scout report and a hyperion landed report (a secondmate report resolved against /fixture/homes/hyperion). Landed: two main rows plus hyperion's report row.",
+  "_comment": "Lost panes and reports for M2. now is 2026-09-16T12:00:00Z = epoch 1789560000. Main worker ship-alpha has a live pane (w1A:p1, working, keyed decision); ship-lost's pane w1L:p1 is absent from the herdr block, so its Needs you and In flight rows are lost; delegate-a's child-one is live and child-lost's pane w2L:p2 is absent. Findings: a main scout report and a delegate-a landed report (a secondmate report resolved against /fixture/homes/delegate-a). Landed: two main rows plus delegate-a's report row.",
   "now": "2026-09-16T12:00:00Z",
   "cols": 160,
   "rows": 40,
@@ -50,16 +50,16 @@
         "backlog": { "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "acme/api" }
       },
       {
-        "id": "hyperion",
+        "id": "delegate-a",
         "kind": "secondmate",
-        "project": "/fixture/homes/hyperion",
+        "project": "/fixture/homes/delegate-a",
         "mode": "secondmate",
         "backend": "herdr",
         "current_state": { "state": "working", "source": "pane", "detail": "supervising two children", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
         "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
         "pr": { "url": null, "source": "absent" },
         "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
-        "paths": { "status_log": { "path": "/fixture/firstmate/state/hyperion.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/delegate-a.status", "present": false, "kind": "event_history", "last_event": { "state": "", "note": "", "raw": "" } } },
         "remote": null,
         "backlog": null
       }
@@ -76,8 +76,8 @@
     "secondmate_current": {
       "records": [
         {
-          "id": "hyperion",
-          "home": "/fixture/homes/hyperion",
+          "id": "delegate-a",
+          "home": "/fixture/homes/delegate-a",
           "host": null,
           "remote": false,
           "registered": true,
@@ -99,14 +99,14 @@
     },
     "secondmate_landed": {
       "records": [
-        { "id": "etl-report", "title": "Scout: warehouse index options", "pr_url": null, "report_path": "data/etl-report/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-14" }, "home": "/fixture/homes/hyperion", "home_id": "hyperion" }
+        { "id": "etl-report", "title": "Scout: warehouse index options", "pr_url": null, "report_path": "data/etl-report/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-14" }, "home": "/fixture/homes/delegate-a", "home_id": "delegate-a" }
       ]
     }
   },
   "herdr": {
     "agents": [
       { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-alpha" },
-      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "hyperion" },
+      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "delegate-a" },
       { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "child-one" }
     ]
   },
@@ -114,9 +114,9 @@
   "mtimes": {
     "/fixture/firstmate/state/ship-alpha.status": 1789559700,
     "/fixture/firstmate/state/ship-lost.status": 1789559400,
-    "/fixture/homes/hyperion/state/child-one.status": 1789300800,
-    "/fixture/homes/hyperion/state/child-lost.status": 1789556400,
+    "/fixture/homes/delegate-a/state/child-one.status": 1789300800,
+    "/fixture/homes/delegate-a/state/child-lost.status": 1789556400,
     "/fixture/firstmate/data/scout-beta/report.md": 1789559400,
-    "/fixture/homes/hyperion/data/etl-report/report.md": 1789387200
+    "/fixture/homes/delegate-a/data/etl-report/report.md": 1789387200
   }
 }

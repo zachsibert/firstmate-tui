@@ -21,13 +21,13 @@
 #
 # The canned PRs, for the login captain (the stand-in snapshot's candidate
 # repositories are acme/widgets, acme/api and acme/etl, and the example
-# config adds MatthewsREIS/gemini with the ready-to-merge rule):
+# config adds example-corp/portal with the ready-to-merge rule):
 #   My PRs open      captain/dotfiles#5, captain's own PR in a repository no
 #                    fleet task touches; acme/api#12, captain's own PR that
 #                    asks captain's team for a review (it is answered for the
 #                    review-requested searches too, as GitHub would without
 #                    the -author: term, and the board must drop it there);
-#                    MatthewsREIS/gemini#6148, captain's own PR with the real
+#                    example-corp/portal#6148, captain's own PR with the real
 #                    PR 6148 rollup (SUPERSEDED below: six runs of one check,
 #                    one cancelled and re-run), merge state BLOCKED and a
 #                    review required: CHECKS must read passing and STATUS
@@ -40,13 +40,13 @@
 #                    acme/widgets#30, ship-old's PR merged in 2020 (dropped);
 #                    anything else null, so ship-gamma's acme/api#7 stays a
 #                    `-` row
-#   To review open   MatthewsREIS/gemini#120 with the ready-to-merge label
+#   To review open   example-corp/portal#120 with the ready-to-merge label
 #                    (listed) and #121 without (dropped by the label rule);
 #                    acme/api#8 in a repository with no rule (listed, checks
 #                    failing); acme/etl#15, a request to captain's team (the
 #                    fake answering it for review-requested: is the contract),
 #                    carrying the same SUPERSEDED rollup and BLOCKED state as
-#                    gemini#6148 so the Teammates' PRs pane proves the rule too;
+#                    portal#6148 so the Teammates' PRs pane proves the rule too;
 #                    acme/widgets#45, which captain already approved (STATUS
 #                    APPROVED); and acme/api#12 from above (dropped: captain
 #                    wrote it)
@@ -109,7 +109,7 @@ check() {
 PASSING="{\"contexts\":{\"nodes\":[$(check build CI SUCCESS 2020-01-01T00:01:00Z 2020-01-01T00:02:00Z)]}}"
 FAILING="{\"contexts\":{\"nodes\":[$(check build CI FAILURE 2020-01-01T00:01:00Z 2020-01-01T00:02:00Z)]}}"
 PENDING='{"contexts":{"nodes":[{"__typename":"StatusContext","context":"ci/lint","state":"PENDING","createdAt":"2020-01-01T00:01:00Z"}]}}'
-# MatthewsREIS/gemini#6148's head commit as GitHub returned it on 2026-09-18:
+# example-corp/portal#6148's head commit as GitHub returned it on 2026-09-18:
 # six runs of "check graphql schema (hive)", five SUCCESS and one CANCELLED
 # (listed first, and superseded by the run that started 23 seconds later),
 # beside one "merge check". Only the newest run of each check may count, so
@@ -133,15 +133,15 @@ pr() {
 mine_open() {
   printf '%s %s\n' captain/dotfiles "$(pr captain/dotfiles 5 'Tidy the zsh prompt' tidy-prompt captain OPEN 2020-01-01T00:00:00Z null null "$NO_LABELS" "$NO_REVIEWS" "$PASSING")"
   printf '%s %s\n' acme/api "$(pr acme/api 12 'Retry budget: ask the API team' team-review captain OPEN 2020-01-02T00:00:00Z null null "$NO_LABELS" "$NO_REVIEWS" "$PENDING")"
-  printf '%s %s\n' MatthewsREIS/gemini "$(pr MatthewsREIS/gemini 6148 'Hide the Primary Sub Type row behind a feature flag' eng-2399-sub-type-flag captain OPEN 2020-01-03T00:00:00Z null null "$NO_LABELS" "$NO_REVIEWS" "$SUPERSEDED" REVIEW_REQUIRED false BLOCKED)"
+  printf '%s %s\n' example-corp/portal "$(pr example-corp/portal 6148 'Hide the Primary Sub Type row behind a feature flag' eng-2399-sub-type-flag captain OPEN 2020-01-03T00:00:00Z null null "$NO_LABELS" "$NO_REVIEWS" "$SUPERSEDED" REVIEW_REQUIRED false BLOCKED)"
 }
 mine_closed() {
   printf '%s %s\n' acme/api "$(pr acme/api 9 'Bump the retry budget' bump-retry captain MERGED 2020-01-01T00:00:00Z "\"$just_now\"" "\"$just_now\"" "$NO_LABELS" "$NO_REVIEWS" "$PASSING" APPROVED)"
   printf '%s %s\n' acme/api "$(pr acme/api 10 'Old spike' old-spike captain CLOSED 2020-01-01T00:00:00Z null '"2020-02-01T00:00:00Z"' "$NO_LABELS" "$NO_REVIEWS" "$NO_CHECKS" '')"
 }
 review_open() {
-  printf '%s %s\n' MatthewsREIS/gemini "$(pr MatthewsREIS/gemini 120 'Gemini: index the parcel table' parcel-index teammate OPEN 2020-01-01T00:00:00Z null null "$READY" "$NO_REVIEWS" "$PASSING")"
-  printf '%s %s\n' MatthewsREIS/gemini "$(pr MatthewsREIS/gemini 121 'Gemini: still cooking' cooking teammate OPEN 2020-01-01T00:00:00Z null null "$NO_LABELS" "$NO_REVIEWS" "$PASSING")"
+  printf '%s %s\n' example-corp/portal "$(pr example-corp/portal 120 'Portal: index the parcel table' parcel-index teammate OPEN 2020-01-01T00:00:00Z null null "$READY" "$NO_REVIEWS" "$PASSING")"
+  printf '%s %s\n' example-corp/portal "$(pr example-corp/portal 121 'Portal: still cooking' cooking teammate OPEN 2020-01-01T00:00:00Z null null "$NO_LABELS" "$NO_REVIEWS" "$PASSING")"
   printf '%s %s\n' acme/api "$(pr acme/api 8 'Retry on 429' retry-429 teammate OPEN 2020-01-01T00:00:00Z null null "$NO_LABELS" "$NO_REVIEWS" "$FAILING" CHANGES_REQUESTED)"
   printf '%s %s\n' acme/etl "$(pr acme/etl 15 'ETL: nightly loader for the team' team-loader teammate OPEN 2020-01-01T00:00:00Z null null "$NO_LABELS" "$NO_REVIEWS" "$SUPERSEDED" REVIEW_REQUIRED false BLOCKED)"
   printf '%s %s\n' acme/widgets "$(pr acme/widgets 45 'Widget: approved by captain' approved-widget teammate OPEN 2020-01-01T00:00:00Z null null "$NO_LABELS" "$MY_APPROVAL" "$PASSING" APPROVED)"
