@@ -261,8 +261,8 @@ assert_contains "$record" "layout=firstmate-tui" "the record names the layout th
 # working directory (falsify: leave lib/ out of the tarball, or make the shim
 # a symlink so firstmate-tui.sh resolves ROOT to the bin dir).
 if frame=$(cd / && "$BIN/firstmate-tui" --render-once --fixture "$FIX/populated.json" --no-herdr 2>&1); then pass; else fail "installed firstmate-tui --render-once exited non-zero: $frame"; fi
-assert_contains "$frame" "Needs you (4)" "the installed command prints the Needs you pane"
-assert_contains "$frame" "In flight" "the installed command prints the In flight pane"
+assert_contains "$frame" "Captain's Call (6)" "the installed command prints the Captain's Call pane"
+assert_contains "$frame" "Underway" "the installed command prints the Underway pane"
 assert_contains "$frame" "blocked: gh auth expired" "the installed command prints fixture rows"
 if alias_frame=$(cd / && "$BIN/fm-board" --render-once --fixture "$FIX/populated.json" --no-herdr 2>&1); then pass; else fail "installed fm-board alias --render-once exited non-zero: $alias_frame"; fi
 assert_equal "$alias_frame" "$frame" "the fm-board alias prints the same frame as firstmate-tui"
@@ -304,7 +304,7 @@ assert_not_contains "$up_out" "next: export FM_HOME" "an upgrade does not repeat
 assert_absent "$PREFIX/stale-file" "the previous install is replaced as a whole, not overlaid (falsify: extract over the existing prefix)"
 assert_not_contains "$("$BIN/firstmate-tui" --help 2>&1)" "INSTALLED-COPY-MARKER" "the wrapper is the fresh copy after the upgrade"
 if frame=$(cd / && "$BIN/firstmate-tui" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "installed firstmate-tui after upgrade exited non-zero: $frame"; fi
-assert_contains "$frame" "Needs you (0)" "the upgraded command renders"
+assert_contains "$frame" "Captain's Call (0)" "the upgraded command renders"
 assert_no_leftovers "$SCRATCH" "an upgrade leaves no staging or previous directory"
 
 # A wrong checksum stops the install and leaves the existing one alone
@@ -574,7 +574,7 @@ assert_equal "$(file_sha "$VIEW_STATE")" "$VIEW_STATE_SHA" "view state survives 
 assert_no_leftovers "$SWAP" "the swap section leaves no staging or previous directory"
 # The command still renders after all the swaps.
 if frame=$(cd / && "$FM" --render-once --fixture "$FIX/empty.json" --no-herdr 2>&1); then pass; else fail "firstmate-tui after the swaps exited non-zero: $frame"; fi
-assert_contains "$frame" "Needs you (0)" "the swapped command renders"
+assert_contains "$frame" "Captain's Call (0)" "the swapped command renders"
 
 # 9. A moved install and a missing record are refused with a pointer to the
 # installer (falsify: install into the recorded prefix regardless).

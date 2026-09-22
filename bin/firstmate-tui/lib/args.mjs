@@ -11,10 +11,11 @@ options:
   --home <path>          add a secondmate home (repeatable). Default: FM_HOME plus
                          every home listed in FM_HOME/data/secondmates.md
   --refresh <seconds>    refresh cadence (default 30): every tick runs the fleet snapshot
-                         and then, unless --no-prs, the live GitHub PR fetch (at most
-                         four searches through gh api graphql, all at once, plus one
-                         lookup of recorded PRs), so nothing on screen is older than
-                         this plus the two steps; a tick that lands while a refresh is
+                         and draws it, then starts, unless --no-prs, the live GitHub PR
+                         fetch (at most four searches through gh api graphql, all at
+                         once, plus one lookup of recorded PRs) without waiting for it:
+                         the PR panes keep their rows marked (updating) until it lands,
+                         one fetch at a time; a tick that lands while a snapshot is
                          still running is skipped
   --no-prs               skip the live GitHub PR fetch (gh api graphql; fm-bearings-snapshot.sh
                          --include-prs when gh is not on PATH) so My PRs shows recorded
@@ -27,12 +28,12 @@ options:
                          ~/.config/fm-board/config.json; never inside FM_HOME). Written
                          once from docs/config.example.json when absent
   --no-herdr             skip the herdr overlay and the socket subscription
-  --all-homes-needs      Needs you also lists every secondmate home's open decisions
-                         (default: main home only; secondmate decisions flag their
-                         In flight group instead)
+  --all-homes-needs      accepted and ignored: since 0.7.0 Captain's Call lists every
+                         home's live captain holds by default (kept so an old launcher
+                         line still starts the board)
   --opener-cmd <argv>    command that opens a URL in the browser (default: open on
                          macOS, xdg-open on Linux); quoted string, split on whitespace
-  --viewer-cmd <argv>    command that shows a Findings report or a hold card in the
+  --viewer-cmd <argv>    command that shows a report or a hold card in the
                          terminal (default: glow -p when glow is on PATH, else $EDITOR,
                          else vim, else less); quoted string, split on whitespace; the
                          path is appended
@@ -63,8 +64,10 @@ options:
   --fixture <json>       with --render-once: render this facts file instead of live reads
   --cols N / --rows N    frame size for --render-once (default: terminal, else 120x40)
   --keys <list>          with --render-once: press these keys first (comma or space
-                         separated, e.g. "tab,j,enter"); a PR open runs --opener-cmd
-                         when given and is only reported in the footer otherwise
+                         separated, e.g. "tab,j,enter"; the word space is the space
+                         bar, which the search prompt types); a PR open runs
+                         --opener-cmd when given and is only reported in the footer
+                         otherwise
   --no-mouse             ignore the mouse and leave the terminal's own text selection
                          alone (default: click selects, double-click is enter, the
                          wheel scrolls, dragging a column boundary in a pane's header
@@ -76,7 +79,7 @@ options:
                          (one motion report with the left button held)  release:X,Y,
                          X and Y the cell from 0 at the top-left; any other token is a
                          key, so "click:12,5 x" selects a row and hides it
-  --expand <all|ids>     with --render-once: expand these In flight groups (secondmate
+  --expand <all|ids>     with --render-once: expand these Underway groups (secondmate
                          ids, or all) before rendering
   --tags                 with --render-once: print the frame with its color tags
                          ({red-fg}...{/red-fg}) instead of plain text
@@ -89,6 +92,13 @@ options:
   -h, --help             this text`;
 
 export const COMMANDS = ['run', 'open', 'focus'];
+
+// A key token of --keys or --mouse -> the key name the controller hears. The
+// lists split on spaces, so the space bar is spelled `space`; every other
+// token is already the name lib/tui-blessed.mjs normalizeKey would give.
+function keyName(token) {
+  return token === 'space' ? ' ' : token;
+}
 
 // One --mouse token -> the mouse events it stands for (lib/controller.mjs
 // mouseAction shape, without `time`), or null when the token is a key name.
@@ -268,7 +278,7 @@ export function parseArgs(argv, env = {}) {
         opts.tags = true;
         break;
       case '--keys':
-        for (const key of need(a).split(/[\s,]+/).filter(Boolean)) {
+        for (const key of need(a).split(/[\s,]+/).filter(Boolean).map(keyName)) {
           opts.keys.push(key);
           opts.inputs.push({ kind: 'key', key });
         }
@@ -286,8 +296,8 @@ export function parseArgs(argv, env = {}) {
           const events = parseMouseToken(token);
           if (events) opts.inputs.push({ kind: 'mouse', events });
           else {
-            opts.keys.push(token);
-            opts.inputs.push({ kind: 'key', key: token });
+            opts.keys.push(keyName(token));
+            opts.inputs.push({ kind: 'key', key: keyName(token) });
           }
         }
         break;

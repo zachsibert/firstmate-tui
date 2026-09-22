@@ -34,16 +34,20 @@ under the old name, and the first installer that knows both).
 `FAKE_CURL_FAIL`). The herdr plugin id `firstmate.board` stays: linked
 plugins and the view-state directory are keyed by it; a plugin linked at
 the old `bin/fm-board` path is relinked once. The
-scout report at `docs/scout-report-2026-09-16.md` is the design record: its
-section 1 table is the pane-to-data mapping that `bin/firstmate-tui/lib/model.mjs`
-implements row for row (since 0.4.0 its Ready for review row is two panes, My
-PRs and Teammates' PRs, both over the identity in the board's config file; the
-README's Using the board section is the current mapping), and its section 7 table is
-the milestone plan. Check the plan before widening scope: of its M2 actions,
-discarding and deferring a hold are here since 0.6.0 (`d` and `D`, through
-`fm-captain-hold.sh`); free-text answers, `fm-send --resolve-key` routing,
-notes through `fm-inbox`, opening PRs, toasts and the findings watermark
-belong to later milestones.
+scout report at `docs/scout-report-2026-09-16.md` is the design record of
+the first releases: its section 1 table was the pane-to-data mapping through
+0.6.x (since 0.4.0 its Ready for review row is two panes, My PRs and
+Teammates' PRs, both over the identity in the board's config file), and its
+section 7 table is the milestone plan. Since 0.7.0 the four fleet panes
+follow the four sections of firstmate's bearings digest (Captain's Call,
+Underway, Charted Next, Recently Landed; the chat-response contract in
+firstmate's `.agents/skills/bearings/SKILL.md`), and the README's Using the
+board section is the current pane-to-data mapping, which
+`bin/firstmate-tui/lib/model.mjs` implements row for row. Check the plan
+before widening scope: of its M2 actions, discarding and deferring a hold are
+here since 0.6.0 (`d` and `D`, through `fm-captain-hold.sh`); free-text
+answers, `fm-send --resolve-key` routing, notes through `fm-inbox`, opening
+PRs, toasts and the unread-report marker belong to later milestones.
 
 ## Hard rules
 
@@ -81,9 +85,10 @@ belong to later milestones.
   PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
   `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
   report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended),
-  showing a hold card (enter on a Needs you hold, decide or blocked row, on a
-  delegate's decision row, or on an In flight or Landed row whose task is a
-  captain hold; `lib/card.mjs` builds it, pure, from the backlog record and
+  showing a hold card (enter on a Captain's Call hold, decide or blocked row,
+  on a Charted Next queued or held row, on a delegate's decision row, or on
+  an Underway or Recently Landed row whose task is a captain hold;
+  `lib/card.mjs` builds it, pure, from the backlog record and
   the files `lib/sources.mjs` reads under `data/<id>/` and `state/<id>.status`,
   and `lib/hold.mjs` writes it to a mkdtemp directory the same viewer path
   shows and then removes; a delegate home's record comes from that home's own
@@ -105,10 +110,11 @@ belong to later milestones.
   starting a refresh, and a failure showing the command's stderr verbatim in
   red and changing nothing;
   a remote home's hold gets a notice and no prompt;
-  refreshing its own data (`r`: the snapshot, then the live PR fetch
-  unless `--no-prs`; that fetch is the board's own read-only GitHub search
-  through `gh api graphql` in `lib/sources.mjs`: at most four searches per
-  tick, My PRs open and tail by `author:<login>`, Teammates' PRs open and tail by
+  refreshing its own data (`r`: the snapshot, drawn when it lands, then the
+  live PR fetch behind it unless `--no-prs`; that fetch is the board's own
+  read-only GitHub search through `gh api graphql` in `lib/sources.mjs`: at
+  most four searches per tick, My PRs open and tail by `author:<login>`,
+  Teammates' PRs open and tail by
   `review-requested:<login> -author:<login>` over the candidate repositories
   plus the config file's, each `first: 50`, plus one aliased lookup of the
   recorded task PRs the author searches missed; `gh search prs --json` cannot
@@ -135,20 +141,47 @@ belong to later milestones.
   exit 75, which `run_board` in the launcher answers by starting the same path
   again. It never moves or closes a herdr
   pane; the captain splits panes himself, so do not bring back an `f` pane
-  toggle or a `pane move` action (since 0.6.0 `f` focuses the selected row's
-  herdr pane in any pane, `focusProblem` with `any`, and nothing more).
+  toggle or a `pane move` action (`F` focuses the selected row's herdr pane
+  in any pane, `focusProblem` with `any`, and nothing more; it was `f` from
+  0.6.0 through 0.6.6, and `f` is the search since: a footer prompt,
+  `view.prompt` kind `search` in `lib/card.mjs`, whose results list replaces
+  the grid, `renderSearch` in `lib/render.mjs`, ranked by the pure
+  `lib/search.mjs` over `model.search`, the index `buildModel` fills from
+  every pane's full row list: dismissed rows out, hidden rows marked, every
+  Underway group open, hidden panes included. Enter jumps: the row's pane
+  shown if hidden, its group expanded, `H` on for the session if the row is
+  hidden, the row selected by hide key. The query and cursor are session
+  state, never view state. `j` and `k` type into the query, so only the
+  arrows, the page keys, tab and the wheel move through the matches).
   `enter` is the one key that opens a PR; do not
   bring back the separate `o` key the scout report's M2 row still lists.
   Free-text answers, merges and dispatch stay with firstmate's own owners.
-- In flight groups secondmate work by home, not by delegated item, because
+- The four fleet panes keep the bearings digest's placement rules, and
+  every rule reads structured fields, never prose: a captain hold sits in
+  exactly one pane by the canonical snapshot's `hold_bucket` (live in
+  Captain's Call, blocked, dated or aged in Charted Next with its structured
+  reason, `chartedRows` in `lib/model.mjs`); a queued item and an
+  action-free warning are Charted Next's and never Captain's Call's
+  (warnings first, left out of the count); a delegate home is never a row of
+  work; a report is a completion in Recently Landed (VERB `reported` or
+  `report`), never a pane of its own; Recently Landed admits a Done row by
+  the port of firstmate's `bin/fm-landed-lib.sh` (`landedRecord`, keep it in
+  step with that file) plus the answered calls as VERB `answered`. A
+  delegate's hold appears once: its ledger is the authority and the copy
+  the parent channel relayed into the delegate's task record (key
+  `captain-hold-<task>-<n>`, `relayedTaskId`) is drawn only when the ledger
+  does not carry the task (`relayedDecisionRows`).
+- Underway groups secondmate work by home, not by delegated item, because
   the ledger carries no per-child parent field (the comment above
   `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it
-  before changing the grouping. A group is built from the home's live
-  children and open decisions only (`ledgerGroup`, `ledgerChildRows`,
-  `groupState`); the delegate's own task record lends it a pane and its
-  relayed decisions and nothing else, because that record's state is the
-  last verb of the delegate's own status log and reads done after any
-  done relay. Do not rank or list it again.
+  before changing the grouping. A home's rows are its live workers only
+  (`ledgerChildRows`: active children and live endpoints, never a done or
+  unknown one, never a hold or decision); a group row is drawn only over two
+  or more of them, one worker draws directly, none draws nothing
+  (`ledgerEntry`, `groupState`); the delegate's own task record lends the
+  group a pane and nothing else, because that record's state is the last
+  verb of the delegate's own status log and reads done after any done relay.
+  Do not rank or list it again.
 - `FM_HOME` is explicit, never inferred from the current directory. The
   launcher's FM_HOME error may name a home it finds above the working
   directory as the command to run, but it never adopts one (`die_no_home`
@@ -160,8 +193,8 @@ belong to later milestones.
 ## Working on the code
 
 - Pure modules (`text`, `layout`, `model`, `render`, `settings`, `identity`,
-  `card`) take data and return data; keep them that way so `--render-once
-  --fixture` stays the test surface. I/O lives in `sources.mjs` (firstmate,
+  `card`, `search`) take data and return data; keep them that way so
+  `--render-once --fixture` stays the test surface. I/O lives in `sources.mjs` (firstmate,
   the GitHub searches and the identity rungs, the GitHub releases fetch
   through `--curl-cmd`, and the reads behind a hold card: `readHoldMaterials`
   and a delegate home's record through `readHoldRecord`), `herdr.mjs`
@@ -187,7 +220,7 @@ belong to later milestones.
   unknown is `skipped`, leaving both panes unfetched. A fixture's
   `prs.identity` absent stands for a known login, `null` for unresolved, and
   an object without a login for resolved unknown.
-- Needs you's `review` row, In flight's `repairing PR` state and My PRs'
+- Captain's Call's `review` row, Underway's `repairing PR` state and My PRs'
   `READY` / `REPAIRING` words are one set of definitions in `lib/model.mjs`
   (`parkedForCaptain`, `isRepairing`, `prReadiness`, `fleetPrTasks`); change
   them together. Two facts they need are not in the fleet snapshot: whether a
@@ -305,25 +338,42 @@ belong to later milestones.
   the home's script for real, so a fixture's homes must never be real ones;
   the pty section types the `D` prompt (digits, backspace, enter) against the
   stand-in home's copy of the fake.
-  The pane order is `PANES` in `lib/layout.mjs` (In flight, Needs you, My
-  PRs, Teammates' PRs, Findings, Landed since 0.6.1); the 1-6 keys follow it
-  by position, the height priorities name panes by id, and view state is
-  keyed by pane id, so a reorder moves the mouse and line-number checks and
-  nothing else.
-  The refresh schedule (the snapshot, then the gh calls; the next refresh
-  armed on completion for the last start plus `--refresh`, so a slow refresh
-  is followed at once and never doubled; a tick that lands mid-refresh
-  skipped) is tested by running the app with `--headless` against a stand-in
-  whose snapshot sleeps and stopping it with a signal, so `--headless` must
-  never load `neo-blessed`. The launcher runs node as a child, so that
-  signal goes to the child first (`pkill -P`) and then to the launcher; a
-  signal to the launcher alone leaves the board running and appending to the
-  fetch log for the rest of the suite. The title line's countdown, `refreshing...` and
-  failure label render from a fixture `refresh` block (`index.mjs` documents
-  it) because a one-shot render has no schedule; the panes' loading spinner
-  comes from the same block (`refreshing: true` with no snapshot or `prs`
-  block, `loading_frame` for the glyph), and it counts ticks, never the
-  clock, so keep it that way or one-shot frames stop being deterministic. The Settings page
+  The pane order is `PANES` in `lib/layout.mjs` (Captain's Call, Underway,
+  My PRs, Teammates' PRs, Charted Next, Recently Landed since 0.7.0); the
+  pane ids are older than the titles (`needs`, `inflight`, `mine`,
+  `toreview`, `charted`, `landed`; `findings` is gone and
+  `lib/viewstate.mjs` drops its entries on read); the 1-6 keys follow the
+  order by position, the height priorities name panes by id, and view state
+  is keyed by pane id, so a reorder moves the mouse and line-number checks
+  and nothing else. The placement checks live in the `captain's call`,
+  `underway`, `charted next` and `recently landed` sections of the suite
+  over `relayed-hold.json` (one row for a hold the parent channel relayed)
+  and `charted.json` (every Charted Next row type and the warning rule).
+  The refresh is two cycles in `lib/app.mjs` (its header): the local cycle
+  (`refresh`: the snapshot and the ledgers, drawn when they land; the next
+  one armed on landing for the last start plus `--refresh`, so a slow
+  snapshot is followed at once and never doubled; a tick that lands
+  mid-snapshot skipped) asks for one GitHub cycle (`fetchCycle`: the
+  identity, then the gh calls, drawn when they return; one in flight at a
+  time, a request meanwhile kept as one follow-up) and never awaits it, so
+  a slow gh holds back nothing local. Both are tested by running the app
+  with `--headless` against a stand-in whose snapshot sleeps and against
+  one whose gh sleeps (`FAKE_GH_SLEEP` in `tests/fake-gh.sh`;
+  `FAKE_GH_GRAPHQL_FAIL` fails the searches), stopping it with a signal
+  and reading the fetch log's order, so `--headless` must never load
+  `neo-blessed`; the pty section drives the same two cycles on a real
+  terminal against a stand-in whose second snapshot adds a row. The
+  launcher runs node as a child, so that signal goes to the child first
+  (`pkill -P`) and then to the launcher; a signal to the launcher alone
+  leaves the board running and appending to the fetch log for the rest of
+  the suite. The title line's countdown, `refreshing...` and failure label
+  and the PR panes' `(updating)` marker render from a fixture `refresh`
+  block (`index.mjs` documents it: `refreshing` is the local cycle,
+  `fetching` the GitHub one) because a one-shot render has no schedule; the
+  panes' loading spinner comes from the same block (`refreshing: true` with
+  no snapshot or `prs` block, `loading_frame` for the glyph), and it counts
+  ticks, never the clock, so keep it that way or one-shot frames stop being
+  deterministic. The Settings page
   is tested with `--install-root` at a fake prefix whose `bin/firstmate-tui.sh` is
   `tests/fake-upgrade.sh` and with `--curl-cmd bash tests/fake-curl.sh` over
   `tests/fixtures/releases/api`; a one-shot render without `--curl-cmd`

@@ -33,17 +33,18 @@
 //
 // Actions on a row:
 //   enter   group row: expand or collapse; a row with a hold card (row.card,
-//           lib/model.mjs: Needs you's hold, decide and blocked rows, a
-//           delegate's decision rows, and any In flight or Landed row whose
-//           task is a captain hold): show the card in the viewer; My PRs,
-//           Teammates' PRs or Needs you row with a PR URL: open it; In flight
-//           worker or Needs you worker: herdr focus; Findings row: open its
-//           report in the viewer; Landed row: the first target it has
+//           lib/model.mjs: Captain's Call's hold, decide and blocked rows, a
+//           delegate's decision rows, Charted Next's queued and held rows,
+//           and any Underway or Recently Landed row whose task is a captain
+//           hold): show the card in the viewer; My PRs, Teammates' PRs or
+//           Captain's Call row with a PR URL: open it; Underway worker or
+//           Captain's Call worker: herdr focus; Charted Next warning: a
+//           notice; Recently Landed row: the first target it has
 //           (landedTarget): its PR, else its report on this host, else its
 //           worker pane while herdr lists it, else a footer notice
-//   f       focus the row's herdr pane, whatever the pane (a row without one
+//   F       focus the row's herdr pane, whatever the pane (a row without one
 //           gets a notice): the secondary action on a card row, whose enter
-//           shows the card
+//           shows the card (f through 0.6.6; f is the search now)
 //   d       discard the row's captain hold (row.hold): the footer asks
 //           `y to discard, esc to cancel`, then the host runs firstmate's
 //           fm-captain-hold.sh answer in the hold's home (lib/hold.mjs)
@@ -63,9 +64,24 @@
 //   x       hide the row (view state); on a hidden row shown by H: unhide it
 //   X       unhide every row of the current pane
 // Board-wide:
+//   f       search every pane's rows at once (the landing page too): the
+//           footer takes a query (view.prompt kind 'search', lib/card.mjs)
+//           and the frame becomes one results list, PANE first, ranked by
+//           lib/search.mjs over model.search (every row of every pane: hidden
+//           rows marked, rows beyond a pane's height, the children of
+//           collapsed groups, the rows of hidden panes). Printable keys and
+//           space type, backspace deletes, up/down, pageup/pagedown and
+//           tab/S-tab move through the matches (j and k type, since a query
+//           may need them), esc closes with the selection as it was, enter
+//           jumps: the prompt closes, the row's pane is focused and shown if
+//           it was hidden, its group expanded if collapsed, H switched on for
+//           the session if the row is hidden, and the row selected, so the
+//           next enter acts on it as usual. A click on a result selects it,
+//           a double-click jumps, the wheel moves. Session state only: never
+//           in the view-state file
 //   H       toggle showing hidden rows (greyed, marked "(hidden)")
-//   1-6     show or hide one pane, in screen order (In flight .. Landed;
-//           lib/layout.mjs PANES); 0 shows all six.
+//   1-6     show or hide one pane, in screen order (Captain's Call ..
+//           Recently Landed; lib/layout.mjs PANES); 0 shows all six.
 //           Any pane may go, the last one too: with all six hidden the frame
 //           is the landing page (lib/render.mjs) and only 0-6, r, ., ? and q
 //           act (LANDING_KEYS below)
@@ -81,12 +97,13 @@
 import { boundaryAt, hitTest, PANES } from './layout.mjs';
 import { allPanesHidden } from './render.mjs';
 import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
-import { checkDeferDate, deferPrompt, discardPrompt, holdActionProblem, localDate, promptKeyAction } from './card.mjs';
+import { checkDeferDate, deferPrompt, discardPrompt, holdActionProblem, localDate, promptKeyAction, searchPrompt } from './card.mjs';
+import { rankRows } from './search.mjs';
 
 const OPEN_PANES = new Set(['mine', 'toreview', 'needs']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
-const VIEW_PANES = new Set(['findings']);
 const LANDED_PANE = 'landed';
+const CHARTED_PANE = 'charted';
 
 export const DBLCLICK_MS = 400;
 export const WHEEL_ROWS = 3;
@@ -214,7 +231,7 @@ export function scrollFromSaved(saved) {
 export function focusProblem(pane, row, herdrOn, { any = false } = {}) {
   if (!row) return 'nothing selected';
   if (any && !row.paneId) return `${row.name}: no herdr pane to focus${row.extra === 'tmux' ? ' (tmux-backed task)' : ''}`;
-  if (!any && !FOCUS_PANES.has(pane.id) && !(pane.id === LANDED_PANE && row.paneId)) return 'enter focuses a worker: pick a row in In flight';
+  if (!any && !FOCUS_PANES.has(pane.id) && !(pane.id === LANDED_PANE && row.paneId)) return 'enter focuses a worker: pick a row in Underway';
   if (row.lost) return `${row.name}: pane ${row.paneId} is gone from herdr (pane lost); nothing to focus`;
   if (!herdrOn) return 'herdr is off (--no-herdr); cannot focus';
   if (!row.paneId) return `${row.name}: no herdr pane to focus${row.extra === 'tmux' ? ' (tmux-backed task)' : ''}`;
@@ -222,11 +239,10 @@ export function focusProblem(pane, row, herdrOn, { any = false } = {}) {
   return null;
 }
 
-// Why a Findings row (or a Landed row that records a report) cannot be
-// viewed, or null.
+// Why a Recently Landed row that records a report cannot be viewed, or null.
 export function viewProblem(pane, row) {
   if (!row) return 'nothing selected';
-  if (!VIEW_PANES.has(pane.id) && !(pane.id === LANDED_PANE && (row.reportPath || row.reportRemote))) return 'enter views a report: pick a row in Findings';
+  if (!(pane.id === LANDED_PANE && (row.reportPath || row.reportRemote))) return 'enter views a report: pick a Recently Landed row with one';
   if (row.reportRemote) return `${row.name}: report lives on another host (${row.home}); not reachable from here`;
   if (!row.reportPath) return `${row.name}: no report path on this row`;
   return null;
@@ -257,8 +273,8 @@ export function paneForKey(key) {
 // key that would otherwise move the selection or act on a row nobody can see
 // only reminds the captain how to bring a pane back; a key the board does not
 // bind stays the silent no-op it is everywhere else.
-const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', 'r', '.', '?', 'q', 'ctrl-c']);
-const ROW_KEYS = new Set(['enter', 'f', 'd', 'D', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
+const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', 'f', 'r', '.', '?', 'q', 'ctrl-c']);
+const ROW_KEYS = new Set(['enter', 'F', 'd', 'D', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
 
 export function keyAction(model, view, key) {
   const pane = model.panes[view.pane];
@@ -291,6 +307,8 @@ export function keyAction(model, view, key) {
       if (!row) return { type: 'notice', text: 'nothing selected to hide', bad: true };
       return { type: row.hidden ? 'unhide' : 'hide', row };
     case 'f':
+      return { type: 'search-prompt' };
+    case 'F':
       if (!row) return { type: 'notice', text: 'nothing selected to focus', bad: true };
       return { type: 'focus', row, any: true };
     case 'd':
@@ -323,12 +341,27 @@ export function keyAction(model, view, key) {
       }
       if (OPEN_PANES.has(pane.id) && row.url) return { type: 'open', row };
       if (FOCUS_PANES.has(pane.id)) return { type: 'focus', row };
-      if (VIEW_PANES.has(pane.id)) return { type: 'view', row };
+      // A Charted Next row without a card is a warning: nothing to open.
+      if (pane.id === CHARTED_PANE) return { type: 'notice', text: `${row.name}: a warning row; nothing to open`, bad: false };
       // A PR pane without a PR URL (every other pane is covered above).
       return { type: 'notice', text: `${row.name}: no PR URL on this row`, bad: true };
     default:
       return { type: 'move', key };
   }
+}
+
+// The search prompt's matches over the current model, best first
+// (lib/search.mjs rankRows over model.search), and the prompt's cursor
+// clamped to them. Both the renderer and the actions below read them, so the
+// row the frame highlights is the row enter jumps to.
+export function searchResults(model, prompt) {
+  if (!prompt || prompt.kind !== 'search') return [];
+  return rankRows(prompt.value, model && Array.isArray(model.search) ? model.search : []);
+}
+
+export function searchIndex(prompt, count) {
+  if (!count) return 0;
+  return Math.max(0, Math.min(Number.isInteger(prompt.index) ? prompt.index : 0, count - 1));
 }
 
 // Two marks { time } are within the double-click window of each other.
@@ -413,10 +446,60 @@ export function mouseAction(model, view, ev) {
   return { type: 'select', pane: hit.pane, row: hit.row, click: { pane: hit.pane, row: hit.row, time: ev.time } };
 }
 
+// A mouse event while the search prompt is up: a left click on a result
+// selects it, two within DBLCLICK_MS jump to it (view.lastClick keeps the
+// first as { result, time }), the wheel moves the cursor; everything else
+// does nothing. The results view's zones are { kind: 'result', index }
+// (lib/render.mjs renderSearch, lib/layout.mjs hitTest).
+export function searchMouseAction(model, view, ev) {
+  if (!ev) return { type: 'none' };
+  if (ev.type === 'wheel') return { type: 'search-move', by: (ev.dir === 'up' ? -1 : 1) * WHEEL_ROWS };
+  if (ev.type !== 'down' || ev.button !== 'left') return { type: 'none' };
+  const hit = hitTest(view.frame, ev.x, ev.y);
+  if (!hit || hit.kind !== 'result') return { type: 'none' };
+  const last = view.lastClick;
+  if (last && last.result === hit.index && within(last, ev)) return { type: 'search-activate', index: hit.index };
+  return { type: 'search-select', index: hit.index, click: { result: hit.index, time: ev.time } };
+}
+
 function clampSelection(ctx) {
   const v = moveSelection(ctx.model, ctx.view, null);
   ctx.view.pane = v.pane;
   ctx.view.row = v.row;
+}
+
+// The jump enter (or a double-click) makes from a search result: the row's
+// pane shown if it was hidden (as its number key would, saved with the view
+// state), its group expanded if collapsed, H switched on for the session if
+// the row is hidden, then the model rebuilt and the row found again by its
+// hide key and selected. The footer names the row, its pane and whatever had
+// to change for it to be seen.
+function jumpToResult(ctx, target) {
+  const { view } = ctx;
+  const { row, paneId, paneTitle } = target;
+  const notes = [];
+  if (view.hiddenPanes.has(paneId)) {
+    view.hiddenPanes.delete(paneId);
+    ctx.persist();
+    notes.push(`pane shown: ${paneTitle}`);
+  }
+  if (row.parent && !view.expanded.has(row.parent)) {
+    view.expanded.add(row.parent);
+    notes.push('group expanded');
+  }
+  if (row.hidden && !view.showHidden) {
+    view.showHidden = true;
+    notes.push('hidden row: H is on for this session');
+  }
+  ctx.rebuild();
+  const paneIdx = ctx.model.panes.findIndex((p) => p.id === paneId);
+  const pane = paneIdx >= 0 ? ctx.model.panes[paneIdx] : null;
+  const idx = pane ? pane.rows.findIndex((r) => r.hideKey === row.hideKey) : -1;
+  if (paneIdx >= 0) view.pane = paneIdx;
+  view.row = idx >= 0 ? idx : 0;
+  view.lastClick = null;
+  clampSelection(ctx);
+  ctx.notice(`${row.name} in ${paneTitle}${notes.length ? ` · ${notes.join(' · ')}` : ''}${idx < 0 ? ' · row not found after the rebuild' : ''}`, idx < 0);
 }
 
 // The captain's column widths in the view: view.columns[paneId][columnId].
@@ -564,7 +647,12 @@ export function handleMouse(ctx, ev) {
     applySettingsAction(ctx, settingsMouseAction(view.settings, view, ev, { dblclickMs: DBLCLICK_MS }));
     return;
   }
-  // A prompt takes the keyboard alone: a click neither confirms nor cancels it.
+  // The search prompt's results take the mouse; the hold prompts take the
+  // keyboard alone: a click neither confirms nor cancels them.
+  if (view.prompt && view.prompt.kind === 'search') {
+    applyAction(ctx, searchMouseAction(ctx.model, view, ev));
+    return;
+  }
   if (view.prompt) return;
   // A release or a motion report means nothing unless a drag is open.
   if ((ev.type === 'up' || ev.type === 'drag') && !view.drag) return;
@@ -742,6 +830,48 @@ function applyAction(ctx, action) {
       }
       view.prompt = null;
       ctx.holdDefer(p.row, { reason: p.reason, until: p.value });
+      return;
+    }
+    case 'search-prompt':
+      view.drag = null;
+      view.lastClick = null;
+      view.prompt = searchPrompt();
+      return;
+    case 'search-edit':
+      // A changed query starts again from its best match.
+      if (view.prompt && view.prompt.kind === 'search') view.prompt = { ...view.prompt, value: action.value, index: 0 };
+      return;
+    case 'search-move': {
+      const p = view.prompt;
+      if (!p || p.kind !== 'search') return;
+      const n = searchResults(ctx.model, p).length;
+      view.prompt = { ...p, index: n ? Math.max(0, Math.min(n - 1, searchIndex(p, n) + action.by)) : 0 };
+      view.lastClick = null;
+      return;
+    }
+    case 'search-select':
+      if (view.prompt && view.prompt.kind === 'search') view.prompt = { ...view.prompt, index: action.index };
+      view.lastClick = action.click || null;
+      return;
+    case 'search-activate':
+      if (view.prompt && view.prompt.kind === 'search') view.prompt = { ...view.prompt, index: action.index };
+      view.lastClick = null;
+      applyAction(ctx, { type: 'search-jump' });
+      return;
+    case 'search-cancel':
+      // The selection was never touched while the prompt was up.
+      view.prompt = null;
+      view.lastClick = null;
+      return;
+    case 'search-jump': {
+      const p = view.prompt;
+      if (!p || p.kind !== 'search') return;
+      const results = searchResults(ctx.model, p);
+      // No match: the prompt stays up and enter does nothing.
+      if (!results.length) return;
+      const target = results[searchIndex(p, results.length)];
+      view.prompt = null;
+      jumpToResult(ctx, target);
       return;
     }
     case 'notice':

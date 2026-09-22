@@ -1,0 +1,177 @@
+{
+  "_comment": "Every Charted Next row type and the warning rule, 160x60. Main backlog: queue-plain (queued, filed 09-14), queue-blocked (queued with two unresolved blockers, 09-15), hold-dated (captain hold, bucket dated, until 10-01, 09-10), hold-aged (bucket aged, 20 days, 08-27), hold-blocked (bucket blocked by hold-dated, 09-12), hold-live (bucket live: Captain's Call only), undated-queue (queued, no since: last), done-item (done, merged: Recently Landed only), held-external (in flight, current_role held, an external hold, its worker paused: a gate, 09-11), worked-held (the same shape but its worker working: an Underway row, never a gate). Delegate homes: delegate-a is a readable ledger with one working child, a queued item (09-16), an aged captain hold (08-31), an endpoint that is gone (child-gone, exists false) and a child whose state is unknown (child-lost); delegate-b's ledger is invalid (terminal child state), so it draws one home-level warning and its done endpoint draws nothing; delegate-c has no ledger at all; delegate-d's canonical record reads unknown with a reason, which suppresses the per-child row for its unknown endpoint ghost-child. The main inventory is invalid too. now is 2026-09-16T12:00:00Z = epoch 1789560000.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 60,
+  "fm_home": "/fixture/charted",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/charted",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "held-external",
+        "kind": "ship",
+        "project": "/fixture/charted/projects/example-repo",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "paused", "source": "status", "detail": "paused: waiting on the vendor", "observed_at": "2026-09-16T11:50:00Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "paused: waiting on the vendor" },
+        "paths": { "status_log": { "path": "/fixture/charted/state/held-external.status", "present": true, "kind": "event_history", "last_event": { "state": "paused", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Vendor cutover", "repo": "example-org/example-repo" }
+      },
+      {
+        "id": "worked-held",
+        "kind": "ship",
+        "project": "/fixture/charted/projects/example-repo",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:00Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1B:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/charted/state/worked-held.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Vendor cutover, part two", "repo": "example-org/example-repo" }
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "held-external", "state": "in_flight", "structured": true, "current_role": "held", "title": "Vendor cutover", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": "external", "hold_reason": "waiting on the vendor", "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-11", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "worked-held", "state": "in_flight", "structured": true, "current_role": "held", "title": "Vendor cutover, part two", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": "external", "hold_reason": "waiting on the vendor", "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-11", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "queue-plain", "state": "queued", "structured": true, "current_role": "queued", "title": "Add the export button", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-14", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "queue-blocked", "state": "queued", "structured": true, "current_role": "queued", "title": "Ship the export report", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "blocked_reason": "needs the export button first", "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": ["queue-plain", "other-task"], "since": "2026-09-15", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "hold-dated", "state": "queued", "structured": true, "current_role": "held", "title": "Revisit the pricing page", "repo": "acme-corp/widgets", "kind": "task", "hold_kind": "captain", "hold_reason": "Revisit after launch", "hold_until": "2026-10-01", "hold_set": "2026-09-10T09:00:00Z", "hold_bucket": "dated", "hold_age_days": 6, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-10", "pr_url": null, "report_path": null, "body_lines": ["Captain hold set: 2026-09-10T09:00:00Z"], "completion": { "verb": null, "date": null } },
+        { "id": "hold-aged", "state": "queued", "structured": true, "current_role": "held", "title": "Keep or drop the legacy importer", "repo": "acme-corp/widgets", "kind": "task", "hold_kind": "captain", "hold_reason": "No answer yet", "hold_until": null, "hold_set": "2026-08-27T09:00:00Z", "hold_bucket": "aged", "hold_age_days": 20, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-08-27", "pr_url": null, "report_path": null, "body_lines": ["Captain hold set: 2026-08-27T09:00:00Z"], "completion": { "verb": null, "date": null } },
+        { "id": "hold-blocked", "state": "queued", "structured": true, "current_role": "held", "title": "Announce the new pricing", "repo": "acme-corp/widgets", "kind": "task", "hold_kind": "captain", "hold_reason": "After the pricing call", "hold_until": null, "hold_set": "2026-09-12T09:00:00Z", "hold_bucket": "blocked", "hold_age_days": 4, "captain_actionable": false, "unresolved_blocker_ids": ["hold-dated"], "since": "2026-09-12", "pr_url": null, "report_path": null, "body_lines": ["Captain hold set: 2026-09-12T09:00:00Z"], "completion": { "verb": null, "date": null } },
+        { "id": "hold-live", "state": "queued", "structured": true, "current_role": "held", "title": "Pick the vendor for the address API", "repo": "acme-corp/widgets", "kind": "task", "hold_kind": "captain", "hold_reason": "Two quotes in the report", "hold_until": null, "hold_set": "2026-09-13T12:00:00Z", "hold_bucket": "live", "hold_age_days": 3, "captain_actionable": true, "unresolved_blocker_ids": [], "since": "2026-09-13", "pr_url": null, "report_path": null, "body_lines": ["Captain hold set: 2026-09-13T12:00:00Z"], "completion": { "verb": null, "date": null } },
+        { "id": "undated-queue", "state": "queued", "structured": true, "current_role": "queued", "title": "Tidy the release notes", "repo": "example-org/example-repo", "kind": "task", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": null, "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "done-item", "state": "done", "structured": true, "current_role": null, "title": "Add the ETL index", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-12", "pr_url": "https://github.com/example-org/example-repo/pull/12", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-15" } }
+      ]
+    },
+    "scout_reports": [],
+    "main_inventory": { "valid": false, "reason": "main in-flight backlog item has no child metadata: orphan-item", "orphan_in_flight": ["orphan-item"], "unstructured_current_count": 0 },
+    "secondmate_current": {
+      "records": [
+        {
+          "id": "delegate-d",
+          "home": "/fixture/homes/delegate-d",
+          "host": null,
+          "remote": false,
+          "registered": true,
+          "provenance": { "selected": "structured-home", "summary_source": "local-ledger", "summary_valid": true, "trust": "partial" },
+          "freshness": { "status": "fresh", "observed_at": "2026-09-16T11:58:00Z", "age_seconds": 120 },
+          "current": { "state": "unknown", "reason": "child current state unavailable: ghost-child" },
+          "active_children": [],
+          "endpoints": [ { "id": "ghost-child", "state": "unknown", "source": "pane", "endpoint": { "target": "default:w4A:p1", "exists": true } } ],
+          "decisions_open": [],
+          "holds": [],
+          "landed": [],
+          "queued": []
+        }
+      ]
+    },
+    "secondmate_landed": { "records": [] }
+  },
+  "ledgers": [
+    {
+      "id": "delegate-a",
+      "home": "/fixture/homes/delegate-a",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789559880,
+        "valid": true,
+        "state": "active_child_work",
+        "reason": null,
+        "active_children": [
+          { "id": "child-work", "kind": "ship", "state": "working", "repo": "acme-corp/widgets", "name": "Write the ETL loader", "source": "pane", "doing": "writing the loader" }
+        ],
+        "endpoints": [
+          { "id": "child-work", "state": "working", "source": "pane", "endpoint": { "target": "default:w2A:p2", "exists": true } },
+          { "id": "child-gone", "state": "unknown", "source": "pane", "endpoint": { "target": "default:w2B:p2", "exists": false } },
+          { "id": "child-lost", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2C:p2", "exists": true } }
+        ],
+        "holds": [],
+        "decisions_open": [
+          { "id": "del-aged", "key": "del-aged", "verb": "captain-hold", "summary": "Retire the old importer", "reason": "Waiting on the captain since August", "hold_until": null, "hold_bucket": "aged", "hold_age_days": 16, "source": "backlog" }
+        ],
+        "landed": [],
+        "queued": [
+          { "id": "del-queued", "title": "Index the warehouse table", "repo": "acme-corp/widgets", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-16" },
+          { "id": "del-aged", "title": "Retire the old importer", "repo": "acme-corp/widgets", "kind": "task", "hold_kind": "captain", "hold_reason": "Waiting on the captain since August", "hold_bucket": "aged", "hold_age_days": 16, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-08-31" }
+        ]
+      }
+    },
+    {
+      "id": "delegate-b",
+      "home": "/fixture/homes/delegate-b",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789559880,
+        "valid": false,
+        "state": "active_child_work",
+        "invalidity": { "kind": "terminal_in_flight", "ids": ["old-child"] },
+        "reason": "in-flight backlog item has terminal child state: old-child=done",
+        "active_children": [],
+        "endpoints": [
+          { "id": "old-child", "state": "done", "source": "status-log", "endpoint": { "target": "default:w3A:p1", "exists": true } }
+        ],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [],
+        "queued": []
+      }
+    },
+    {
+      "id": "delegate-c",
+      "home": "/fixture/homes/delegate-c",
+      "remote": false,
+      "cached": false,
+      "summary": null,
+      "error": "no ledger"
+    },
+    {
+      "id": "delegate-d",
+      "home": "/fixture/homes/delegate-d",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789559880,
+        "valid": true,
+        "state": "no_active_work",
+        "reason": null,
+        "active_children": [],
+        "endpoints": [
+          { "id": "ghost-child", "state": "unknown", "source": "pane", "endpoint": { "target": "default:w4A:p1", "exists": true } }
+        ],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [],
+        "queued": []
+      }
+    }
+  ],
+  "herdr": {
+    "agents": [
+      { "pane_id": "w1A:p1", "agent_status": "idle", "terminal_title_stripped": "held-external" },
+      { "pane_id": "w1B:p1", "agent_status": "working", "terminal_title_stripped": "worked-held" },
+      { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "child-work" },
+      { "pane_id": "w2C:p2", "agent_status": "done", "terminal_title_stripped": "child-lost" },
+      { "pane_id": "w4A:p1", "agent_status": "done", "terminal_title_stripped": "ghost-child" }
+    ]
+  },
+  "prs": null,
+  "mtimes": {
+    "/fixture/charted/state/held-external.status": 1789559400,
+    "/fixture/charted/state/worked-held.status": 1789559940,
+    "/fixture/homes/delegate-a/state/child-work.status": 1789549200
+  }
+}

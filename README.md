@@ -9,7 +9,7 @@ The board is read-only, with two exceptions: discarding a hold you set and defer
 Each of those asks you to confirm first and then runs firstmate's own `fm-captain-hold.sh` in the home that owns the hold; the board never edits a firstmate file itself, never answers a question with words of its own and never merges anything.
 Its other actions are jumping to an agent's pane, opening a pull request in your browser and showing a report or a hold card in the terminal.
 
-![A dark terminal filled by the board. The top line names the tool, the fleet directory and 4 homes, with next refresh in 15s at the right edge. Below it six bordered panes stack top to bottom, each titled with its number key and a count: 1 In flight (4) lists a task on hold after a failed run and three homes with 0 live panes, one waiting on a decision in amber, one blocked in red and one idle, with state, herdr, id, what, repo, home and age columns; 2 Needs you (5) lists five items on hold, two of them deferred to a date, with state, key, id, what, repo, home and age columns; 3 My PRs (2), the focused pane, drawn with an amber border and title, lists two merged pull requests with checks, status, id, title, base branch and age columns, its first row highlighted as the selection; 4 Teammates' PRs (4) lists four pull requests in review, three with passing checks and one pending, with checks, status, id, author, title, base branch and age columns; 5 Findings (15, 6 hidden) lists six reports by kind, verb, id, report path, repo, home and age with plus 9 more at its foot; 6 Landed (22, 18 hidden) lists four items merged on 09-20 and 09-21 and one reported on 09-19 by verb, date, id, what, repo, home and age with plus 17 more at its foot. The bottom line lists the keys: j/k move, tab pane, enter open/focus/view, l/h expand, x hide, H hidden, 1-6 panes, r refresh, . settings, ? help, q quit.](docs/fm-board.png)
+![The 0.6.4 board, before the four-section layout of 0.7.0 described below: a dark terminal filled by the board. The top line names the tool, the fleet directory and 4 homes, with next refresh in 15s at the right edge. Below it six bordered panes stack top to bottom, each titled with its number key and a count: 1 In flight (4) lists a task on hold after a failed run and three homes with 0 live panes, one waiting on a decision in amber, one blocked in red and one idle, with state, herdr, id, what, repo, home and age columns; 2 Needs you (5) lists five items on hold, two of them deferred to a date, with state, key, id, what, repo, home and age columns; 3 My PRs (2), the focused pane, drawn with an amber border and title, lists two merged pull requests with checks, status, id, title, base branch and age columns, its first row highlighted as the selection; 4 Teammates' PRs (4) lists four pull requests in review, three with passing checks and one pending, with checks, status, id, author, title, base branch and age columns; 5 Findings (15, 6 hidden) lists six reports by kind, verb, id, report path, repo, home and age with plus 9 more at its foot; 6 Landed (22, 18 hidden) lists four items merged on 09-20 and 09-21 and one reported on 09-19 by verb, date, id, what, repo, home and age with plus 17 more at its foot. The bottom line lists the keys: j/k move, tab pane, enter open/focus/view, l/h expand, x hide, H hidden, 1-6 panes, r refresh, . settings, ? help, q quit.](docs/fm-board.png)
 
 The current board has the six panes listed under [Using the board](#using-the-board).
 
@@ -77,7 +77,7 @@ Install, Debian and Ubuntu, when one is missing: `sudo apt install curl tar core
 
 **gh, the GitHub CLI, logged in.**
 gh gives the two pull request panes their data.
-On every refresh the board runs `gh api graphql` itself, at most four searches plus one lookup, and once per session `gh api user` for your GitHub login unless the [config file](#configuration) names it.
+After every fleet snapshot the board runs `gh api graphql` itself, at most four searches plus one lookup, without holding the rest of the board for the answer, and once per session `gh api user` for your GitHub login unless the [config file](#configuration) names it.
 Without gh on `PATH`, My PRs falls back to a firstmate script that needs gh as well, so in practice that pane reports a failed fetch, and Teammates' PRs reads `gh not on PATH: Teammates' PRs needs the GitHub CLI`.
 The config file's `prs.source` can pick that script on purpose ([Configuration](#configuration)); it needs gh just the same, so neither choice removes this prerequisite.
 `--no-prs` runs the board without any GitHub call; the two panes then list only the pull request links firstmate recorded.
@@ -87,7 +87,7 @@ Debian and Ubuntu: `sudo apt install gh`, or the packages at https://github.com/
 Then run `gh auth login` once.
 
 **glow.**
-glow renders a Markdown report, or a hold card, in the terminal when you press `enter` on a Findings row or on a held task.
+glow renders a Markdown report, or a hold card, in the terminal when you press `enter` on a Recently Landed row with a report or on a held task.
 Without it the board uses `$EDITOR`, then `vim`, then `less`.
 Check: `glow --version`.
 Install: macOS `brew install glow`.
@@ -225,35 +225,43 @@ An install older than 0.2.5 first runs its own `fm-board upgrade --version 0.2.5
 
 ## Using the board
 
-The six panes, top to bottom; each pane's key is its number:
+The six panes, top to bottom; each pane's key is its number.
+The four fleet panes follow the four sections of firstmate's bearings digest, and they keep its rules: one scannable row per item, a hold you set in exactly one pane, nothing that needs no action from you in Captain's Call, and a delegate home never drawn as a row of work.
 
-1. **In flight**: one row per agent working in the main home, with firstmate's state (`working`, `awaiting merge`, `repairing PR`, or `hold` when a failed run is parked on you) beside herdr's live pane count, and one group row per delegate home. A group's state comes from that home's live agents and its open decisions (`blocked`, `decide`, `hold` or `working`, else `idle` when it has none), never from the delegate's own last status line, and it expands to those live agents and decisions. Finished work appears only in Landed: a main-home agent leaves the pane when firstmate cleans up its record, and a delegate's finished agents are never listed.
-2. **Needs you**: what firstmate is waiting on you for: blocked agents, decisions to make, holds you set with their due dates, and one `review` row per pull request that is yours to review because its agent is done and GitHub reports the pull request open and mergeable.
-   `enter` on a hold, decision or blocked row shows its hold card in the terminal viewer: the task's facts, the full hold reason, the backlog body, the pull request, the first 40 lines of its report, its brief and other files under `data/<id>/`, and the last 10 lines of its status log, read from the home that owns it; `d` discards the hold and `D` defers it (the Keys table below).
+1. **Captain's Call**: what needs your own action now, from every home: every hold you set that is live (not deferred to a date, not waiting on a blocker, not aged past firstmate's threshold), from the main home and from every delegate home; blocked agents and decisions an agent asked for; and one `review` row per pull request that is yours to review because its agent is done and GitHub reports the pull request open and mergeable.
+   A hold appears here once, whichever home holds it: a delegate's hold that firstmate also relayed into the main home is drawn from the delegate's own ledger and the relay is dropped.
+   `enter` on a hold, decision or blocked row shows its card in the terminal viewer: the task's facts, the full hold reason, the backlog body, the pull request, the first 40 lines of its report, its brief and other files under `data/<id>/`, and the last 10 lines of its status log, read from the home that owns it; `d` discards the hold and `D` defers it (the Keys table below).
+2. **Underway**: one row per live agent, in the main home and in every delegate home, with the task's title and what the agent is doing in WHAT, firstmate's state (`working`, `blocked`, `paused`, `failed`, `awaiting merge` when a done agent's pull request waits for your merge, `repairing PR` when an agent is fixing a pull request it once called done) beside herdr's pane state in HERDR. A delegate home with two or more live agents draws a group row over them (`working 2 live`, expanding to the agents); a home with one live agent draws that agent directly with HOME naming the home; a home with none draws nothing here. Holds and decisions are never rows in this pane: an agent whose task is also waiting on you carries `!` in front of its id, and its hold is in Captain's Call or Charted Next. Finished work appears only in Recently Landed.
 3. **My PRs**: every open pull request your GitHub login authored, in any repository, plus the pull requests recorded on unfinished firstmate tasks whoever opened them, plus either kind that merged or closed in the last 12 hours; the columns are CHECKS (`passing`, `pending` or `failing`, judged from the newest run of each check on the head commit, so a run that a re-run superseded does not count), STATUS, ID, TITLE, BASE (the branch it targets) and AGE.
    With the config file's `prs.source` set to `firstmate`, or without gh on `PATH`, the pane lists what firstmate's own `fm-bearings-snapshot.sh` reports instead; [config.json](#configjson) says what that shows and leaves out.
 4. **Teammates' PRs**: the open pull requests where you are a requested reviewer, directly or through a team, and not the author, in the repositories firstmate works in plus the ones the config file names, filtered by the config file's label rules, with the same columns plus AUTHOR.
-5. **Findings**: the reports the agents wrote, newest first, from every home.
-6. **Landed**: finished work, newest first: merged pull requests and done tasks, with the pull request URL, report path or pane id in WHAT.
+5. **Charted Next**: queued and gated work with the reason it waits, from every home: queued items (`queued`, or `blocked` with `by <blocker>` in WHY when another task must finish first), the holds you set that are not live (`dated` with `until MM-DD`, `blocked` with its blocker, `aged` with `held Nd`), and an in-flight item held from outside (a vendor, a dependency) whose agent is not working (`queued`, with the hold reason in WHAT), each once, newest filed first, with the filed date in FILED. Warnings come first and are not counted in the title: a delegate home whose state firstmate cannot read, an agent whose current state is unavailable, a pane that is gone, or a main inventory that does not add up. `enter` on a queued or held row shows its card, and `d` and `D` act on a held row as in Captain's Call; a warning has nothing to open.
+6. **Recently Landed**: finished work and reports, newest first: merged pull requests, done tasks and reported scouts from every home, with the pull request URL or report path in WHAT; the holds you answered or discarded, with VERB `answered`, so your own words stay one `enter` away; and every report an agent wrote whose task has no completion row, with VERB `report` and the file's date.
 
-The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing...` while one runs, and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
-Each pane title carries its key and its row count, as in `[1] In flight (3)`.
+A refresh is two independent cycles.
+The fleet snapshot runs first and the four panes built from it, Captain's Call, Underway, Charted Next and Recently Landed, repaint the moment it lands; the GitHub fetch then starts on its own and the two pull request panes repaint when it returns, keeping their previous rows with `(updating)` in their titles meanwhile.
+A slow or failed GitHub call never delays the fleet panes, the countdown or the next snapshot.
+The title line names the main home and the number of homes, counts down to the next snapshot (`next refresh in 18s`), reads `refreshing...` while the snapshot runs, and after a failed snapshot or GitHub fetch reads `refresh failed 40s ago, retrying in 20s` in red until both are clean again, while the pane whose data failed carries `(stale)` in its title.
+Each pane title carries its key and its row count, as in `[1] Captain's Call (3)`; Charted Next names its warnings apart, as in `[5] Charted Next (43, 2 warnings)`.
 The selected row is drawn inverse, in your theme's own colours, and the focused pane's border is amber (palette colour 214 on a 256-colour terminal, your terminal's yellow on one with fewer colours); the other panes keep their blue border.
 In the HERDR column, `pane lost` in red means herdr no longer has that agent's pane, and `unknown` in grey means herdr is disconnected so the board cannot tell.
 The bottom line lists the keys, and `?` shows them all.
+`f` searches every pane at once, the way quick open works in an editor: type a few letters in any order and any case, even letters apart (`mdm gap` finds `portal-mdm-gap-analysis`), and the grid gives way to one list of the matching rows, best first, with the pane each row belongs to in its first column; hidden rows, rows below a pane's `+N more` foot and the children of a collapsed Underway group are all searched.
+`enter` jumps to the selected match in its pane, showing the pane, expanding the group or switching hidden rows on for the session when that is what it takes, so the next `enter` acts on the row as usual; `esc` closes the search and leaves the selection where it was.
 
 | Key or gesture | Action |
 | --- | --- |
 | `j` / `k`, arrows | move the selection |
 | `tab` / `shift-tab` | next / previous pane |
-| `enter`, or a double-click | act on the row: open its pull request in your browser; on a Needs you hold, decision or blocked row, or on an In flight or Landed row whose task is a captain hold, show its hold card in the terminal viewer; on a Findings row show the report; on an In flight group expand or collapse it; on an agent row focus its herdr pane; on a Landed row without a pull request show its report, else focus its pane |
-| `f` | focus the selected row's herdr pane, whatever the pane; a row without one says so |
+| `enter`, or a double-click | act on the row: open its pull request in your browser; on a Captain's Call hold, decision or blocked row, on a Charted Next queued or held row, or on an Underway or Recently Landed row whose task is a captain hold, show its card in the terminal viewer; on an Underway group expand or collapse it; on an agent row focus its herdr pane; on a Recently Landed row without a pull request show its report, else focus its pane |
+| `f` | search every pane: the footer takes the query (printable keys and space type, `backspace` deletes), the frame lists the matches ranked with the pane name first, `up` / `down`, `pageup` / `pagedown` and `tab` move through them, `enter` jumps to the selected match in its pane and `esc` closes; a hidden row is listed greyed and marked `(hidden)`, and jumping to it turns `H` on for the session; a query with no match reads `no matches` |
+| `F` | focus the selected row's herdr pane, whatever the pane; a row without one says so (`f` through 0.6.6) |
 | `d` | discard the selected hold: the footer asks `y to discard, esc to cancel`, then firstmate's `fm-captain-hold.sh answer` closes the task in its home with the decision `Discarded by <your GitHub login> from firstmate-tui on <date>: no action; closed as not wanted.`; the task's rows leave the board at once, the cursor moves to the next row and a refresh follows so firstmate's own state catches up; a refusal from the command shows in red and changes nothing |
-| `D` | defer the selected hold: the footer takes a date (`YYYY-MM-DD`, prefilled with today plus 14 days; digits and dashes edit it, `enter` defers, `esc` cancels), then `fm-captain-hold.sh hold --until <date>` records it in the hold's home with the hold's own reason and the row leaves Needs you at once, as after `d`; a hold in a delegate home is deferred only when that home's full reason is readable here |
-| `l` / `right`, `h` / `left` | expand / collapse the selected In flight group |
+| `D` | defer the selected hold: the footer takes a date (`YYYY-MM-DD`, prefilled with today plus 14 days; digits and dashes edit it, `enter` defers, `esc` cancels), then `fm-captain-hold.sh hold --until <date>` records it in the hold's home with the hold's own reason and the row leaves Captain's Call at once, as after `d`, to reappear in Charted Next as `dated` on the next refresh; a hold in a delegate home is deferred only when that home's full reason is readable here |
+| `l` / `right`, `h` / `left` | expand / collapse the selected Underway group |
 | `x`, `X`, `H` | hide the selected row; unhide every row in the pane; show hidden rows greyed and marked `(hidden)` |
 | `1` to `6`, `0` | show or hide that pane; show every pane (with all six hidden the board lists these keys, and `r`, `.`, `?` and `q`) |
-| `r` | refresh now: the fleet snapshot, then the GitHub fetch |
+| `r` | refresh now: the fleet snapshot, drawn as soon as it lands, then the GitHub fetch behind it |
 | `.` | the Settings page ([Upgrade and betas](#upgrade-and-betas)) |
 | `=` | reset every column width to its automatic size |
 | `?`, `q` or `ctrl-c` | help overlay; quit |
@@ -285,17 +293,17 @@ Flags go after `open` or directly after `firstmate-tui`.
 
 | Flag | Meaning |
 | --- | --- |
-| `--refresh <seconds>` | how often the board refreshes, default 30. Each refresh runs the fleet snapshot and then the GitHub fetch. `r` and a herdr event on a known agent pane refresh at once; a tick that lands during a running refresh is skipped |
+| `--refresh <seconds>` | how often the board refreshes, default 30. Each tick runs the fleet snapshot, draws it, and starts the GitHub fetch without waiting for it; one fetch runs at a time, and a snapshot that lands while one is out leaves one follow-up fetch behind it. `r` and a herdr event on a known agent pane refresh at once; a tick that lands during a running snapshot is skipped |
 | `--no-prs` | skip the GitHub fetch and the `gh api user` call. My PRs lists recorded pull request links with `checks: off (--no-prs)`, and Teammates' PRs reads `PR fetch off (--no-prs)` |
 | `--home <path>` | add a delegate home (repeatable). Default: `FM_HOME` plus every home in `FM_HOME/data/secondmates.md` |
 | `--no-herdr` | run without herdr: no live pane state and no herdr calls |
 | `--no-mouse` | ignore the mouse and leave the terminal's own text selection alone |
-| `--all-homes-needs` | Needs you also lists every delegate home's open decisions; by default those flag the home's In flight group instead |
+| `--all-homes-needs` | accepted and ignored since 0.7.0: Captain's Call lists every home's live holds by default |
 | `--config <path>`, `--view-state <path>`, `--cache <path>` | where the board's three files live ([Configuration](#configuration)); a path inside `FM_HOME` is refused |
 | `--cache-max-age <seconds>` | ignore a state cache whose data is older than this and start with the spinners instead, default 3600 |
 | `--no-cache` | never read the state cache, so every launch starts with the spinners; the file is still written for the next launch |
 | `--opener-cmd <argv>` | the command that opens a URL, default `open` on macOS and `xdg-open` on Linux; the URL is appended as one argument |
-| `--viewer-cmd <argv>` | the command that shows a Findings report or a hold card, default `glow -p`, else `$EDITOR`, else `vim`, else `less`; the path is appended |
+| `--viewer-cmd <argv>` | the command that shows a report or a hold card, default `glow -p`, else `$EDITOR`, else `vim`, else `less`; the path is appended |
 | `--snapshot-timeout <seconds>` | kill a snapshot run after this long, default 60 |
 | `--herdr-cmd <argv>`, `--herdr-socket <path>` | how to reach herdr when `HERDR_BIN_PATH`, `HERDR_SOCKET_PATH` and `herdr status` do not apply |
 | `--render-once`, `--fixture`, `--cols`, `--rows`, `--keys`, `--mouse`, `--expand`, `--tags`, `--headless`, `--curl-cmd`, `--install-root` | test mode: print one frame, or run the schedule without a terminal. `bin/firstmate-tui/lib/args.mjs` documents each one |
@@ -355,21 +363,22 @@ The board does not change or copy the script: it lives in firstmate's repository
 
 ### view-state.json
 
-The view state remembers what you hid and how you sized the columns: hidden rows (by pane, home and id, plus the completion date for Landed, so an item that lands again reappears), hidden panes, and every column width you dragged.
+The view state remembers what you hid and how you sized the columns: hidden rows (by pane, home and id, plus the completion date for Recently Landed, so an item that lands again reappears), hidden panes, and every column width you dragged.
+The pane ids in the file are older than the pane titles (`needs` is Captain's Call, `inflight` is Underway, `landed` is Recently Landed, `charted` is Charted Next), so a file written before 0.7.0 keeps its meaning; its entries for the former Findings pane are dropped on read, and a report you had hidden there reappears once in Recently Landed.
 firstmate retires done rows on its own, so hiding a row is the board's business and never a firstmate write.
 A hold you discarded or deferred is not a hidden row: it leaves the board for the rest of the session because firstmate's own state now carries the answer, so it is not in this file and `H` does not show it.
 `=` resets every column width, and the Settings page has a `Reset column widths` entry that does the same.
-Since 0.5.0 the file also remembers where you were: the focused pane, the selected row, the expanded In flight groups and each pane's scroll offset.
+Since 0.5.0 the file also remembers where you were: the focused pane, the selected row, the expanded Underway groups and each pane's scroll offset.
 The board saves them whenever it saves the file anyway, about 1.5 seconds after your last key or click, and when you quit.
 At the next launch the cursor goes back to that row as soon as its pane has data; a row that is gone gives way to the row at the same position, and a board that quit before any data landed keeps the file's selection rather than recording an empty one.
 
 ### state-cache.json
 
 The state cache holds the last data the board drew that came from outside: the fleet snapshot, the delegate homes' ledgers, the pull request data with the GitHub login it was fetched for, and the herdr pane states.
-The board writes it after every refresh that landed cleanly and again when you quit, and stamps it with the time the data landed; a refresh that failed never overwrites it.
+The board writes it when the fleet snapshot lands and again when the GitHub fetch lands, as long as neither has failed, and once more when you quit, and stamps it with the time the data landed; a snapshot or fetch that failed never overwrites it, and neither does a quit while that failure stands.
 At the next launch, when the file is younger than `--cache-max-age` seconds (default 3600, one hour), the panes draw it at once and every pane title carries `(cached 12m ago)`, the age in the AGE column's shape.
-The title line reads the refreshing label and the launch refresh starts immediately, exactly as it would without a cache; nothing is skipped or delayed.
-As each source lands live its panes drop the marker: the fleet snapshot clears Needs you, In flight, Findings and Landed, and each pull request pane clears its own when its GitHub fetch answers.
+The title line reads the refreshing label and the launch snapshot starts immediately, exactly as it would without a cache; nothing is skipped or delayed.
+As each source lands live its panes drop the marker: the fleet snapshot clears Captain's Call, Underway, Charted Next and Recently Landed, and each pull request pane clears its own when its GitHub fetch answers.
 A pane whose live fetch failed keeps its cached rows, its marker and the `(stale)` word.
 Every cached row works as usual, and `enter` on a pull request row whose pane still shows cached data opens the pull request and says `opening PR from data cached 12m ago` in the footer, so you know what you are acting on; there is no prompt.
 With no cache, a cache older than the limit or `--no-cache`, the first frame is the spinner-per-pane start described in [First run](#first-run); `--no-cache` skips the read only, and the file is still written.
@@ -415,7 +424,7 @@ Check: run the same command in that home (`FM_HOME=<home> <home>/bin/fm-captain-
 Fix: whatever the message asks for; a hold whose home is on another machine cannot be changed from here at all, and the board says so before it prompts.
 
 **The title line reads `herdr disconnected (<reason>)` in red.**
-Symptom: the title line carries that warning, and the HERDR column in In flight reads `unknown` in grey instead of a live pane count.
+Symptom: the title line carries that warning, and the HERDR column in Underway reads `unknown` in grey instead of a live pane state.
 Cause: the board cannot hold its subscription to herdr's socket.
 The reason in the parentheses says why: `--no-herdr` means you started it that way; `connecting` means it has not connected yet; a socket error such as `ECONNREFUSED` or `ENOENT` means herdr's server is not running or its socket has moved; `herdr status did not report a socket path` means the board found a `herdr` command but that command could not name a server.
 Check: run `herdr status`.
