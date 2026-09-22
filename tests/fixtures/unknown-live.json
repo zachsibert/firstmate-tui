@@ -1,0 +1,197 @@
+{
+  "_comment": "The unknown-state rule, 160x60: every task here reads unknown from the run-step reader, and the board judges each by its pane. Main home: main-live (pane exists, herdr working, last event working: an Underway row reading working, validation state unreadable), main-event (herdr idle, last event working: an Underway row too, the status log's word counts for a main-home task), main-gone (exists false: the gone warning), main-dead (agent_alive dead while herdr reads working: the dead warning), main-idle (herdr idle, last event paused: the pane alive, agent idle warning), main-lost (pane absent from herdr: the pane lost warning). Delegate delegate-a: its canonical record and its ledger both read unknown with the reason naming child-a and child-b; child-a (herdr working) and child-b (herdr busy) are the group's two live rows, so no warning names them and the home-level warning is dropped; child-gone (exists false) keeps its gone warning and child-idle (herdr idle) its warning naming the idle agent. The delegate's own record reads done and lends the group its pane only. now is 2026-09-22T12:00:00Z = epoch 1790078400. Ages: main-live 10m, main-event 25m, child-a 30m, child-b 5m, child-idle 2h.",
+  "now": "2026-09-22T12:00:00Z",
+  "cols": 160,
+  "rows": 60,
+  "fm_home": "/fixture/unknown-live",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/unknown-live",
+    "generated": "2026-09-22T11:59:48Z",
+    "tasks": [
+      {
+        "id": "main-live",
+        "kind": "ship",
+        "project": "/fixture/unknown-live/projects/example-repo",
+        "mode": "no-mistakes",
+        "backend": "herdr",
+        "current_state": { "state": "unknown", "source": "run-step", "detail": "run inventory has no entry for the worktree", "observed_at": "2026-09-22T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "adding the retry loop" },
+        "paths": { "status_log": { "path": "/fixture/unknown-live/state/main-live.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "adding the retry loop", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Retry on 429 from the address API", "repo": "example-org/example-repo" }
+      },
+      {
+        "id": "main-event",
+        "kind": "ship",
+        "project": "/fixture/unknown-live/projects/example-repo",
+        "mode": "no-mistakes",
+        "backend": "herdr",
+        "current_state": { "state": "unknown", "source": "run-step", "detail": "run inventory has no entry for the worktree", "observed_at": "2026-09-22T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1B:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "wiring the export button" },
+        "paths": { "status_log": { "path": "/fixture/unknown-live/state/main-event.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "wiring the export button", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Add the export button", "repo": "example-org/example-repo" }
+      },
+      {
+        "id": "main-gone",
+        "kind": "ship",
+        "project": "/fixture/unknown-live/projects/example-repo",
+        "mode": "no-mistakes",
+        "backend": "herdr",
+        "current_state": { "state": "unknown", "source": "run-step", "detail": "run inventory has no entry for the worktree", "observed_at": "2026-09-22T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1C:p1", "exists": false, "agent_alive": "not_checked", "status": "absent" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "backfilling the ledger" },
+        "paths": { "status_log": { "path": "/fixture/unknown-live/state/main-gone.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "backfilling the ledger", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Backfill the ledger", "repo": "example-org/example-repo" }
+      },
+      {
+        "id": "main-dead",
+        "kind": "ship",
+        "project": "/fixture/unknown-live/projects/example-repo",
+        "mode": "no-mistakes",
+        "backend": "herdr",
+        "current_state": { "state": "unknown", "source": "run-step", "detail": "run inventory has no entry for the worktree", "observed_at": "2026-09-22T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "dead", "status": "dead" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "rotating the key" },
+        "paths": { "status_log": { "path": "/fixture/unknown-live/state/main-dead.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "rotating the key", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Rotate the signing key", "repo": "example-org/example-repo" }
+      },
+      {
+        "id": "main-idle",
+        "kind": "ship",
+        "project": "/fixture/unknown-live/projects/example-repo",
+        "mode": "no-mistakes",
+        "backend": "herdr",
+        "current_state": { "state": "unknown", "source": "run-step", "detail": "run inventory has no entry for the worktree", "observed_at": "2026-09-22T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1E:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "paused: waiting on the vendor" },
+        "paths": { "status_log": { "path": "/fixture/unknown-live/state/main-idle.status", "present": true, "kind": "event_history", "last_event": { "state": "paused", "note": "waiting on the vendor", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Tidy the release notes", "repo": "example-org/example-repo" }
+      },
+      {
+        "id": "main-lost",
+        "kind": "ship",
+        "project": "/fixture/unknown-live/projects/example-repo",
+        "mode": "no-mistakes",
+        "backend": "herdr",
+        "current_state": { "state": "unknown", "source": "run-step", "detail": "run inventory has no entry for the worktree", "observed_at": "2026-09-22T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1F:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "indexing the table" },
+        "paths": { "status_log": { "path": "/fixture/unknown-live/state/main-lost.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "indexing the table", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Index the warehouse table", "repo": "example-org/example-repo" }
+      },
+      {
+        "id": "delegate-a",
+        "kind": "secondmate",
+        "project": "/fixture/homes/delegate-a",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status-log", "detail": "corr=1a2b done: relayed the vendor answer", "observed_at": "2026-09-22T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1G:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "corr=1a2b done: relayed the vendor answer" },
+        "paths": { "status_log": { "path": "/fixture/unknown-live/state/delegate-a.status", "present": true, "kind": "event_history", "last_event": { "state": "done", "note": "corr=1a2b done: relayed the vendor answer", "raw": "" } } },
+        "remote": null,
+        "backlog": null
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "main-live", "state": "in_flight", "structured": true, "current_role": "worker", "title": "Retry on 429 from the address API", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-21", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "main-event", "state": "in_flight", "structured": true, "current_role": "worker", "title": "Add the export button", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-21", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "main-gone", "state": "in_flight", "structured": true, "current_role": "worker", "title": "Backfill the ledger", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-20", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "main-dead", "state": "in_flight", "structured": true, "current_role": "worker", "title": "Rotate the signing key", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-20", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "main-idle", "state": "in_flight", "structured": true, "current_role": "worker", "title": "Tidy the release notes", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-20", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "main-lost", "state": "in_flight", "structured": true, "current_role": "worker", "title": "Index the warehouse table", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": null, "hold_reason": null, "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-19", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } }
+      ]
+    },
+    "scout_reports": [],
+    "main_inventory": { "valid": true, "reason": null, "orphan_in_flight": [], "unstructured_current_count": 0 },
+    "secondmate_current": {
+      "records": [
+        {
+          "id": "delegate-a",
+          "home": "/fixture/homes/delegate-a",
+          "host": null,
+          "remote": false,
+          "registered": true,
+          "provenance": { "selected": "structured-home", "summary_source": "local-ledger", "summary_valid": false, "trust": "partial" },
+          "freshness": { "status": "fresh", "observed_at": "2026-09-22T11:58:00Z", "age_seconds": 120 },
+          "current": { "state": "unknown", "reason": "child current state unavailable: child-a, child-b" },
+          "active_children": [],
+          "endpoints": [
+            { "id": "child-a", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2A:p1", "exists": true } },
+            { "id": "child-b", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2B:p1", "exists": true } },
+            { "id": "child-gone", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2C:p1", "exists": false } },
+            { "id": "child-idle", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2D:p1", "exists": true } }
+          ],
+          "decisions_open": [],
+          "holds": [],
+          "landed": [],
+          "queued": []
+        }
+      ]
+    },
+    "secondmate_landed": { "records": [] }
+  },
+  "ledgers": [
+    {
+      "id": "delegate-a",
+      "home": "/fixture/homes/delegate-a",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1790078280,
+        "valid": false,
+        "state": "unknown",
+        "invalidity": { "kind": "child_current_unavailable", "ids": ["child-a", "child-b"] },
+        "reason": "child current state unavailable: child-a, child-b",
+        "active_children": [],
+        "endpoints": [
+          { "id": "child-a", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2A:p1", "exists": true } },
+          { "id": "child-b", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2B:p1", "exists": true } },
+          { "id": "child-gone", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2C:p1", "exists": false } },
+          { "id": "child-idle", "state": "unknown", "source": "run-step", "endpoint": { "target": "default:w2D:p1", "exists": true } }
+        ],
+        "holds": [],
+        "decisions_open": [],
+        "landed": [],
+        "queued": []
+      }
+    }
+  ],
+  "herdr": {
+    "agents": [
+      { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "main-live" },
+      { "pane_id": "w1B:p1", "agent_status": "idle", "terminal_title_stripped": "main-event" },
+      { "pane_id": "w1D:p1", "agent_status": "working", "terminal_title_stripped": "main-dead" },
+      { "pane_id": "w1E:p1", "agent_status": "idle", "terminal_title_stripped": "main-idle" },
+      { "pane_id": "w1G:p1", "agent_status": "idle", "terminal_title_stripped": "delegate-a" },
+      { "pane_id": "w2A:p1", "agent_status": "working", "terminal_title_stripped": "child-a" },
+      { "pane_id": "w2B:p1", "agent_status": "busy", "terminal_title_stripped": "child-b" },
+      { "pane_id": "w2D:p1", "agent_status": "idle", "terminal_title_stripped": "child-idle" }
+    ]
+  },
+  "prs": null,
+  "mtimes": {
+    "/fixture/unknown-live/state/main-live.status": 1790077800,
+    "/fixture/unknown-live/state/main-event.status": 1790076900,
+    "/fixture/homes/delegate-a/state/child-a.status": 1790076600,
+    "/fixture/homes/delegate-a/state/child-b.status": 1790078100,
+    "/fixture/homes/delegate-a/state/child-idle.status": 1790071200
+  }
+}
