@@ -82,23 +82,28 @@
 //              "source"?: { "kind": "board" | "firstmate",
 //                           "reason": "default" | "config" | "gh-missing" } } | null,
 //     "snapshot_error": text (optional; marks the four snapshot panes stale),
-//     "refresh": { "next_in": seconds, "refreshing": bool, "failed_ago": seconds,
-//                  "failed": text, "loading_frame": N } (optional; every field optional),
+//     "refresh": { "next_in": seconds, "refreshing": bool, "fetching": bool,
+//                  "failed_ago": seconds, "failed": text, "loading_frame": N }
+//                  (optional; every field optional),
 //     "mtimes": { "<absolute path>": epoch seconds },
 //     "status_logs": { "<absolute status log path>": [ "working", "done", ... ] } }
 // status_logs stands in for the lines of a task's status log (the verbs, in
 // order), which the model reads to tell a task repairing its PR (working
 // again after a done line) from one on its first pass; a path absent from
 // the map reads as an unreadable log, never repairing.
-// The refresh block stands in for the app's schedule, which a one-shot render
-// has none of: {"next_in": 18} draws `next refresh in 18s` on the title line,
-// {"refreshing": true} draws `refreshing…`, and {"failed_ago": 40, "next_in":
-// 20, "failed": "PR fetch: exit 1"} draws `refresh failed 40s ago, retrying in
+// The refresh block stands in for the app's two cycles, which a one-shot
+// render has none of: {"next_in": 18} draws `next refresh in 18s` on the
+// title line, {"refreshing": true} (the local cycle, the fleet snapshot, in
+// flight) draws `refreshing…`, and {"failed_ago": 40, "next_in": 20,
+// "failed": "PR fetch: exit 1"} draws `refresh failed 40s ago, retrying in
 // 20s` in red; without the block the title line carries no refresh label.
-// With {"refreshing": true} a fixture that omits "snapshot" (or sets it null)
-// puts Needs you, In flight, Findings and Landed into the loading state, and
-// one that omits "prs" (or sets it null) puts My PRs and To review there: each
-// such pane draws the spinner line, `⠋ loading fleet snapshot…`, `⠋ loading
+// {"fetching": true} is the app's GitHub cycle in flight: it marks each PR
+// pane that has rows (or an earlier fetch's empty text) ` (updating)` in its
+// title and touches the title line not at all. With {"refreshing": true} a
+// fixture that omits "snapshot" (or sets it null) puts Needs you, In flight,
+// Findings and Landed into the loading state, and with either flag one that
+// omits "prs" (or sets it null) puts My PRs and To review there: each such
+// pane draws the spinner line, `⠋ loading fleet snapshot…`, `⠋ loading
 // GitHub checks…` or `⠋ loading GitHub review requests…`, in place of its
 // rows. "loading_frame" (a whole number, default 0) picks the spinner glyph,
 // the app's frame counter standing still, so the frame is the same on every
@@ -253,6 +258,7 @@ function refreshFromFixture(block, now) {
   return {
     nextAt: nextIn === null ? null : now + nextIn,
     refreshing: Boolean(block.refreshing),
+    fetching: Boolean(block.fetching),
     failedAt: failedAgo !== null ? now - failedAgo : failed ? now : null,
     failed,
     loadingFrame,

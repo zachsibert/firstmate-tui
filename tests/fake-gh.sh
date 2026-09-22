@@ -54,7 +54,12 @@
 # When the search string carries repo: qualifiers, only PRs in those
 # repositories are answered, so a configured repository must be in the query
 # to be listed. FM_BOARD_TEST_GH_CAPPED=1 reports issueCount 51 on every
-# search, the way a capped search reads.
+# search, the way a capped search reads. FAKE_GH_SLEEP=<seconds> sleeps that
+# long before answering an `api graphql` call (after logging it), so a test
+# can hold the board's GitHub fetch open while its snapshot has landed, and
+# FAKE_GH_GRAPHQL_FAIL=1 fails every `api graphql` call (after the sleep) with
+# one stderr line, the shape of a fetch that failed; `api user` answers at
+# once and succeeds either way.
 set -eu
 
 log() { echo "gh $*" >> "${FM_BOARD_TEST_FETCH_LOG:?}"; }
@@ -165,6 +170,8 @@ if [ -z "$q" ]; then
   targets=$(printf '%s' "$query" | grep -oE 'repository\(owner: "[^"]+", name: "[^"]+"\) \{ pullRequest\(number: [0-9]+\)' | sed -E 's/repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ pullRequest\(number: ([0-9]+)\)/\1\/\2#\3/')
   [ -n "$targets" ] || { log "api graphql: no search string and no lookup in the query"; echo "fake gh: unsupported graphql query" >&2; exit 1; }
   log "api graphql lookup=$(printf '%s' "$targets" | tr '\n' ',' | sed 's/,$//')"
+  [ -z "${FAKE_GH_SLEEP:-}" ] || sleep "$FAKE_GH_SLEEP"
+  [ -z "${FAKE_GH_GRAPHQL_FAIL:-}" ] || { echo "fake gh: graphql failed (FAKE_GH_GRAPHQL_FAIL)" >&2; exit 1; }
   out='{"data":{'
   i=0
   sep=''
@@ -178,6 +185,8 @@ if [ -z "$q" ]; then
 fi
 
 log "api graphql q=$(printf '%s' "$q" | sed -E 's/closed:>=[^ ]+/closed:>=<since>/')"
+[ -z "${FAKE_GH_SLEEP:-}" ] || sleep "$FAKE_GH_SLEEP"
+[ -z "${FAKE_GH_GRAPHQL_FAIL:-}" ] || { echo "fake gh: graphql failed (FAKE_GH_GRAPHQL_FAIL)" >&2; exit 1; }
 
 case "$q" in
   *review-requested:*) kind=review ;;

@@ -11,10 +11,11 @@ options:
   --home <path>          add a secondmate home (repeatable). Default: FM_HOME plus
                          every home listed in FM_HOME/data/secondmates.md
   --refresh <seconds>    refresh cadence (default 30): every tick runs the fleet snapshot
-                         and then, unless --no-prs, the live GitHub PR fetch (at most
-                         four searches through gh api graphql, all at once, plus one
-                         lookup of recorded PRs), so nothing on screen is older than
-                         this plus the two steps; a tick that lands while a refresh is
+                         and draws it, then starts, unless --no-prs, the live GitHub PR
+                         fetch (at most four searches through gh api graphql, all at
+                         once, plus one lookup of recorded PRs) without waiting for it:
+                         the PR panes keep their rows marked (updating) until it lands,
+                         one fetch at a time; a tick that lands while a snapshot is
                          still running is skipped
   --no-prs               skip the live GitHub PR fetch (gh api graphql; fm-bearings-snapshot.sh
                          --include-prs when gh is not on PATH) so My PRs shows recorded

@@ -77,7 +77,7 @@ Install, Debian and Ubuntu, when one is missing: `sudo apt install curl tar core
 
 **gh, the GitHub CLI, logged in.**
 gh gives the two pull request panes their data.
-On every refresh the board runs `gh api graphql` itself, at most four searches plus one lookup, and once per session `gh api user` for your GitHub login unless the [config file](#configuration) names it.
+After every fleet snapshot the board runs `gh api graphql` itself, at most four searches plus one lookup, without holding the rest of the board for the answer, and once per session `gh api user` for your GitHub login unless the [config file](#configuration) names it.
 Without gh on `PATH`, My PRs falls back to a firstmate script that needs gh as well, so in practice that pane reports a failed fetch, and Teammates' PRs reads `gh not on PATH: Teammates' PRs needs the GitHub CLI`.
 The config file's `prs.source` can pick that script on purpose ([Configuration](#configuration)); it needs gh just the same, so neither choice removes this prerequisite.
 `--no-prs` runs the board without any GitHub call; the two panes then list only the pull request links firstmate recorded.
@@ -236,7 +236,10 @@ The six panes, top to bottom; each pane's key is its number:
 5. **Findings**: the reports the agents wrote, newest first, from every home.
 6. **Landed**: finished work, newest first: merged pull requests and done tasks, with the pull request URL, report path or pane id in WHAT.
 
-The title line names the main home and the number of homes, counts down to the next refresh (`next refresh in 18s`), reads `refreshing...` while one runs, and after a failed refresh reads `refresh failed 40s ago, retrying in 20s` in red until a later refresh is clean, while the pane whose data failed carries `(stale)` in its title.
+A refresh is two independent cycles.
+The fleet snapshot runs first and the four panes built from it, In flight, Needs you, Findings and Landed, repaint the moment it lands; the GitHub fetch then starts on its own and the two pull request panes repaint when it returns, keeping their previous rows with `(updating)` in their titles meanwhile.
+A slow or failed GitHub call never delays the fleet panes, the countdown or the next snapshot.
+The title line names the main home and the number of homes, counts down to the next snapshot (`next refresh in 18s`), reads `refreshing...` while the snapshot runs, and after a failed snapshot or GitHub fetch reads `refresh failed 40s ago, retrying in 20s` in red until both are clean again, while the pane whose data failed carries `(stale)` in its title.
 Each pane title carries its key and its row count, as in `[1] In flight (3)`.
 The selected row is drawn inverse, in your theme's own colours, and the focused pane's border is amber (palette colour 214 on a 256-colour terminal, your terminal's yellow on one with fewer colours); the other panes keep their blue border.
 In the HERDR column, `pane lost` in red means herdr no longer has that agent's pane, and `unknown` in grey means herdr is disconnected so the board cannot tell.
@@ -253,7 +256,7 @@ The bottom line lists the keys, and `?` shows them all.
 | `l` / `right`, `h` / `left` | expand / collapse the selected In flight group |
 | `x`, `X`, `H` | hide the selected row; unhide every row in the pane; show hidden rows greyed and marked `(hidden)` |
 | `1` to `6`, `0` | show or hide that pane; show every pane (with all six hidden the board lists these keys, and `r`, `.`, `?` and `q`) |
-| `r` | refresh now: the fleet snapshot, then the GitHub fetch |
+| `r` | refresh now: the fleet snapshot, drawn as soon as it lands, then the GitHub fetch behind it |
 | `.` | the Settings page ([Upgrade and betas](#upgrade-and-betas)) |
 | `=` | reset every column width to its automatic size |
 | `?`, `q` or `ctrl-c` | help overlay; quit |
@@ -285,7 +288,7 @@ Flags go after `open` or directly after `firstmate-tui`.
 
 | Flag | Meaning |
 | --- | --- |
-| `--refresh <seconds>` | how often the board refreshes, default 30. Each refresh runs the fleet snapshot and then the GitHub fetch. `r` and a herdr event on a known agent pane refresh at once; a tick that lands during a running refresh is skipped |
+| `--refresh <seconds>` | how often the board refreshes, default 30. Each tick runs the fleet snapshot, draws it, and starts the GitHub fetch without waiting for it; one fetch runs at a time, and a snapshot that lands while one is out leaves one follow-up fetch behind it. `r` and a herdr event on a known agent pane refresh at once; a tick that lands during a running snapshot is skipped |
 | `--no-prs` | skip the GitHub fetch and the `gh api user` call. My PRs lists recorded pull request links with `checks: off (--no-prs)`, and Teammates' PRs reads `PR fetch off (--no-prs)` |
 | `--home <path>` | add a delegate home (repeatable). Default: `FM_HOME` plus every home in `FM_HOME/data/secondmates.md` |
 | `--no-herdr` | run without herdr: no live pane state and no herdr calls |
@@ -366,9 +369,9 @@ At the next launch the cursor goes back to that row as soon as its pane has data
 ### state-cache.json
 
 The state cache holds the last data the board drew that came from outside: the fleet snapshot, the delegate homes' ledgers, the pull request data with the GitHub login it was fetched for, and the herdr pane states.
-The board writes it after every refresh that landed cleanly and again when you quit, and stamps it with the time the data landed; a refresh that failed never overwrites it.
+The board writes it when the fleet snapshot lands and again when the GitHub fetch lands, as long as neither has failed, and once more when you quit, and stamps it with the time the data landed; a snapshot or fetch that failed never overwrites it, and neither does a quit while that failure stands.
 At the next launch, when the file is younger than `--cache-max-age` seconds (default 3600, one hour), the panes draw it at once and every pane title carries `(cached 12m ago)`, the age in the AGE column's shape.
-The title line reads the refreshing label and the launch refresh starts immediately, exactly as it would without a cache; nothing is skipped or delayed.
+The title line reads the refreshing label and the launch snapshot starts immediately, exactly as it would without a cache; nothing is skipped or delayed.
 As each source lands live its panes drop the marker: the fleet snapshot clears Needs you, In flight, Findings and Landed, and each pull request pane clears its own when its GitHub fetch answers.
 A pane whose live fetch failed keeps its cached rows, its marker and the `(stale)` word.
 Every cached row works as usual, and `enter` on a pull request row whose pane still shows cached data opens the pull request and says `opening PR from data cached 12m ago` in the footer, so you know what you are acting on; there is no prompt.

@@ -35,11 +35,15 @@
 //                 searched) and `unavailable` (why it cannot fetch at all)
 //   refresh       the schedule for the title line, or null when nothing is
 //                 scheduled (a one-shot render): { nextAt, refreshing,
-//                 failedAt, failed, loadingFrame }, the times in epoch seconds,
-//                 `failed` the last failure's text, kept until a later refresh
-//                 succeeds, and loadingFrame the spinner's frame counter (the
-//                 app's 10 Hz tick count, a fixture's refresh.loading_frame;
-//                 never wall-clock, so a one-shot frame is deterministic)
+//                 fetching, failedAt, failed, loadingFrame }, the times in
+//                 epoch seconds; refreshing while the app's local cycle (the
+//                 fleet snapshot and the ledgers) runs, fetching while its
+//                 GitHub cycle (the identity and the PR fetch) is in flight,
+//                 the two independent; `failed` the last failure's text,
+//                 kept until a later landing of both is clean, and
+//                 loadingFrame the spinner's frame counter (the app's 10 Hz
+//                 tick count, a fixture's refresh.loading_frame; never
+//                 wall-clock, so a one-shot frame is deterministic)
 //   cached        null, or { at, snapshot, prs: { mine, toreview } } while
 //                 some of the facts above come from the state cache
 //                 (lib/cache.mjs) and their live source has not landed in this
@@ -78,10 +82,12 @@
 //
 // Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading, cached } x6 ], meta },
 // where header is `Title (count[, n hidden])` plus ` (stale)` when that pane's
-// own data failed to refresh and ` (cached 12m ago)` while its rows come from
+// own data failed to refresh, ` (cached 12m ago)` while its rows come from
 // the state cache (paneCached below; cached is null or { ageSeconds, label }
-// so the host can name the age when a cached row is opened), loading is null
-// or { source, text } while the
+// so the host can name the age when a cached row is opened) and, on a PR
+// pane that has something to show, ` (updating)` while the GitHub cycle is
+// in flight (paneUpdating below), in that order; loading is null or
+// { source, text } while the
 // pane still waits for its first data (paneLoading below; text is the spinner
 // line the renderer draws), and meta carries the title line's refresh label
 // ({ text, failed }) and herdr warning ('' while the link is up).
@@ -1551,9 +1557,21 @@ function paneCached(facts, pane, cached) {
   return { ageSeconds, label: `cached ${fmtAge(ageSeconds)} ago` };
 }
 
-function paneHeader(facts, pane, count, hiddenCount, showHidden, cached) {
+// A PR pane is updating while the GitHub cycle is in flight
+// (facts.refresh.fetching) and it has something to keep on screen meanwhile:
+// rows, or the empty text of an earlier fetch or the cache. A pane still
+// waiting for its first fetch spins instead (paneLoading), and a pane nothing
+// is fetched for, the identity unknown or the pane unavailable on the script
+// source, carries no marker.
+function paneUpdating(facts, pane, loading) {
+  if (!PR_PANE_IDS.has(pane.id) || loading || !facts.refresh || !facts.refresh.fetching) return false;
+  const prs = facts.prs;
+  return Boolean(prs && prs.enabled) && !identityMissing(prs) && !paneFetch(prs, pane.id).unavailable;
+}
+
+function paneHeader(facts, pane, count, hiddenCount, showHidden, cached, loading) {
   const hiddenNote = hiddenCount > 0 ? `, ${hiddenCount} hidden${showHidden ? ' shown' : ''}` : '';
-  return `${pane.title} (${count}${hiddenNote})${paneStale(facts, pane) ? ' (stale)' : ''}${cached ? ` (${cached.label})` : ''}`;
+  return `${pane.title} (${count}${hiddenNote})${paneStale(facts, pane) ? ' (stale)' : ''}${cached ? ` (${cached.label})` : ''}${paneUpdating(facts, pane, loading) ? ' (updating)' : ''}`;
 }
 
 // ------------------------------------------------------------------ Loading
@@ -1568,24 +1586,29 @@ export function spinnerGlyph(frame) {
 }
 
 // What a pane is still waiting for, or null: a pane is loading only while a
-// refresh is in flight and the source it draws from has never landed in this
+// cycle is in flight and the source it draws from has never landed in this
 // session. Needs you, In flight, Findings and Landed wait on the fleet
-// snapshot; My PRs and To review wait first on the GitHub identity, while it
-// is still being resolved (`resolving GitHub identity`, the one line whose
-// verb is not `loading`; the resolution follows the snapshot, so on a cold
-// start it is what both panes show until the login is known, and r shows it
-// again while asking for an unknown one), then My PRs on the GitHub checks
-// and To review on the GitHub review requests (with --no-prs neither is ever
-// loading: the panes show the off state, and with the identity resolved
-// unknown they show its row); In flight's HERDR column comes from herdr,
-// which its spinner names only once the snapshot has landed while the herdr
-// link is still connecting. A source that landed once never loads again (an
-// empty pane reads its empty text, a refreshing pane keeps its rows), and a
-// source whose first fetch failed shows the failure text, not the spinner,
-// until a later refresh lands it.
+// snapshot while the local cycle runs (refreshing); My PRs and To review
+// wait, while either cycle runs (the GitHub cycle follows the local one, so
+// a cold start spins from its first frame to its first fetch), first on the
+// GitHub identity, while it is still being resolved (`resolving GitHub
+// identity`, the one line whose verb is not `loading`; the resolution follows
+// the snapshot, so on a cold start it is what both panes show until the login
+// is known, and r shows it again while asking for an unknown one), then My
+// PRs on the GitHub checks and To review on the GitHub review requests (with
+// --no-prs neither is ever loading: the panes show the off state, and with
+// the identity resolved unknown they show its row); In flight's HERDR column
+// comes from herdr, which its spinner names only once the snapshot has landed
+// while the herdr link is still connecting. A source that landed once never
+// loads again (an empty pane reads its empty text, a refreshing pane keeps
+// its rows and a PR pane under a fetch in flight is marked updating instead),
+// and a source whose first fetch failed shows the failure text, not the
+// spinner, until a later cycle lands it.
 function paneLoadingSource(facts, pane) {
-  if (!facts.refresh || !facts.refresh.refreshing) return null;
+  const r = facts.refresh;
+  if (!r) return null;
   if (PR_PANE_IDS.has(pane.id)) {
+    if (!r.refreshing && !r.fetching) return null;
     const prs = facts.prs;
     if (!prs || !prs.enabled || identityMissing(prs)) return null;
     if (identityResolving(prs)) return { verb: 'resolving', source: 'GitHub identity' };
@@ -1593,6 +1616,7 @@ function paneLoadingSource(facts, pane) {
     if (own.fetchedAt || own.error || own.unavailable) return null;
     return { verb: 'loading', source: pane.id === 'mine' ? 'GitHub checks' : 'GitHub review requests' };
   }
+  if (!r.refreshing) return null;
   if (!facts.snapshot && !facts.snapshotError) return { verb: 'loading', source: 'fleet snapshot' };
   if (pane.id === 'inflight' && facts.herdr && facts.herdr.state === 'connecting') return { verb: 'loading', source: 'herdr' };
   return null;
@@ -1697,7 +1721,8 @@ export function buildModel(facts, options = {}) {
     const { rows, hiddenCount } = applyHidden(p.id, applyDismissed(builders[p.id](f, opts), opts), opts);
     const empty = PR_PANE_IDS.has(p.id) ? prPaneEmpty(f, p) : p.empty;
     const cached = paneCached(f, p, f.cached);
-    return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden, cached), loading: paneLoading(f, p), cached };
+    const loading = paneLoading(f, p);
+    return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden, cached, loading), loading, cached };
   });
   const homes = 1 + f.ledgers.length;
   return {

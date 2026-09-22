@@ -42,9 +42,11 @@
 # fetch reaches the real GitHub CLI. The identity chain (the config file, then gh,
 # then git) runs against a temporary config directory, the fake gh and a fake
 # git that answers `config --get github.user` alone. The refresh schedule
-# itself (one tick runs the snapshot and then the gh calls; a tick during a
-# running refresh is skipped) is checked by running the app with --headless
-# against a second stand-in whose snapshot sleeps, then stopping it with a
+# itself (the local cycle runs the snapshot on the tick and asks for one
+# GitHub cycle without awaiting it; a tick during a running snapshot is
+# skipped, a landing during a running fetch leaves one follow-up) is checked
+# by running the app with --headless against a stand-in whose snapshot sleeps
+# and against one whose gh sleeps (FAKE_GH_SLEEP), then stopping it with a
 # signal; --headless draws nothing, reads no key and never loads neo-blessed.
 # The wrapper checks that touch the detached routes run with a fake `herdr` on
 # HERDR_BIN_PATH and PATH (herdr sets HERDR_BIN_PATH inside its panes, so PATH
@@ -3101,25 +3103,35 @@ frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install
 assert_opened "https://github.com/acme/api/pull/8" "a click and a wheel on the page leave the board's selection where it was"
 
 # ------------------------------------------------------------ refresh schedule
-# The interactive schedule, run with --headless against a stand-in whose snapshot sleeps 7 s, with
-# --refresh 5 (the minimum) and the fake gh on PATH. The next refresh is due 5 s after the last
-# one started, armed when it completes, so a refresh slower than the cadence is followed by the
-# next one at once and never by two. From launch: the start refresh runs the snapshot (0-7 s) and
-# then the identity call and the five gh calls (four searches, one lookup); its timer is already
-# due, so the second refresh runs the snapshot (7-14 s) and the gh calls; the third starts its
-# snapshot at 14 s and is still in it at 19 s. Stopped at 19 s, the log holds three snapshot lines,
-# the first two each followed by their gh lines, one identity call in all, and no script fallback
-# (falsify: arm the timer from the completion instead of the start, two snapshots and five gh
-# lines; keep the old fixed interval, two snapshots; never clear the refreshing flag, one; re-arm
-# the timer at the start of a refresh as well, four; start the fetch with the snapshot instead of
-# after it, and gh lines land before the snapshot line; resolve the identity per tick, two user
-# calls).
+# The two cycles, run with --headless and --refresh 5 (the minimum), the fake gh on PATH, stopped
+# with a signal: the fetch log (one line per snapshot start and per gh call, in the order the
+# processes started) is the evidence. The local cycle is the snapshot: its timer is due 5 s after
+# its start and armed when it lands, so a snapshot slower than the cadence is followed by the next
+# one at once and never by two. The GitHub cycle follows each landed snapshot without being awaited,
+# one at a time: a landing during a running fetch leaves one follow-up behind it.
+#
+# A slow snapshot (7 s) with gh answering at once: from launch the snapshot runs 0-7 s; at 7 s its
+# fetch (the identity call, four searches and the lookup, all within the second) and, the timer
+# being due, the second snapshot (7-14 s); at 14 s the second fetch and the third snapshot, still
+# running when the run stops at 19 s. Three snapshot lines, one identity call, ten graphql lines;
+# the identity call and the first fetch's five lines come after the first snapshot line and before
+# the third, the second fetch's five after the second snapshot line (falsify: arm the timer from
+# the landing instead of the start: two snapshots and five gh lines; keep the old fixed interval:
+# two snapshots; never clear the refreshing flag: one; re-arm the timer at the start of a cycle as
+# well: four; start the fetch with the snapshot instead of after it: gh lines before the first
+# snapshot line; resolve the identity per tick: two user calls).
 SLOW_HOME="$SCRATCH/firstmate-slow"
 mkdir -p "$SLOW_HOME/bin"
 # shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
 printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\nsleep 7\ncat "%s"\n' "$FAKE_HOME/snapshot.json" > "$SLOW_HOME/bin/fm-fleet-snapshot.sh"
 cp "$FAKE_HOME/bin/fm-bearings-snapshot.sh" "$SLOW_HOME/bin/fm-bearings-snapshot.sh"
 chmod +x "$SLOW_HOME/bin/fm-fleet-snapshot.sh" "$SLOW_HOME/bin/fm-bearings-snapshot.sh"
+# log_line <pattern> <n>: the line number in FETCH_LOG of the n-th line matching the pattern, or 0
+log_line() {
+  local n
+  n=$(grep -n -- "$1" "$FETCH_LOG" 2>/dev/null | sed -n "${2}p" | cut -d: -f1)
+  printf '%s\n' "${n:-0}"
+}
 rm -f "${FETCH_LOG:?}"
 FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$SLOW_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --headless --refresh 5 --no-herdr > "$SCRATCH/headless.log" 2>&1 &
 headless_pid=$!
@@ -3130,12 +3142,40 @@ pkill -TERM -P "$headless_pid" 2>/dev/null
 kill "$headless_pid" 2>/dev/null
 wait "$headless_pid" 2>/dev/null
 headless_log=$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')
-if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 3 ]; then pass; else fail "headless schedule: expected three snapshot starts in 19 s (0, 7 and 14 s), log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
-if [ "$(grep -c '^gh api graphql ' "$FETCH_LOG" 2>/dev/null)" = 10 ]; then pass; else fail "headless schedule: no second PR fetch during a running refresh, and one per completed refresh (two completed, four searches and one lookup each); log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
-if [ "$(grep -c '^gh api user ' "$FETCH_LOG" 2>/dev/null)" = 1 ]; then pass; else fail "headless schedule: the identity is resolved once per session, not per tick; log is '$headless_log'"; fi
-if [ "$(grep -n '^snapshot$' "$FETCH_LOG" 2>/dev/null | cut -d: -f1 | tr '\n' ' ')" = "1 8 14 " ]; then pass; else fail "headless schedule: each refresh runs the snapshot before its identity call and gh calls (lines 1, 8 and 14), and the third starts only after the second's gh calls; log is '$headless_log'"; fi
-if grep -q '^prs ' "$FETCH_LOG" 2>/dev/null; then fail "headless schedule: the firstmate PR script ran although gh is on PATH; log is '$headless_log'"; else pass; fi
+if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 3 ]; then pass; else fail "headless slow snapshot: expected three snapshot starts in 19 s (0, 7 and 14 s), log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(grep -c '^gh api graphql ' "$FETCH_LOG" 2>/dev/null)" = 10 ]; then pass; else fail "headless slow snapshot: one fetch per landed snapshot (two landed, four searches and one lookup each); log is '$headless_log' (board output: $(cat "$SCRATCH/headless.log"))"; fi
+if [ "$(grep -c '^gh api user ' "$FETCH_LOG" 2>/dev/null)" = 1 ]; then pass; else fail "headless slow snapshot: the identity is resolved once per session, not per tick; log is '$headless_log'"; fi
+if [ "$(head -n 1 "$FETCH_LOG" 2>/dev/null)" = snapshot ]; then pass; else fail "headless slow snapshot: the snapshot starts before any gh call; log is '$headless_log'"; fi
+if [ "$(log_line '^gh api user ' 1)" -gt 1 ] && [ "$(log_line '^gh api user ' 1)" -lt "$(log_line '^snapshot$' 3)" ] && [ "$(log_line '^gh api graphql ' 5)" -lt "$(log_line '^snapshot$' 3)" ]; then pass; else fail "headless slow snapshot: the identity call and the first fetch follow the first landed snapshot and precede the third snapshot start; log is '$headless_log'"; fi
+if [ "$(log_line '^gh api graphql ' 6)" -gt "$(log_line '^snapshot$' 2)" ]; then pass; else fail "headless slow snapshot: the second fetch follows the second landed snapshot; log is '$headless_log'"; fi
+if grep -q '^prs ' "$FETCH_LOG" 2>/dev/null; then fail "headless slow snapshot: the firstmate PR script ran although gh is on PATH; log is '$headless_log'"; else pass; fi
 if [ -s "$SCRATCH/headless.log" ]; then fail "headless run wrote to the terminal: $(head -c 300 "$SCRATCH/headless.log")"; else pass; fi
+# A slow gh (FAKE_GH_SLEEP=7: every graphql answer 7 s late, so one fetch, the four searches
+# together and then the lookup, takes 14 s) with the stand-in snapshot answering at once: the
+# snapshot at 0 s and its fetch 0-14 s; the snapshots at 5, 10 and 15 s land while it runs and leave
+# one follow-up between them; at 14 s the follow-up's four searches start (its lookup would at
+# 21 s); stopped at 18 s. Four snapshot lines (the local cadence held through the fetch), one
+# identity call and nine graphql lines: the one lookup line has exactly four search lines before it
+# and four after, and the follow-up's four come after the third snapshot line (falsify: await the
+# fetch in the local cycle again: two snapshot lines, at 0 and 14 s; start a fetch per landed
+# snapshot: eight search lines before the lookup; forget the follow-up: five graphql lines in all;
+# start the follow-up when it is asked for instead of after the running fetch: search lines before
+# the lookup line).
+rm -f "${FETCH_LOG:?}"
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FAKE_GH_SLEEP=7 FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" "$BOARD" --headless --refresh 5 --no-herdr > "$SCRATCH/headless-gh.log" 2>&1 &
+headless_pid=$!
+sleep 18
+pkill -TERM -P "$headless_pid" 2>/dev/null
+kill "$headless_pid" 2>/dev/null
+wait "$headless_pid" 2>/dev/null
+headless_log=$(cat "$FETCH_LOG" 2>/dev/null || echo '<absent>')
+if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 4 ]; then pass; else fail "headless slow gh: expected four snapshot starts in 18 s (0, 5, 10 and 15 s) while one fetch ran 14 s, log is '$headless_log' (board output: $(cat "$SCRATCH/headless-gh.log"))"; fi
+if [ "$(grep -c '^gh api user ' "$FETCH_LOG" 2>/dev/null)" = 1 ]; then pass; else fail "headless slow gh: the identity is resolved once; log is '$headless_log'"; fi
+if [ "$(grep -c '^gh api graphql ' "$FETCH_LOG" 2>/dev/null)" = 9 ]; then pass; else fail "headless slow gh: the first fetch's five graphql calls and the one follow-up's four searches, nothing for the other two landings; log is '$headless_log'"; fi
+if [ "$(grep -c '^gh api graphql lookup=' "$FETCH_LOG" 2>/dev/null)" = 1 ] && [ "$(grep '^gh api graphql ' "$FETCH_LOG" 2>/dev/null | grep -n 'lookup=' | cut -d: -f1)" = 5 ]; then pass; else fail "headless slow gh: one lookup, with four searches before it (the first fetch) and four after (the follow-up started when it landed, never while it ran); log is '$headless_log'"; fi
+if [ "$(log_line '^gh api graphql ' 6)" -gt "$(log_line '^snapshot$' 3)" ]; then pass; else fail "headless slow gh: the follow-up's searches start after the third snapshot landed; log is '$headless_log'"; fi
+if grep -q '^prs ' "$FETCH_LOG" 2>/dev/null; then fail "headless slow gh: the firstmate PR script ran although gh is on PATH; log is '$headless_log'"; else pass; fi
+if [ -s "$SCRATCH/headless-gh.log" ]; then fail "headless slow gh run wrote to the terminal: $(head -c 300 "$SCRATCH/headless-gh.log")"; else pass; fi
 
 # ------------------------------------------------- refresh countdown, herdr link
 # The title line carries one refresh label, from the fixture's refresh block at the fixture's clock
@@ -3151,6 +3191,37 @@ assert_row "$frame_c" '^ firstmate-tui .* +next refresh in 0s $' "countdown: nev
 frame_c=$(render "$(variant populated.json refreshing '{"refresh": {"refreshing": true, "next_in": 18}}')") || fail "refreshing: render exited non-zero"
 assert_row "$frame_c" '^ firstmate-tui · /fixture/firstmate · 3 homes +refreshing… $' "refreshing: the title line reads refreshing…"
 assert_not_contains "$frame_c" "next refresh" "refreshing: no countdown beside it"
+# The GitHub cycle's own flag, {"fetching": true}: over rows it marks the two PR pane titles
+# (updating), keeps their rows, spins nothing and leaves the title line on the local countdown; a
+# stale marker keeps its place before it; with the identity unknown, or with --no-prs, nothing is
+# fetched and no pane carries it (falsify: drop paneUpdating from paneHeader, key it on refreshing,
+# read fetching in refreshLabel, or mark a loading pane too).
+frame_c=$(render "$(variant populated.json fetching '{"refresh": {"fetching": true, "next_in": 18}}')") || fail "fetching: render exited non-zero"
+assert_contains "$frame_c" "┌─ [3] My PRs (3) (updating) ─" "fetching: My PRs keeps its count and is marked updating"
+assert_contains "$frame_c" "┌─ [4] Teammates' PRs (0) (updating) ─" "fetching: Teammates' PRs, empty after an earlier fetch, is marked updating too"
+assert_count "$frame_c" "(updating)" 2 "fetching: the two PR panes alone carry the marker"
+assert_row "$frame_c" '^ firstmate-tui · /fixture/firstmate · 3 homes +next refresh in 18s $' "fetching: the title line keeps the local countdown and never reads refreshing"
+assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "fetching: the PR rows stay under the marker"
+assert_count "$frame_c" "loading" 0 "fetching: a pane with rows spins nothing"
+frame_c=$(render "$(variant populated.json fetching-stale '{"prs": {"mine": {"error": "My PRs: exit 1"}}, "refresh": {"fetching": true, "next_in": 18}}')") || fail "fetching stale: render exited non-zero"
+assert_contains "$frame_c" "┌─ [3] My PRs (3) (stale) (updating) ─" "fetching: the stale marker keeps its place before updating"
+frame_c=$(render "$(variant populated.json fetching-unknown '{"prs": {"identity": {"login": null, "source": "unknown", "reason": "fixture"}}, "refresh": {"fetching": true, "next_in": 18}}')") || fail "fetching identity unknown: render exited non-zero"
+assert_count "$frame_c" "(updating)" 0 "fetching with the identity unknown: nothing is fetched for nobody, so no marker"
+frame_c=$(render "$(variant populated.json fetching '{"refresh": {"fetching": true, "next_in": 18}}')" --no-prs) || fail "fetching --no-prs: render exited non-zero"
+assert_count "$frame_c" "(updating)" 0 "fetching --no-prs: the PR panes are off, so no marker"
+# With nothing fetched yet the flag draws the fetch spinners in the two PR panes, and the four fleet
+# panes, whose cycle is not running, read their empty text; the flag off draws neither marker nor
+# spinner (falsify: key the PR spinners on refreshing alone, or the fleet spinners on fetching).
+frame_c=$(render "$(variant cold-start.json fetching-cold '{"refresh": {"refreshing": false, "fetching": true}}')") || fail "fetching cold: render exited non-zero"
+assert_count "$frame_c" "⠋ loading GitHub checks…" 1 "fetching with nothing fetched: My PRs spins on the fetch"
+assert_count "$frame_c" "⠋ loading GitHub review requests…" 1 "fetching with nothing fetched: Teammates' PRs spins on its own fetch"
+assert_count "$frame_c" "(updating)" 0 "fetching with nothing fetched: a spinning pane carries no marker"
+assert_count "$frame_c" "loading fleet snapshot" 0 "fetching alone: the fleet panes do not spin"
+assert_row "$frame_c" '^│ no workers in flight +│$' "fetching alone: In flight reads its empty text"
+assert_no_row "$frame_c" '^ firstmate-tui .*refreshing' "fetching alone: the title line does not read refreshing"
+frame_c=$(render "$(variant populated.json fetching-off '{"refresh": {"fetching": false, "next_in": 18}}')") || fail "fetching off: render exited non-zero"
+assert_count "$frame_c" "(updating)" 0 "fetching false: no marker"
+assert_count "$frame_c" "loading" 0 "fetching false: no spinner"
 # A failed PR fetch: the title line names the failure's age and the retry in red, the Ready for
 # review header alone is marked stale, and the previous PR rows stay (falsify: drop the failedAt
 # branch from refreshLabel, the 'title bad' style from titleLine, or the review case from paneStale).
@@ -3463,6 +3534,16 @@ frame_c=$(render "$(variant cold-start.json prs-live '{"prs": {"candidate_prs": 
 assert_count "$frame_c" "(cached 5m ago)" 4 "PR fetch landed: the four snapshot panes still carry the marker"
 assert_contains "$frame_c" "┌─ [3] My PRs (2) ─" "PR fetch landed: My PRs draws the live (empty) fetch over the cached snapshot's recorded PRs, no marker"
 assert_contains "$frame_c" "┌─ [1] In flight (7) (cached 5m ago) ─" "PR fetch landed: In flight is still cached"
+# The GitHub cycle in flight over a cached launch, the snapshot landed: the PR panes keep the cached
+# rows under both markers, cached first, then updating, and never spin; the fleet panes, live
+# already, carry neither (falsify: put updating before cached in paneHeader, or treat cached rows
+# as loading).
+frame_c=$(render "$(variant populated.json cached-fetching '{"prs": null, "refresh": {"refreshing": false, "fetching": true}, "now": "2026-09-16T12:05:00Z"}')" --cache "$CACHE") || fail "cache fetching: render exited non-zero"
+assert_contains "$frame_c" "┌─ [3] My PRs (3) (cached 5m ago) (updating) ─" "cached and fetching: My PRs carries the cached marker, then updating"
+assert_contains "$frame_c" "┌─ [4] Teammates' PRs (0) (cached 5m ago) (updating) ─" "cached and fetching: Teammates' PRs too"
+assert_count "$frame_c" "(updating)" 2 "cached and fetching: the two PR panes alone"
+assert_count "$frame_c" "loading" 0 "cached and fetching: the cached rows never give way to a spinner"
+assert_contains "$frame_c" "┌─ [2] Needs you (4) ─" "cached and fetching: Needs you is live and carries no marker"
 # The launch refresh failed over a cached board: the rows stay, each pane is stale and cached at
 # once, and the title line names the failure (falsify: drop the cached snapshot when
 # snapshot_error is set, or the fixture's errors, in restoreFromCache).
@@ -3580,41 +3661,68 @@ assert_file_contains "$vs_f" '"row": "mine:main:api#8"' "the hide left the saved
 assert_file_contains "$vs_f" '"hidden": [' "the hide itself is saved"
 
 # ------------------------------------------------- state cache, headless app
-# The app itself, --headless against the stand-in home (its snapshot answers at once, the fake gh
-# on PATH) with --view-state and --cache in a scratch directory, run as node index.mjs so the
-# signal reaches the board (a launcher killed by the suite leaves node running). After the first
-# clean tick the cache is on disk, stamped with that tick; SIGTERM quits the board, which saves
-# the selection (Needs you, its first row) and writes the cache again with the same fetched_at
-# and a later saved_at. A second run against a home whose snapshot fails, over the same files,
-# leaves the cache byte for byte as it was (a failed refresh never writes it, and neither does a
-# quit without a clean tick) and keeps the saved selection (a board that never had data records
-# no empty one) (falsify: write the cache before the failure check in refresh, on quit without
-# fetchedAt, or stamp it with the write time; save savedFocus without a snapshot).
+# The app itself, --headless against the stand-in home (its snapshot answers at once; the fake gh on
+# PATH sleeps 3 s before each graphql answer, so the GitHub cycle lands about 6 s after the local
+# one) with --view-state and --cache in a scratch directory, run as node index.mjs so the signal
+# reaches the board (a launcher killed by the suite leaves node running). The cache is written
+# twice per launch: by the local cycle, the snapshot and the ledgers with the PR block as it was
+# (empty here, the identity not asked yet), and by the GitHub cycle with the rows and the login gh
+# named; SIGTERM quits the board, which saves the selection (In flight, its first row) and writes
+# the cache again with the fetch's fetched_at and a later saved_at. A second run over the same files
+# with gh failing every graphql call (FAKE_GH_GRAPHQL_FAIL) writes the cache once, at the local
+# landing, the previous run's PR rows still in it, and never again: not at the failed fetch and not
+# at the quit after it. A third run against a home whose snapshot fails leaves the cache byte for
+# byte as it was and keeps the saved selection (a board that never had data records no empty one)
+# (falsify: write the cache before the failure check in landed, or on quit with a failure standing:
+# the failing runs move it; stamp it with the write time; await the fetch before the first write:
+# the 1.5 s cache carries the login; save savedFocus without a snapshot).
 HL="$SCRATCH/headless-cache"
 mkdir -p "$HL"
 vs_h="$HL/view-state.json"
 cache_h="$HL/state-cache.json"
 rm -f "${FETCH_LOG:?}"
-FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" node "$ROOT/bin/firstmate-tui/index.mjs" --headless --refresh 30 --no-herdr --view-state "$vs_h" --cache "$cache_h" > "$HL/out.log" 2>&1 &
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FAKE_GH_SLEEP=3 FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" node "$ROOT/bin/firstmate-tui/index.mjs" --headless --refresh 30 --no-herdr --view-state "$vs_h" --cache "$cache_h" > "$HL/out.log" 2>&1 &
 hl_pid=$!
-sleep 4
-if [ -f "$cache_h" ]; then pass; else fail "headless: the cache is written after the first clean tick"; fi
+sleep 1.5
+if [ -f "$cache_h" ]; then pass; else fail "headless: the cache is written when the snapshot lands, before the fetch"; fi
+local_cache=$(cat "$cache_h" 2>/dev/null)
+assert_file_contains "$cache_h" '"id": "ship-alpha"' "headless local landing: the cache carries the snapshot's tasks"
+assert_file_not_contains "$cache_h" '"login": "captain"' "headless local landing: the identity is not in it yet, the GitHub cycle has not landed"
+assert_file_not_contains "$cache_h" 'acme/api/pull/9' "headless local landing: no fetched PR row yet"
+sleep 7
 tick_cache=$(cat "$cache_h" 2>/dev/null)
+if [ -n "$tick_cache" ] && [ "$tick_cache" != "$local_cache" ]; then pass; else fail "headless: the cache is written again when the fetch lands"; fi
 kill -TERM "$hl_pid" 2>/dev/null
 wait "$hl_pid" 2>/dev/null
 assert_file_contains "$cache_h" '"schema": "fm-board-state-cache.v1"' "headless: the cache names its schema"
 assert_file_contains "$cache_h" "\"fm_home\": \"$FAKE_HOME\"" "headless: the cache names the stand-in home"
-assert_file_contains "$cache_h" '"login": "captain"' "headless: the cache carries the identity gh named"
+assert_file_contains "$cache_h" '"login": "captain"' "headless fetch landing: the cache carries the identity gh named"
+assert_file_contains "$cache_h" 'acme/api/pull/9' "headless fetch landing: the cache carries the fetched PR rows"
 assert_file_contains "$cache_h" '"id": "ship-alpha"' "headless: the cache carries the snapshot's tasks"
 tick_fetched=$(printf '%s\n' "$tick_cache" | grep -o '"fetched_at": "[^"]*"')
 quit_fetched=$(grep -o '"fetched_at": "[^"]*"' "$cache_h")
 tick_saved=$(printf '%s\n' "$tick_cache" | grep -o '"saved_at": "[^"]*"')
 quit_saved=$(grep -o '"saved_at": "[^"]*"' "$cache_h")
-if [ -n "$tick_fetched" ] && [ "$tick_fetched" = "$quit_fetched" ]; then pass; else fail "headless quit: fetched_at stays the tick's ($tick_fetched, then $quit_fetched)"; fi
+if [ -n "$tick_fetched" ] && [ "$tick_fetched" = "$quit_fetched" ]; then pass; else fail "headless quit: fetched_at stays the fetch landing's ($tick_fetched, then $quit_fetched)"; fi
 if [ -n "$quit_saved" ] && [ "$tick_saved" != "$quit_saved" ]; then pass; else fail "headless quit: the cache is written again on quit, saved_at moving on ($tick_saved, then $quit_saved)"; fi
 assert_file_contains "$vs_h" '"pane": "inflight"' "headless quit: the focused pane, In flight where the board starts, is saved"
 assert_file_contains "$vs_h" '"row": "inflight:main:ship-alpha"' "headless quit: the selected row is saved by its hide key"
 if [ -s "$HL/out.log" ]; then fail "headless cache run wrote to the terminal: $(head -c 300 "$HL/out.log")"; else pass; fi
+cp "$cache_h" "$HL/before-ghfail.json"
+rm -f "${FETCH_LOG:?}"
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FAKE_GH_SLEEP=1 FAKE_GH_GRAPHQL_FAIL=1 FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" node "$ROOT/bin/firstmate-tui/index.mjs" --headless --refresh 30 --no-herdr --view-state "$vs_h" --cache "$cache_h" > "$HL/out-ghfail.log" 2>&1 &
+hl_pid=$!
+sleep 0.8
+local_cache=$(cat "$cache_h" 2>/dev/null)
+if [ -n "$local_cache" ] && [ "$local_cache" != "$(cat "$HL/before-ghfail.json")" ]; then pass; else fail "headless failing fetch: the local landing wrote the cache (a clean snapshot over the previous run's clean PR data)"; fi
+assert_file_contains "$cache_h" 'acme/api/pull/9' "headless failing fetch: the previous run's PR rows are still in the cache the local landing wrote"
+sleep 3.2
+if [ "$(cat "$cache_h" 2>/dev/null)" = "$local_cache" ]; then pass; else fail "headless failing fetch: the failed fetch left the cache as the local landing wrote it"; fi
+kill -TERM "$hl_pid" 2>/dev/null
+wait "$hl_pid" 2>/dev/null
+if [ "$(cat "$cache_h" 2>/dev/null)" = "$local_cache" ]; then pass; else fail "headless failing fetch: the quit after a failed fetch wrote nothing"; fi
+if [ "$(grep -c '^gh api graphql ' "$FETCH_LOG" 2>/dev/null)" -ge 4 ]; then pass; else fail "headless failing fetch: the searches ran and failed ($(cat "$FETCH_LOG" 2>/dev/null))"; fi
+if [ -s "$HL/out-ghfail.log" ]; then fail "headless failing fetch run wrote to the terminal: $(head -c 300 "$HL/out-ghfail.log")"; else pass; fi
 FAIL_HOME="$SCRATCH/firstmate-fail"
 mkdir -p "$FAIL_HOME/bin"
 # shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
@@ -3629,7 +3737,7 @@ sleep 3
 kill -TERM "$hl_pid" 2>/dev/null
 wait "$hl_pid" 2>/dev/null
 if grep -q '^snapshot-fail$' "$FETCH_LOG" 2>/dev/null; then pass; else fail "headless failing home: the failing snapshot ran ($(cat "$FETCH_LOG" 2>/dev/null))"; fi
-if cmp -s "$HL/before-fail.json" "$cache_h"; then pass; else fail "headless failing home: a failed refresh (and the quit after it) left the cache untouched"; fi
+if cmp -s "$HL/before-fail.json" "$cache_h"; then pass; else fail "headless failing home: a failed snapshot (and the quit after it) left the cache untouched"; fi
 assert_file_contains "$vs_h" '"row": "inflight:main:ship-alpha"' "headless failing home: the saved selection survives a run that never had data"
 if [ -s "$HL/out-fail.log" ]; then fail "headless failing run wrote to the terminal: $(head -c 300 "$HL/out-fail.log")"; else pass; fi
 
@@ -4345,6 +4453,57 @@ argv=hold decide-vendor --reason Two quotes in the report --until 2027-01-15" "p
   PTY_XDG="$SCRATCH/ident-pty-ident-gh" run_pty_identity ident-gh-warm "" "wait:cached" "sleep:4.5" "absent:resolvingGitHub" "absent:identityunknown" "wait:Bumptheretrybudget" "sleep:0.4" "send:q" exit
   pty_ok ident-gh-warm "pty warm launch: the cached rows stay on screen through the identity resolution"
   assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "pty warm launch: the identity is still resolved once"
+  # The two cycles on a real terminal, against a stand-in whose snapshot answers at once and gains a
+  # task, latecomer, from its second run on, with the fake gh sleeping 4 s before each graphql answer
+  # (one fetch, the four searches and then the lookup, takes 8 s) and --refresh 5. Cold: In flight's
+  # rows are drawn at once while the PR panes spin; at 5 s the second local cycle lands and
+  # latecomer, a failed task that sorts last onto a blank line (every cell new, so the driver sees
+  # the whole id), is drawn while the fetch has 3 s to run and no PR row is on screen yet; the rows
+  # follow when the fetch lands (falsify: await the fetch in the local cycle: latecomer is drawn
+  # with the PR rows at 8 s, and the absent check after it fails). Warm, over the state cache the
+  # cold run wrote on quit: the cached PR rows are on screen from the first frame, their titles gain
+  # (updating), drawn over border cells, when the fetch starts and never give way to the fetch
+  # spinner, and the capped-search note (FM_BOARD_TEST_GH_CAPPED) names the landing (falsify: drop
+  # paneUpdating from paneHeader, or spin a pane that has cached rows).
+  LATE_HOME="$SCRATCH/firstmate-late"
+  mkdir -p "$LATE_HOME/bin"
+  node -e '
+    const fs = require("fs");
+    const [src, dst] = process.argv.slice(1);
+    const snap = JSON.parse(fs.readFileSync(src, "utf8"));
+    const t = JSON.parse(JSON.stringify(snap.tasks.find((x) => x.id === "tmux-task")));
+    t.id = "latecomer";
+    t.project = "/fixture/firstmate/projects/late";
+    t.current_state = { state: "failed", source: "pane", detail: "exit 1", observed_at: "2026-09-16T11:59:48Z", freshness: "fresh" };
+    t.endpoint = { target: "0:fm-latecomer", exists: true, agent_alive: "not_checked", status: "unknown" };
+    t.hints.last_event_text = "failed: exit 1";
+    t.paths.status_log.path = "/fixture/firstmate/state/latecomer.status";
+    t.backlog = { state: "in_flight", title: "Arrives with the second snapshot", repo: "acme/late" };
+    snap.tasks.push(t);
+    fs.writeFileSync(dst, JSON.stringify(snap));
+  ' "$FAKE_HOME/snapshot.json" "$LATE_HOME/snapshot-late.json"
+  # shellcheck disable=SC2016 # the fake expands $FM_BOARD_TEST_FETCH_LOG at run time, not here
+  printf '#!/usr/bin/env bash\necho snapshot >> "$FM_BOARD_TEST_FETCH_LOG"\nif [ -e "%s/ran" ]; then cat "%s"; else touch "%s/ran"; cat "%s"; fi\n' "$LATE_HOME" "$LATE_HOME/snapshot-late.json" "$LATE_HOME" "$FAKE_HOME/snapshot.json" > "$LATE_HOME/bin/fm-fleet-snapshot.sh"
+  cp "$FAKE_HOME/bin/fm-bearings-snapshot.sh" "$LATE_HOME/bin/fm-bearings-snapshot.sh"
+  chmod +x "$LATE_HOME/bin/fm-fleet-snapshot.sh" "$LATE_HOME/bin/fm-bearings-snapshot.sh"
+  run_pty_cycles() { # <name> <state dir> <actions...>: the interactive board with the PR fetch on against the late stand-in and the slowed fake gh, its view state and state cache in <state dir>
+    local name=$1 dir=$2
+    shift 2
+    mkdir -p "$dir"
+    rm -f "${FETCH_LOG:?}"
+    FM_HOME="$LATE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FAKE_GH_SLEEP=4 PATH="$FAKE_BIN:$PATH" \
+      FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" \
+      python3 "$PTY" --term xterm-256color --rows 60 --timeout 20 --capture "$SCRATCH/pty-$name.bin" "$@" -- \
+      "$BOARD" run --no-herdr --refresh 5 --opener-cmd "$FAKE_OPENER" --view-state "$dir/view-state.json" \
+      > "$SCRATCH/pty-$name.out" 2>&1
+  }
+  rm -f "${LATE_HOME:?}/ran"
+  run_pty_cycles cycles-cold "$SCRATCH/pty-cycles" "wait:ship-alpha" "absent:Bumptheretrybudget" "wait:latecomer" "absent:Bumptheretrybudget" "absent:(updating)" "wait:Bumptheretrybudget" "sleep:0.4" "send:q" exit
+  pty_ok cycles-cold "pty two cycles: In flight lands first, the second snapshot repaints it while the fetch runs, and the PR rows follow"
+  assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "pty two cycles: the identity is resolved once"
+  if [ "$(grep -c '^snapshot$' "$FETCH_LOG")" -ge 2 ]; then pass; else fail "pty two cycles: the second snapshot ran while the fetch was out ($(cat "$FETCH_LOG"))"; fi
+  FM_BOARD_TEST_GH_CAPPED=1 run_pty_cycles cycles-warm "$SCRATCH/pty-cycles" "wait:cached" "wait:(updating)" "absent:loadingGitHub" "wait:searchcappedatthe50" "sleep:0.4" "send:q" exit
+  pty_ok cycles-warm "pty two cycles warm: the cached PR rows stay under (updating) until the fetch lands with its note"
 else
   echo "note: the pseudo-terminal section was skipped; it needs python3 on PATH and bin/firstmate-tui/node_modules (npm ci in bin/firstmate-tui)"
 fi

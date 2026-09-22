@@ -105,10 +105,11 @@ belong to later milestones.
   starting a refresh, and a failure showing the command's stderr verbatim in
   red and changing nothing;
   a remote home's hold gets a notice and no prompt;
-  refreshing its own data (`r`: the snapshot, then the live PR fetch
-  unless `--no-prs`; that fetch is the board's own read-only GitHub search
-  through `gh api graphql` in `lib/sources.mjs`: at most four searches per
-  tick, My PRs open and tail by `author:<login>`, Teammates' PRs open and tail by
+  refreshing its own data (`r`: the snapshot, drawn when it lands, then the
+  live PR fetch behind it unless `--no-prs`; that fetch is the board's own
+  read-only GitHub search through `gh api graphql` in `lib/sources.mjs`: at
+  most four searches per tick, My PRs open and tail by `author:<login>`,
+  Teammates' PRs open and tail by
   `review-requested:<login> -author:<login>` over the candidate repositories
   plus the config file's, each `first: 50`, plus one aliased lookup of the
   recorded task PRs the author searches missed; `gh search prs --json` cannot
@@ -310,20 +311,31 @@ belong to later milestones.
   by position, the height priorities name panes by id, and view state is
   keyed by pane id, so a reorder moves the mouse and line-number checks and
   nothing else.
-  The refresh schedule (the snapshot, then the gh calls; the next refresh
-  armed on completion for the last start plus `--refresh`, so a slow refresh
-  is followed at once and never doubled; a tick that lands mid-refresh
-  skipped) is tested by running the app with `--headless` against a stand-in
-  whose snapshot sleeps and stopping it with a signal, so `--headless` must
-  never load `neo-blessed`. The launcher runs node as a child, so that
-  signal goes to the child first (`pkill -P`) and then to the launcher; a
-  signal to the launcher alone leaves the board running and appending to the
-  fetch log for the rest of the suite. The title line's countdown, `refreshing...` and
-  failure label render from a fixture `refresh` block (`index.mjs` documents
-  it) because a one-shot render has no schedule; the panes' loading spinner
-  comes from the same block (`refreshing: true` with no snapshot or `prs`
-  block, `loading_frame` for the glyph), and it counts ticks, never the
-  clock, so keep it that way or one-shot frames stop being deterministic. The Settings page
+  The refresh is two cycles in `lib/app.mjs` (its header): the local cycle
+  (`refresh`: the snapshot and the ledgers, drawn when they land; the next
+  one armed on landing for the last start plus `--refresh`, so a slow
+  snapshot is followed at once and never doubled; a tick that lands
+  mid-snapshot skipped) asks for one GitHub cycle (`fetchCycle`: the
+  identity, then the gh calls, drawn when they return; one in flight at a
+  time, a request meanwhile kept as one follow-up) and never awaits it, so
+  a slow gh holds back nothing local. Both are tested by running the app
+  with `--headless` against a stand-in whose snapshot sleeps and against
+  one whose gh sleeps (`FAKE_GH_SLEEP` in `tests/fake-gh.sh`;
+  `FAKE_GH_GRAPHQL_FAIL` fails the searches), stopping it with a signal
+  and reading the fetch log's order, so `--headless` must never load
+  `neo-blessed`; the pty section drives the same two cycles on a real
+  terminal against a stand-in whose second snapshot adds a row. The
+  launcher runs node as a child, so that signal goes to the child first
+  (`pkill -P`) and then to the launcher; a signal to the launcher alone
+  leaves the board running and appending to the fetch log for the rest of
+  the suite. The title line's countdown, `refreshing...` and failure label
+  and the PR panes' `(updating)` marker render from a fixture `refresh`
+  block (`index.mjs` documents it: `refreshing` is the local cycle,
+  `fetching` the GitHub one) because a one-shot render has no schedule; the
+  panes' loading spinner comes from the same block (`refreshing: true` with
+  no snapshot or `prs` block, `loading_frame` for the glyph), and it counts
+  ticks, never the clock, so keep it that way or one-shot frames stop being
+  deterministic. The Settings page
   is tested with `--install-root` at a fake prefix whose `bin/firstmate-tui.sh` is
   `tests/fake-upgrade.sh` and with `--curl-cmd bash tests/fake-curl.sh` over
   `tests/fixtures/releases/api`; a one-shot render without `--curl-cmd`

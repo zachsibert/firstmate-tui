@@ -5,59 +5,77 @@
 // shares them; this module supplies the I/O: herdr focus, the browser opener,
 // the report viewer, snapshots and the view-state file. The terminal is reached only through the adapter's screen contract.
 //
-// Cadence: one refresh runs the fleet snapshot and then, unless --no-prs, the
-// live GitHub PR fetch (at most four searches through gh api graphql for the
-// two PR panes, all at once, then one lookup of the recorded PRs the author
-// search missed; the firstmate script when gh is not on PATH or when the
-// config file's prs.source asks for it, which the Settings page's PR source
-// line reports after every fetch), applied in one
-// frame update. The next refresh is due --refresh seconds (default 30)
-// after the last one started: a single timer, armed when a refresh completes
-// (armRefreshTimer), and the title line counts down to it once a second. A
-// herdr event touching a known task pane brings a refresh forward, debounced
-// to one start per 10 s, and r starts one at once; both reset the countdown.
-// Never two refreshes at once: a tick or an event that lands while one is
-// still running is skipped, not queued, and the panes keep the data they
-// have; r during a refresh queues exactly one follow-up so the key press is
-// honored. A failed snapshot or PR fetch keeps the previous data, marks that
-// pane's title (stale) (each PR pane on its own: My PRs keeps its rows when
-// only the To review searches failed), turns the title line's label into
-// `refresh failed Ns ago, retrying in Ns` until a later refresh is clean, and
-// is named in the footer once, as is a fetch note (the script fallback, a
-// search that was capped). Herdr pushes redraw the frame immediately because
-// the agents map is already updated. With --no-prs, r says why the PR panes
-// did not change.
+// Cadence: two cycles. The local cycle (refresh) runs the fleet snapshot and
+// the ledgers and draws the frame the moment they land: the four fleet panes
+// never wait for GitHub. It is what the timer, a herdr event, r and a hold
+// command start. The next local cycle is due --refresh seconds (default 30)
+// after the last one started: a single timer, armed when the local cycle
+// lands (armRefreshTimer), and the title line counts down to it once a
+// second, reading `refreshing…` while the cycle runs. A herdr event touching
+// a known task pane brings a cycle forward, debounced to one start per 10 s,
+// and r starts one at once; both reset the countdown. Never two local cycles
+// at once: a tick or an event that lands while one is still running is
+// skipped, not queued, and the panes keep the data they have; r during one
+// queues exactly one follow-up so the key press is honored.
+// The GitHub cycle (fetchCycle) is what a landed local cycle asks for and
+// never awaits: the identity when it is not known yet, then, unless
+// --no-prs, the live PR fetch over the snapshot just landed (at most four
+// searches through gh api graphql for the two PR panes, all at once, then
+// one lookup of the recorded PRs the author search missed; the firstmate
+// script when gh is not on PATH or when the config file's prs.source asks
+// for it, which the Settings page's PR source line reports after every
+// fetch), folded into the PR facts and drawn when it returns. One GitHub
+// cycle runs at a time: a request made while one is in flight (a local cycle
+// landing, r) is kept as one follow-up, any number collapsing into it, and
+// runs when the current fetch returns, so the newest snapshot's repositories
+// are searched. While it runs each PR pane that has rows or an earlier
+// result to show keeps them under ` (updating)` in its title, and a pane
+// whose fetch never landed spins; a slow or failed gh call holds nothing
+// else back, not the fleet panes, the countdown or the next local cycle. A
+// failed snapshot or PR fetch keeps the previous data, marks that pane's
+// title (stale) (each PR pane on its own: My PRs keeps its rows when only
+// the To review searches failed), turns the title line's label into
+// `refresh failed Ns ago, retrying in Ns` (landed: the snapshot's result
+// and the last fetch's, read again whenever either cycle lands) until both
+// are clean, and is named in the footer once, as is a fetch note (the
+// script fallback, a search that was capped). Herdr pushes redraw the frame
+// immediately because the agents map is already updated. With --no-prs, r
+// says why the PR panes did not change.
 //
 // Identity and config: the config file (lib/config.mjs) is read once at
 // startup, written from the example when absent, and the GitHub login the two
-// PR panes are built around is resolved on the first refresh (the file, then
-// `gh api user`, then git; lib/identity.mjs) and cached for the session; a
-// manual r resolves it again only while it is unknown. Until the rungs have
+// PR panes are built around is resolved by the first GitHub cycle (the file,
+// then `gh api user`, then git; lib/identity.mjs) and cached for the session;
+// a manual r resolves it again only while it is unknown. Until the rungs have
 // answered the identity is null (pending): the two PR panes spin on it the
 // way the other four spin on the snapshot, and r sets it back to null while
 // it asks again, so the identity row shows only for a resolved unknown login.
-// The Settings page shows both.
+// The Settings page shows both. Under --no-prs the cycle resolves the
+// identity from the file and git alone and fetches nothing.
 //
 // Cold start: until the first snapshot and the first PR fetch land, the panes
 // have nothing to show, so each draws a spinner line naming what it waits on
-// (lib/model.mjs paneLoading). The spinner runs on its own 10 Hz timer
-// (syncSpinner) that starts when a rebuilt model has a loading pane and stops
-// when none is left, so the board redraws ten times a second only during
-// those few seconds; the frame index is a counter, never the clock.
+// (lib/model.mjs paneLoading; a PR pane spins while either cycle is in
+// flight until its first fetch lands). The spinner runs on its own 10 Hz
+// timer (syncSpinner) that starts when a rebuilt model has a loading pane and
+// stops when none is left, so the board redraws ten times a second only
+// during those few seconds; the frame index is a counter, never the clock.
 //
-// State cache (lib/cache.mjs): after every refresh that landed cleanly, and on
-// quit, the facts just rendered that came from outside (the snapshot, the
-// ledgers, the PR data with its identity, the herdr agents) are written to
-// state-cache.json beside the view-state file. At launch a cache younger than
-// --cache-max-age (default an hour) is drawn at once, each pane's title marked
-// `(cached 12m ago)`, the title line reading its refreshing label while the
-// launch refresh runs exactly as it would without a cache, never skipped or delayed;
-// the snapshot landing clears the four fleet panes' markers and each PR pane's
-// fetch landing clears its own, so a pane whose live fetch failed keeps its
-// cached rows, its marker and the (stale) word. The cached herdr agents stand
-// in for the HERDR column until the herdr bootstrap answers. A failed refresh
-// never overwrites the file; --no-cache skips the read only; a damaged or
-// foreign cache is named in the footer once and cold-starts the board.
+// State cache (lib/cache.mjs): after every cycle that landed cleanly while
+// the other source's last result was clean too, and on quit unless the last
+// landing failed, the facts just rendered that came from outside (the
+// snapshot, the ledgers, the PR data with its identity, the herdr agents) are
+// written to state-cache.json beside the view-state file (landed). At launch
+// a cache younger than --cache-max-age (default an hour) is drawn at once,
+// each pane's title marked `(cached 12m ago)`, the title line reading its
+// refreshing label while the launch cycle runs exactly as it would without a
+// cache, never skipped or delayed; the snapshot landing clears the four fleet
+// panes' markers and each PR pane's fetch landing clears its own, so a pane
+// whose live fetch failed keeps its cached rows, its marker and the (stale)
+// word. The cached herdr agents stand in for the HERDR column until the herdr
+// bootstrap answers. A failed snapshot or fetch never overwrites the file;
+// --no-cache skips the read only; a damaged or foreign cache is named in the
+// footer once and cold-starts the board.
 //
 // View restore (lib/viewstate.mjs): the focused pane, the selected row (by
 // its hide key, else its index), the expanded In flight groups and the scroll
@@ -65,7 +83,7 @@
 // the last key or click (schedulePersist) and on quit, and put back at launch
 // as soon as the saved pane has its rows (applyPendingView), cache or not.
 //
-// --headless runs this schedule with no terminal (tests/fm-board.test.sh does,
+// --headless runs both cycles with no terminal (tests/fm-board.test.sh does,
 // against a stand-in home, and stops it with a signal): nothing is drawn, no
 // key is read and neo-blessed is never loaded, so the suite needs only Node.
 //
@@ -204,12 +222,14 @@ export async function runApp(opts) {
       settings: initialSettings({ install: readInstall(opts.installRoot || defaultInstallRoot()), flags: settingsFlags(opts), config: settingsConfig(cfg), prSource: { enabled: Boolean(opts.prs), ...plannedPrSource(cfg.config, process.env) } }),
     },
     noticeStrongUntil: 0, // epoch ms until which the shown notice must not be painted over by a weak one
-    refreshing: false,
-    refreshPending: false,
+    refreshing: false, // the local cycle is running (refresh)
+    refreshPending: false, // r pressed during a local cycle: one follow-up
+    fetching: false, // the GitHub cycle is in flight (fetchCycle)
+    fetchPending: null, // a GitHub cycle asked for while one runs: { manual }, the one follow-up
     lastSnapshotStart: 0,
-    refreshTimer: null, // the one timer to the next refresh (armRefreshTimer)
+    refreshTimer: null, // the one timer to the next local cycle (armRefreshTimer)
     nextRefreshAt: null, // epoch ms that timer is due, for the title line's countdown
-    lastFailure: null, // { at: epoch seconds, text } of the last failed refresh, until one succeeds
+    lastFailure: null, // { at: epoch seconds, text } of the last failure either cycle landed with, until both are clean (landed)
     loadingFrame: 0, // the spinner's frame counter, advanced by spinnerTimer while a pane is loading
     spinnerTimer: null,
     debounceTimer: null,
@@ -235,6 +255,7 @@ export async function runApp(opts) {
     refresh: {
       nextAt: state.nextRefreshAt === null ? null : Math.floor(state.nextRefreshAt / 1000),
       refreshing: state.refreshing,
+      fetching: state.fetching,
       failedAt: state.lastFailure ? state.lastFailure.at : null,
       failed: state.lastFailure ? state.lastFailure.text : null,
       loadingFrame: state.loadingFrame,
@@ -382,12 +403,14 @@ export async function runApp(opts) {
     state.persistTimer.unref?.();
   };
 
-  // The state cache, written after a clean refresh and on quit: the facts
+  // The state cache, written after a clean landing and on quit: the facts
   // the board just rendered that came from outside, stamped with the time
-  // they landed (fetchedAt), never with the write time. A write that fails is
-  // named once per distinct error.
+  // they landed (fetchedAt), never with the write time. Nothing is written
+  // while the last landing failed, so a failed snapshot or fetch never
+  // reaches the file, not even through a quit. A write that fails is named
+  // once per distinct error.
   const writeCache = () => {
-    if (!cachePath.path || !state.fetchedAt || !state.snapshot) return;
+    if (!cachePath.path || !state.fetchedAt || !state.snapshot || state.lastFailure) return;
     const agents = herdr ? (state.cachedAgents && !state.herdrLive ? state.cachedAgents : herdr.agents) : {};
     const err = saveStateCache(cachePath.path, { fmHome: state.fmHome, snapshot: state.snapshot, snapshotAt: state.snapshotAt, ledgers: state.ledgers, prs: state.prs, identity: state.identity, herdr: { agents } }, { fetchedAt: state.fetchedAt });
     if (err && err !== state.cacheErrorShown) {
@@ -396,12 +419,12 @@ export async function runApp(opts) {
     }
   };
 
-  // The one timer to the next refresh, armed when a refresh completes for that
-  // refresh's start plus --refresh: the title line counts down to exactly this
-  // moment. A refresh that took longer than the cadence leaves it already due,
-  // so the next one starts at once; nothing is queued and nothing doubles.
-  // A manual r or a herdr event starts a refresh of its own, which clears the
-  // pending timer and re-arms it on completion: that is what resets the
+  // The one timer to the next local cycle, armed when one lands for its start
+  // plus --refresh: the title line counts down to exactly this moment. A
+  // snapshot that took longer than the cadence leaves it already due, so the
+  // next cycle starts at once; nothing is queued and nothing doubles. A
+  // manual r or a herdr event starts a cycle of its own, which clears the
+  // pending timer and re-arms it on landing: that is what resets the
   // countdown. Headless, this timer is what keeps the process alive.
   const armRefreshTimer = () => {
     if (state.refreshTimer) clearTimeout(state.refreshTimer);
@@ -413,12 +436,25 @@ export async function runApp(opts) {
     if (!opts.headless) state.refreshTimer.unref?.();
   };
 
-  // One refresh: the snapshot, then the PR fetch against the repositories that
-  // snapshot names, landing in one frame update. While one is running, a timer
-  // tick or a herdr event is skipped (the next one catches up) and only a key
-  // press queues a follow-up. The title line reads `refreshing…` meanwhile,
-  // then either the countdown or, when the snapshot or the fetch failed,
-  // `refresh failed Ns ago, retrying in Ns` until a later refresh is clean.
+  // What either cycle does when it lands: the title line's failure label is
+  // read again from the snapshot's result and the last fetch's, and the cache
+  // is written when both are clean (what is on screen is worth drawing first
+  // next time). The caller draws.
+  const landed = () => {
+    const failure = state.snapshotError ? `snapshot: ${state.snapshotError}` : state.prs.error ? `PR fetch: ${state.prs.error}` : null;
+    state.lastFailure = failure ? { at: Math.floor(Date.now() / 1000), text: failure } : null;
+    if (!failure) {
+      state.fetchedAt = Math.floor(Date.now() / 1000);
+      writeCache();
+    }
+  };
+
+  // The local cycle: the snapshot and the ledgers, drawn as soon as they
+  // land, then one GitHub cycle asked for and not awaited. While one is
+  // running, a timer tick or a herdr event is skipped (the next one catches
+  // up) and only a key press queues a follow-up. The title line reads
+  // `refreshing…` meanwhile, then the countdown or, while the snapshot or the
+  // last fetch failed, `refresh failed Ns ago, retrying in Ns`.
   const refresh = async (why) => {
     const manual = why === 'manual';
     if (state.refreshing) {
@@ -433,8 +469,7 @@ export async function runApp(opts) {
     }
     state.nextRefreshAt = state.lastSnapshotStart + opts.refresh * 1000;
     notice(`refreshing (${why})…`, false, 60000, { weak: true });
-    const timeoutMs = opts.snapshotTimeout * 1000;
-    const snap = await runSnapshot(state.fmHome, { timeoutMs });
+    const snap = await runSnapshot(state.fmHome, { timeoutMs: opts.snapshotTimeout * 1000 });
     if (snap.value && !snap.error) {
       state.snapshot = snap.value;
       state.snapshotAt = Math.floor(Date.now() / 1000);
@@ -448,13 +483,58 @@ export async function runApp(opts) {
     // longer lists as live are forgotten (the header's clearing rule); a
     // failed snapshot keeps the previous data and every entry with it.
     if (!state.snapshotError && state.view.dismissed.size) pruneDismissed(state.view.dismissed, facts());
+    if (herdr) herdr.setPanes(knownPaneIds(state.snapshot, state.ledgers));
+    state.refreshing = false;
+    armRefreshTimer();
+    landed();
+    // The GitHub cycle is asked for before this frame is drawn, so a PR pane
+    // waiting on its first fetch spins on without a frame of empty text
+    // between the two cycles.
+    requestFetch(manual);
+    draw();
+    if (state.snapshotError) notice(`snapshot: ${state.snapshotError}`, true, 30000);
+    else {
+      const errs = state.ledgers.filter((l) => l.error && !l.cached).map((l) => `${l.id}: ${l.error}`);
+      if (errs.length) notice(`ledger ${errs.join('; ')}`, true, 15000);
+      else if (manual && !state.prs.enabled) notice('PR checks off: start without --no-prs', false, 8000);
+      else notice('', false, 1, { weak: true });
+    }
+    if (state.refreshPending) {
+      state.refreshPending = false;
+      scheduleRefresh('queued');
+    }
+  };
+
+  // Whether the GitHub cycle has an identity to resolve: none yet this
+  // session, or r asking again while it is unknown.
+  const identityWanted = (manual) => !state.identity || (manual && !identityKnown(state.identity));
+
+  // One GitHub cycle at a time: a request while one is in flight is kept as
+  // the one follow-up (manual if any of the collapsed requests was) and runs
+  // when the current fetch returns. Under --no-prs there is nothing to fetch,
+  // so a request runs only while the identity is wanted.
+  const requestFetch = (manual) => {
+    if (!state.prs.enabled && !identityWanted(manual)) return;
+    if (state.fetching) {
+      state.fetchPending = { manual: manual || Boolean(state.fetchPending && state.fetchPending.manual) };
+      return;
+    }
+    fetchCycle(manual);
+  };
+
+  // The GitHub cycle: the identity, then the PR fetch over the snapshot the
+  // local cycle last landed, folded into the PR facts when it returns; the
+  // fleet panes are never held for it.
+  const fetchCycle = async (manual) => {
+    state.fetching = true;
+    const timeoutMs = opts.snapshotTimeout * 1000;
     // The identity: once per session, again on r only while it is unknown.
     // Pending (null) while the rungs are asked, so the PR panes spin on it
     // instead of keeping the identity row; the draw starts the spinner. PR
     // rows restored from the state cache are drawn around the login they were
     // fetched for, and keep it (and their cached marker) until the live answer
     // replaces it: pending never blanks a pane that has a login to show.
-    if (!state.identity || (manual && !identityKnown(state.identity))) {
+    if (identityWanted(manual)) {
       state.identity = null;
       state.view.settings.identity = null;
       if (!identityKnown(state.prs.identity)) state.prs = { ...state.prs, identity: null };
@@ -483,35 +563,23 @@ export async function runApp(opts) {
       } else state.prsErrorShown = null;
       if (prs.note && prs.note !== state.prsNoteShown) prsNote = prs.note;
     }
-    if (herdr) herdr.setPanes(knownPaneIds(state.snapshot, state.ledgers));
-    state.refreshing = false;
-    const failure = state.snapshotError ? `snapshot: ${state.snapshotError}` : state.prs.error ? `PR fetch: ${state.prs.error}` : null;
-    state.lastFailure = failure ? { at: Math.floor(Date.now() / 1000), text: failure } : null;
-    armRefreshTimer();
-    if (!failure) {
-      // A clean refresh: what is on screen is worth drawing first next time.
-      state.fetchedAt = Math.floor(Date.now() / 1000);
-      writeCache();
+    state.fetching = false;
+    if (prs) landed();
+    draw();
+    if (prsFailure) {
+      state.prsErrorShown = prsFailure;
+      notice(`PR fetch: ${prsFailure}`, true, 15000);
+    } else if (prsNote) {
+      state.prsNoteShown = prsNote;
+      notice(prsNote, false, 15000);
+    } else if (state.prs.enabled && !identityKnown(state.identity) && !state.identityShown) {
+      state.identityShown = true;
+      notice(`GitHub identity unknown (${state.identity.reason}); set identity.github_login in ${cfg.path || 'the config file'} or run gh auth login`, true, 30000);
     }
-    if (state.snapshotError) notice(`snapshot: ${state.snapshotError}`, true, 30000);
-    else {
-      const errs = state.ledgers.filter((l) => l.error && !l.cached).map((l) => `${l.id}: ${l.error}`);
-      if (errs.length) notice(`ledger ${errs.join('; ')}`, true, 15000);
-      else if (prsFailure) {
-        state.prsErrorShown = prsFailure;
-        notice(`PR fetch: ${prsFailure}`, true, 15000);
-      } else if (prsNote) {
-        state.prsNoteShown = prsNote;
-        notice(prsNote, false, 15000);
-      } else if (manual && !state.prs.enabled) notice('PR checks off: start without --no-prs', false, 8000);
-      else if (state.prs.enabled && !identityKnown(state.identity) && !state.identityShown) {
-        state.identityShown = true;
-        notice(`GitHub identity unknown (${state.identity.reason}); set identity.github_login in ${cfg.path || 'the config file'} or run gh auth login`, true, 30000);
-      } else notice('', false, 1, { weak: true });
-    }
-    if (state.refreshPending) {
-      state.refreshPending = false;
-      scheduleRefresh('queued');
+    if (state.fetchPending) {
+      const next = state.fetchPending;
+      state.fetchPending = null;
+      fetchCycle(next.manual);
     }
   };
 
