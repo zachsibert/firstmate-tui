@@ -145,6 +145,17 @@
 #                   its two home paths are placeholders the suite rewrites to
 #                   scratch homes holding the files, a fake fm-fleet-snapshot.sh
 #                   and tests/fake-captain-hold.sh (the hold section below)
+#   search.json     160x44, the f key: a delegate home (delegate-a) whose
+#                   two live captain-hold decisions, portal-mdm-gap-analysis
+#                   and portal-ingest-expired-token-scout, are Captain's
+#                   Call rows drawn from its ledger, and whose two live
+#                   children sit behind a collapsed Underway group; one
+#                   queued main item, Charted Next's row; twenty-three
+#                   Recently Landed rows (merges, reported scouts, a hold's
+#                   report and the delegate's two) so the pane caps with +8
+#                   more and its oldest, ship-17 and the reported
+#                   archive-owner-scout, sit below the fold; the test hides
+#                   legacy-import-scout through a view-state file
 #   bearings-prs.json  not a frame: what the stand-in home's
 #                   fm-bearings-snapshot.sh prints, three rows in the script's
 #                   shape, one carrying the head commit's contexts (its _note
@@ -532,10 +543,10 @@ assert_row "$frame" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' "po
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
 assert_row "$frame" '^│ STATE +WHY +ID +WHAT +REPO +HOME +FILED │$' "Charted Next heads WHY and FILED in the KEY and AGE slots (falsify: drop AGE_LABEL or the charted labels in lib/layout.mjs)"
 # Captain's Call's first row, where the board starts, is scout-beta's blocked row: it carries a hold
-# card and a pane, so the footer names enter card and f focus in place of enter open/focus/view and,
+# card and a pane, so the footer names enter card and F focus in place of enter open/focus/view and,
 # with no captain hold on that task, no d or D (falsify: drop . settings from FOOTER_KEYS, or the card branch from boardHints).
-assert_row "$(render populated.json)" '^ j/k move  tab pane  enter card  f focus  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group)"
-assert_row "$(render populated.json --keys "tab,tab")" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a PR row (falsify: drop . settings from FOOTER_KEYS)"
+assert_row "$(render populated.json)" '^ j/k move  tab pane  enter card  F focus  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group)"
+assert_row "$(render populated.json --keys "tab,tab")" '^ j/k move  tab pane  enter open/focus/view  f search  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a PR row (falsify: drop . settings or f search from FOOTER_KEYS)"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs). The board starts
 # on Captain's Call's first row, so an Underway row is one tab away; its group is the third row.
@@ -613,8 +624,8 @@ assert_row "$frame_med" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "medium: My P
 assert_no_row "$frame_med" ' TITLE +BASE' "medium: no BASE column"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$(render populated.json --cols 90 --rows 30)" '^ enter card  f focus  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer (the card form: the board starts on scout-beta's card row with a pane)"
-assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab,tab")" '^ j/k  tab  enter  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer on a PR row"
+assert_row "$(render populated.json --cols 90 --rows 30)" '^ enter card  F focus  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer (the card form: the board starts on scout-beta's card row with a pane)"
+assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab,tab")" '^ j/k  tab  enter  f search  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer on a PR row"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -844,11 +855,12 @@ assert_contains "$frame_v" "Recently Landed row without a PR: view its report (g
 assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
 assert_contains "$frame_v" "1 - 6        show or hide a pane" "help overlay documents 1-5"
 assert_contains "$frame_v" "r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)" "help overlay documents r"
-# The board never moves the firstmate pane; the captain splits panes himself, and f focuses the
+# The board never moves the firstmate pane; the captain splits panes himself, and F focuses the
 # selected row's pane instead (falsify: bring a pane-move line back into HELP_LINES, or drop the f, d
 # or D lines).
 assert_not_contains "$frame_v" "firstmate pane" "help overlay does not mention the firstmate pane"
-assert_contains "$frame_v" "f            focus the selected row's herdr pane, in any pane" "help overlay documents f as a focus"
+assert_contains "$frame_v" "F            focus the selected row's herdr pane, in any pane" "help overlay documents F as the focus (falsify: leave the f line for the focus)"
+assert_contains "$frame_v" "f            search all panes: type loosely (any order, any case, letters apart), enter jumps, esc closes" "help overlay documents f as the search (falsify: drop the search line from HELP_LINES)"
 assert_contains "$frame_v" "d            discard the selected hold: asks y first, then runs fm-captain-hold.sh answer" "help overlay documents d"
 assert_contains "$frame_v" "D            defer the selected hold to a date (default today + 14 days): fm-captain-hold.sh hold" "help overlay documents D"
 assert_contains "$frame_v" "show its card in the viewer" "help overlay documents enter on a held row"
@@ -869,8 +881,8 @@ assert_no_row "$tags_l" '\{red-fg\}decide.*ship-alpha' "Captain's Call row of th
 # Enter on a lost row: a footer notice, never a focus (falsify: drop the lost check in focusProblem).
 frame_k=$(render lost.json --keys "tab,j,enter") || fail "lost enter inflight: render exited non-zero"
 assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "enter on the lost Underway row says pane lost"
-frame_k=$(render lost.json --keys "j,f") || fail "lost f needs: render exited non-zero"
-assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "f on the lost Captain's Call row says pane lost (enter there shows the hold card since 0.6.0)"
+frame_k=$(render lost.json --keys "j,F") || fail "lost F needs: render exited non-zero"
+assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "F on the lost Captain's Call row says pane lost (enter there shows the hold card since 0.6.0)"
 # Disconnected herdr: absence is unproved, so the cell reads unknown in grey and nothing is red (falsify: drop
 # the unknown branch in herdrColumn, or the grey style in rowSegments).
 frame_d=$(render lost-disconnected.json) || fail "disconnected: render exited non-zero"
@@ -1145,12 +1157,12 @@ assert_no_row "$frame_h" '^│ paused +[^│]*held-worker ' "holds: the paused w
 assert_row "$frame_h" '^│ dated +until 10-01 +held-worker +Move the cache to the new vendor · Waiting for the vendor contract before the cache lands +acme/api +main +09-09 │$' "holds: the dated hold is Charted Next's row, WHY its until date, FILED its since date"
 assert_row "$frame_h" '^│ paused +idle +!child-held +Child held · waiting on the captain +acme/etl +delegate +- │$' "holds: the delegate's one worker, held for the captain, draws directly with the ! marker"
 assert_row "$frame_h" '^│ answered +09-14 +landed-hold +Rename the widget table +acme/widgets +main +2d │$' "holds: the finished hold lists in Recently Landed as usual"
-assert_row "$(render_hold "k")" '^ j/k move  tab pane  enter card  f focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
+assert_row "$(render_hold "k")" '^ j/k move  tab pane  enter card  F focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
 assert_row "$(render_hold "j")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
 # held-worker is Charted Next's first row, three tabs away (Underway, My PRs, then Teammates' PRs is empty).
 assert_row "$(render_hold "tab,tab,tab")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the dated hold in Charted Next has the card and both actions, no pane (a hold row is built from the backlog record)"
-assert_row "$(render_hold "tab,j")" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "holds footer: the held worker in Underway has the card, the focus and both actions"
-assert_row "$(render_hold "j,j,j,j,j,j")" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
+assert_row "$(render_hold "tab,j")" '^ j/k move  tab pane  enter card  F focus  d discard  D defer  x hide ' "holds footer: the held worker in Underway has the card, the focus and both actions"
+assert_row "$(render_hold "j,j,j,j,j,j")" '^ j/k move  tab pane  enter open/focus/view  f search  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
 assert_row "$(render_hold "tab,tab,tab,tab,j")" '^ j/k move  tab pane  enter card  x hide ' "holds footer: the finished hold in Recently Landed has its card, no pane and nothing to act on"
 assert_widths "$frame_h" 160 "holds frame lines are 160 columns"
 
@@ -1271,14 +1283,14 @@ assert_not_viewed "enter on the review row runs no viewer"
 frame_h=$(render_hold "tab,tab,tab,tab,j,j,enter") || fail "holds report enter: render exited non-zero"
 assert_viewed "$HOLD_HOME/data/scout-x/report.md" "enter on the report row of Recently Landed views its report"
 assert_no_hold "neither enter runs a hold command"
-# f (falsify: drop the f case from keyAction).
-frame_h=$(render_hold "k,f") || fail "holds f: render exited non-zero"
-assert_contains "$frame_h" "herdr is off (--no-herdr); cannot focus" "f on the decision row asks for its pane, refused under --no-herdr"
-frame_h=$(fake_herdr_env "$BOARD" --render-once --fixture "$HOLD_FIX" --keys "f") || fail "holds f herdr: render exited non-zero"
-assert_contains "$frame_h" "would focus w1A:p1 (decide-task); --render-once never runs herdr agent focus" "f on the decision row focuses its worker's pane through the fixture overlay"
-if [ -e "$HERDR_LOG" ]; then fail "holds f: a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
-frame_h=$(render_hold "j,f") || fail "holds f hold row: render exited non-zero"
-assert_contains "$frame_h" "main-hold: no herdr pane to focus" "f on a hold row without a pane says so"
+# F (falsify: drop the F case from keyAction).
+frame_h=$(render_hold "k,F") || fail "holds F: render exited non-zero"
+assert_contains "$frame_h" "herdr is off (--no-herdr); cannot focus" "F on the decision row asks for its pane, refused under --no-herdr"
+frame_h=$(fake_herdr_env "$BOARD" --render-once --fixture "$HOLD_FIX" --keys "F") || fail "holds F herdr: render exited non-zero"
+assert_contains "$frame_h" "would focus w1A:p1 (decide-task); --render-once never runs herdr agent focus" "F on the decision row focuses its worker's pane through the fixture overlay"
+if [ -e "$HERDR_LOG" ]; then fail "holds F: a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
+frame_h=$(render_hold "j,F") || fail "holds F hold row: render exited non-zero"
+assert_contains "$frame_h" "main-hold: no herdr pane to focus" "F on a hold row without a pane says so"
 
 # d: the prompt, the confirmation, the cancel paths and the refusals (falsify: drop the prompt branch
 # from handleKey, let x act while the prompt is up, run the command before y, or drop holdActionProblem).
@@ -1576,7 +1588,7 @@ assert_lines "$frame_ch" 60 "charted frame is 60 lines"
 # Captain's Call. The two PR panes are empty here, so two tabs reach the pane (falsify: drop the
 # charted case from keyAction, or mainCard from chartedRow's fields).
 frame_ch=$(render charted.json --keys "tab,tab") || fail "charted footer warning: render exited non-zero"
-assert_row "$frame_ch" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "charted: a warning row keeps the standard hints"
+assert_row "$frame_ch" '^ j/k move  tab pane  enter open/focus/view  f search  l/h expand ' "charted: a warning row keeps the standard hints"
 frame_ch=$(render charted.json --keys "tab,tab,enter") || fail "charted enter warning: render exited non-zero"
 assert_contains "$frame_ch" "main inventory: a warning row; nothing to open" "charted: enter on a warning is a plain notice"
 frame_ch=$(render charted.json --keys "tab,tab,d") || fail "charted d warning: render exited non-zero"
@@ -1873,7 +1885,7 @@ assert_not_contains "$frame_p" "[6] Recently Landed" "list mode: the hidden pane
 assert_contains "$frame_p" "panes hidden: 6" "list mode: the title lists the hidden pane"
 assert_widths "$frame_p" 70 "list mode with a hidden pane: lines are 70 columns"
 
-# ---------------------------------------------------------- o is a no-op, f focuses
+# ---------------------------------------------------------- o is a no-op, F focuses
 # o used to open the selected row's PR in any pane; enter does that now, so
 # the key does nothing, not even a notice (falsify: give 'o' a case in keyAction).
 frame_o=$(render_open populated.json "tab,o") || fail "keys o: render exited non-zero"
@@ -1882,22 +1894,213 @@ frame_o=$(render populated.json --keys "o") || fail "keys o plain: render exited
 if [ "$frame_o" = "$frame" ]; then pass; else fail "o changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_o") | head -n 5)"; fi
 assert_not_contains "$frame_o" "no PR URL" "o leaves no PR notice"
 assert_no_row "$frame" '^ j/k move .* o open' "footer offers no o key"
-# f used to move the firstmate pane beside the board; the captain splits panes himself, so the key
-# now focuses the selected row's herdr pane in any pane and never moves one (falsify: bring the pane
-# move back, drop the f case from keyAction, or drop `any` from focusProblem). scout-beta, the default
-# selection, has a pane: under --no-herdr the focus is refused with the herdr-off words, with the
-# fixture's herdr overlay it is reported as it would run; a row without a pane is told so.
-frame_f=$(render populated.json --keys "f") || fail "keys f: render exited non-zero"
-assert_contains "$frame_f" "herdr is off (--no-herdr); cannot focus" "f on a Captain's Call row with a pane asks for the focus, refused under --no-herdr"
-assert_not_contains "$frame_f" "firstmate pane" "f leaves no firstmate-pane notice"
-frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "j,f") || fail "keys f herdr: render exited non-zero"
-assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "f on a Captain's Call decision row focuses its worker's pane, the pane rule of enter skipped"
+# f used to move the firstmate pane beside the board; the captain splits panes himself, so since 0.6.0
+# the focus key focuses the selected row's herdr pane in any pane and never moves one, and since the
+# search took f the focus is F, the same letter shifted (falsify: bring the pane move back, drop the F
+# case from keyAction, or drop `any` from focusProblem). scout-beta, the default selection, has a pane:
+# under --no-herdr the focus is refused with the herdr-off words, with the fixture's herdr overlay it is
+# reported as it would run; a row without a pane is told so.
+frame_f=$(render populated.json --keys "F") || fail "keys F: render exited non-zero"
+assert_contains "$frame_f" "herdr is off (--no-herdr); cannot focus" "F on a Captain's Call row with a pane asks for the focus, refused under --no-herdr"
+assert_not_contains "$frame_f" "firstmate pane" "F leaves no firstmate-pane notice"
+frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "j,F") || fail "keys F herdr: render exited non-zero"
+assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "F on a Captain's Call decision row focuses its worker's pane, the pane rule of enter skipped"
 if [ -e "$HERDR_LOG" ]; then fail "a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
-frame_f=$(render populated.json --keys "j,j,j,f") || fail "keys f no pane: render exited non-zero"
-assert_contains "$frame_f" "decide-vendor: no herdr pane to focus" "f on a hold row, which has no pane, says so"
-frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "tab,f") || fail "keys f underway herdr: render exited non-zero"
-assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "f on an Underway worker focuses its pane too"
+frame_f=$(render populated.json --keys "j,j,j,F") || fail "keys F no pane: render exited non-zero"
+assert_contains "$frame_f" "decide-vendor: no herdr pane to focus" "F on a hold row, which has no pane, says so"
+frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "tab,F") || fail "keys F underway herdr: render exited non-zero"
+assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "F on an Underway worker focuses its pane too"
+# f no longer focuses: on the same row it opens the search prompt and the frame is the results list
+# (falsify: give f the focus case back).
+frame_f=$(render populated.json --keys "f") || fail "keys f search: render exited non-zero"
+assert_not_contains "$frame_f" "cannot focus" "f asks for no focus"
+assert_row "$frame_f" '^ Search:  \([0-9]+ matches\) +$' "f opens the search prompt with an empty query"
 if grep -Fq -- "-firstmate" "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
+
+# ------------------------------------------------------------------ search (f)
+# f opens a search over every pane at once (lib/search.mjs, the results view in lib/render.mjs
+# renderSearch, the prompt in lib/card.mjs). The matcher first, through its pure functions: a token
+# is a subsequence of the text, and among matches a contiguous run beats letters scattered over word
+# starts, a run at a word start beats one inside a word, a hit in the id-and-title head beats the same
+# hit in a path, the tokens may come in any order, case never matters, a token that is no subsequence
+# fails the row and an empty query matches everything at 0 (falsify: drop the CONTIGUOUS bonus, the
+# wordStart bonus, the head bonus, the lower-casing, or the null return from tokenScore). The checks
+# below read pane titles and ids from lib/layout.mjs PANES rather than spelling them, so a retitled
+# or reordered pane moves nothing here.
+pane_title() { # <pane id>: its title as PANES spells it
+  node --input-type=module -e "import { PANES } from '$ROOT/bin/firstmate-tui/lib/layout.mjs'; process.stdout.write(PANES.find((p) => p.id === process.argv[1]).title);" "$1"
+}
+T_NEEDS=$(pane_title needs)
+T_INFLIGHT=$(pane_title inflight)
+T_CHARTED=$(pane_title charted)
+T_LANDED=$(pane_title landed)
+ALL_PANE_IDS=$(node --input-type=module -e "import { PANES } from '$ROOT/bin/firstmate-tui/lib/layout.mjs'; process.stdout.write(JSON.stringify(PANES.map((p) => p.id)));")
+search_rules=$(node --input-type=module -e "
+  import { matchScore, rankRows, searchTextOf } from '$ROOT/bin/firstmate-tui/lib/search.mjs';
+  const gt = (a, b) => Number.isFinite(a) && Number.isFinite(b) && a > b;
+  const out = {
+    contiguous: gt(matchScore('gap', 'the-gap-x'), matchScore('gap', 'g-a-p')),
+    midWordRun: gt(matchScore('gap', 'xxgapx'), matchScore('gap', 'g-a-p')),
+    wordStart: gt(matchScore('gap', 'x-gap'), matchScore('gap', 'xxgapx')),
+    head: gt(matchScore('gap', 'gap widgets/gap', { head: 3 }), matchScore('gap', 'zzz widgets/gap', { head: 3 })),
+    anyOrder: matchScore('gap mdm', 'mdm-gap') === matchScore('mdm gap', 'mdm-gap') && matchScore('gap mdm', 'mdm-gap') > 0,
+    caseless: matchScore('MDM Gap', 'x-mdm-gap') === matchScore('mdm gap', 'x-mdm-gap'),
+    camel: matchScore('expired token', 'ExpiredToken') !== null,
+    none: matchScore('zzz', 'mdm-gap') === null && matchScore('mdm zzz', 'mdm-gap') === null,
+    empty: matchScore('', 'anything') === 0,
+    text: JSON.stringify(searchTextOf({ id: 'x', name: 'x', text: 'T', repo: '-', home: 'main', reportPath: null, url: 'https://u' })) === JSON.stringify({ searchText: 'x T main https://u', searchHead: 3 }),
+    rank: rankRows('b', [{ row: { id: 'a', text: 'zzb' } }, { row: { id: 'b', text: 'x' } }, { row: { id: 'c', text: 'zzz' } }]).map((e) => e.row.id).join(',') === 'b,a',
+  };
+  console.log(Object.entries(out).filter(([, v]) => v !== true).map(([k]) => k).join(' ') || 'ok');
+")
+if [ "$search_rules" = "ok" ]; then pass; else fail "search matcher rules broken: $search_rules"; fi
+# The results view over search.json: f, then the letters and the space bar (the key list spells the
+# space bar `space`) type the query; the header counts the matches and the list leads with the best,
+# the PANE column first; "mdm gap" finds portal-mdm-gap-analysis, the delegate's live hold drawn in
+# Captain's Call from its ledger, and "expired token" finds the ExpiredToken scout beside it; the
+# footer is the prompt with the same count (falsify: drop the space mapping from lib/args.mjs
+# keyName, or the head bonus that ranks the id's runs over the URLs' scattered letters).
+frame_s=$(render search.json --keys "f,m,d,m,space,g,a,p") || fail "search mdm gap: render exited non-zero"
+assert_row "$frame_s" '^ Search: mdm gap \([0-9]+ matches\) +$' "search: the header carries the query and the match count"
+assert_row "$frame_s" '^ PANE +STATE +INFO +ID +WHAT +REPO +HOME +AGE$' "search: PANE leads the shared column header"
+assert_row "$frame_s" "^ $T_NEEDS +hold +- +portal-mdm-gap-analysis " "search: 'mdm gap' ranks the delegate's held gap-analysis scout first (falsify: drop CONTIGUOUS or HEAD)"
+assert_before "$frame_s" '^ Search: mdm gap' "^ $T_NEEDS +hold +- +portal-mdm-gap-analysis " "search: the best match is the first row under the header"
+assert_row "$frame_s" '^ search: mdm gap  [0-9]+ matches  enter jumps  esc cancels' "search: the footer is the prompt with the count"
+assert_not_contains "$frame_s" "┌─" "search: the results list replaces the grid"
+tags_s=$(render search.json --keys "f,m,d,m,space,g,a,p" --tags) || fail "search mdm gap --tags: render exited non-zero"
+assert_row "$tags_s" "${SEL}$T_NEEDS" "search: the cursor bar is on the first match (falsify: draw the list without the selected style)"
+frame_s=$(render search.json --keys "f,e,x,p,i,r,e,d,space,t,o,k,e,n") || fail "search expired token: render exited non-zero"
+assert_row "$frame_s" '^ Search: expired token \(1 match\) +$' "search: 'expired token' finds one row, and one reads match, not matches"
+assert_row "$frame_s" "^ $T_NEEDS +hold +- +portal-ingest-expired" "search: the ExpiredToken scout is that row (its summary says ExpiredToken; the id says expired-token)"
+# Enter jumps: the prompt closes, the grid is back and the row is selected in Captain's Call, so
+# enter would show its card next (falsify: drop the rebuild before the row is found again, or leave
+# view.row where it was).
+frame_s=$(render search.json --keys "f,m,d,m,space,g,a,p,enter") || fail "search jump: render exited non-zero"
+assert_not_contains "$frame_s" "Search:" "search jump: the prompt is closed"
+assert_contains "$frame_s" "portal-mdm-gap-analysis in $T_NEEDS" "search jump: the notice names the row and its pane"
+assert_row "$frame_s" '^ enter card  d discard  D defer  x hide  H  1-6 panes ' "search jump: the footer offers the row's card and hold actions, as on any selected card row (the short form: the notice takes the full hint's room)"
+tags_s=$(render search.json --keys "f,m,d,m,space,g,a,p,enter" --tags) || fail "search jump --tags: render exited non-zero"
+assert_row "$tags_s" "${SEL}hold.*${SEL}portal-mdm-gap-analysis" "search jump: the cursor bar is on the found row in its pane"
+# The children of a collapsed Underway group are searched through the index built with every group
+# open: "sync job" matches the delegate's child portal-owner-sync alone (its doing text), a row the
+# grid shows only inside the collapsed delegate-a group, and the jump expands the group for it
+# (falsify: drop the expandAll build of the index in buildModel, or the expanded.add from
+# jumpToResult).
+frame_g=$(render search.json) || fail "search grid: render exited non-zero"
+assert_row "$frame_g" '^│ working +2 live +!▸ delegate-a +portal-owner-sync, portal-owner-audit ' "search grid: the delegate's two workers sit behind a collapsed group row"
+assert_not_contains "$frame_g" "↳ portal-owner-sync" "search grid: the child row is not drawn"
+frame_s=$(render search.json --keys "f,s,y,n,c,space,j,o,b") || fail "search sync job: render exited non-zero"
+assert_row "$frame_s" '^ Search: sync job \(1 match\) +$' "search: the collapsed group's child is found by its doing text"
+assert_row "$frame_s" "^ $T_INFLIGHT +working +working +↳ portal-owner-sync +Owner sync · writing the sync job " "search: the child row is listed as the expanded group would draw it"
+frame_s=$(render search.json --keys "f,s,y,n,c,space,j,o,b,enter") || fail "search child jump: render exited non-zero"
+assert_row "$frame_s" '^│ working +2 live +!▾ delegate-a ' "search child jump: the collapsed group is expanded"
+assert_contains "$frame_s" "portal-owner-sync in $T_INFLIGHT · group expanded" "search child jump: the notice names the row, its pane and the expansion"
+tags_s=$(render search.json --keys "f,s,y,n,c,space,j,o,b,enter" --tags) || fail "search child jump --tags: render exited non-zero"
+assert_row "$tags_s" "${SEL}working.*${SEL}↳ portal-owner-sync" "search child jump: the cursor bar is on the child in its pane"
+# A Charted Next row is searched like any other: "export report" finds the queued portal-export-report
+# first (its title carries both words as runs) and the jump selects it there, where enter shows its
+# card (falsify: leave the charted builder out of the index, or drop the card from chartedRow).
+frame_s=$(render search.json --keys "f,e,x,p,o,r,t,space,r,e,p,o,r,t") || fail "search export report: render exited non-zero"
+assert_row "$frame_s" "^ $T_CHARTED +queued +- +portal-export-report +Ship the export report " "search: the queued item ranks first for its title's words"
+assert_before "$frame_s" '^ Search: export report' "^ $T_CHARTED +queued +- +portal-export-report " "search: the Charted Next row is the first match"
+frame_s=$(render search.json --keys "f,e,x,p,o,r,t,space,r,e,p,o,r,t,enter") || fail "search charted jump: render exited non-zero"
+assert_contains "$frame_s" "portal-export-report in $T_CHARTED" "search charted jump: the notice names the row and Charted Next"
+assert_row "$frame_s" '^ j/k move  tab pane  enter card  x hide ' "search charted jump: the queued row's footer offers its card"
+tags_s=$(render search.json --keys "f,e,x,p,o,r,t,space,r,e,p,o,r,t,enter" --tags) || fail "search charted jump --tags: render exited non-zero"
+assert_row "$tags_s" "${SEL}queued.*${SEL}portal-export-report" "search charted jump: the queued row is selected in Charted Next"
+# Esc closes with the selection untouched: the frame after tab, j, f, a query and esc is the frame
+# after tab, j (falsify: move view.pane or view.row while the prompt is up, or leave a notice).
+frame_a=$(render search.json --keys "tab,j") || fail "search esc base: render exited non-zero"
+frame_b=$(render search.json --keys "tab,j,f,x,y,z,escape") || fail "search esc: render exited non-zero"
+if [ "$frame_a" = "$frame_b" ]; then pass; else fail "esc did not restore the frame: $(diff <(printf '%s\n' "$frame_a") <(printf '%s\n' "$frame_b") | head -n 6)"; fi
+# A query with no match says so and enter does nothing: the prompt stays up (falsify: jump on an
+# empty result list, or close the prompt on enter regardless). q and j are typed, not obeyed.
+frame_s=$(render search.json --keys "f,x,y,z,q,q,enter") || fail "search no match: render exited non-zero"
+assert_row "$frame_s" '^ Search: xyzqq \(0 matches\) +$' "search: no match counts 0, and q types into the query"
+assert_row "$frame_s" '^ no matches +$' "search: the list reads no matches"
+assert_row "$frame_s" '^ search: xyzqq  0 matches  enter jumps  esc cancels' "search: enter on no match leaves the prompt up"
+assert_row "$(render search.json --keys "f,j,k")" '^ Search: jk \(' "search: j and k type into the query (a query may carry them)"
+# up/down move the cursor through the matches and enter jumps to the one under it: 'ship' lists
+# ship-cache (Underway), ship-cache (My PRs), then the Charted Next item whose title starts with Ship,
+# then the Recently Landed ship-NN rows; two downs land on the third and enter selects it in Charted
+# Next (falsify: drop the search-move case, or read index 0 on jump).
+frame_s=$(render search.json --keys "f,s,h,i,p,down,down") || fail "search move: render exited non-zero"
+assert_row "$frame_s" "^ $T_INFLIGHT +working +working +ship-cache " "search move: the Underway worker leads the ship matches"
+third=$(printf '%s\n' "$frame_s" | sed -n 6p | grep -oE 'portal-export-report|ship-[a-z0-9-]+' | head -n 1)
+tags_s=$(render search.json --keys "f,s,h,i,p,down,down" --tags) || fail "search move --tags: render exited non-zero"
+assert_row "$tags_s" "${SEL}$T_CHARTED.*${SEL}${third} " "search move: two downs put the bar on the third match, the Charted Next row ($third)"
+assert_contains "$(render search.json --keys "f,s,h,i,p,down,down,enter")" "$third in $T_CHARTED" "search move: enter jumps to the match under the cursor, not the first"
+# A row below a pane's fold is found and the jump scrolls the pane to it: ship-17 is Recently Landed's
+# oldest merge, behind +8 more on the grid, and nowhere on it (falsify: search the drawn rows instead
+# of the builders' full lists, or leave the scroll where it was).
+assert_contains "$frame_g" "+8 more" "search grid: Recently Landed is capped"
+assert_not_contains "$frame_g" "ship-17" "search grid: ship-17 is below the fold"
+frame_s=$(render search.json --keys "f,s,h,i,p,-,1,7") || fail "search capped: render exited non-zero"
+assert_row "$frame_s" '^ Search: ship-17 \(1 match\) +$' "search: the row below the fold is found"
+assert_row "$frame_s" "^ $T_LANDED +merged +09-05 +ship-17 " "search: it is the Recently Landed row"
+tags_s=$(render search.json --keys "f,s,h,i,p,-,1,7,enter" --tags) || fail "search capped jump --tags: render exited non-zero"
+assert_row "$tags_s" "${SEL}merged.*${SEL}ship-17 " "search capped jump: ship-17 is selected in Recently Landed, the pane scrolled to it"
+assert_contains "$tags_s" " above" "search capped jump: the pane's foot counts the rows scrolled above"
+# A report folded into Recently Landed is a row like any other, below the fold too: archive-owner-scout,
+# the oldest reported scout, is behind the foot and "archive owner" finds it; the jump scrolls the
+# pane to it, where enter views the report (falsify: leave the reported rows out of landedRows'
+# full list, or index the drawn rows).
+assert_not_contains "$frame_g" "archive-owner-scout" "search grid: the oldest report is below the fold"
+frame_s=$(render search.json --keys "f,a,r,c,h,i,v,e,space,o,w,n,e,r") || fail "search archive owner: render exited non-zero"
+assert_row "$frame_s" "^ $T_LANDED +reported +08-22 +archive-owner-scout +Scout: who owns the archive bucket · data/archive-owner-scout" "search: the folded report row is found first, with its path"
+frame_s=$(render search.json --keys "f,a,r,c,h,i,v,e,space,o,w,n,e,r,enter") || fail "search report jump: render exited non-zero"
+assert_contains "$frame_s" "archive-owner-scout in $T_LANDED" "search report jump: the notice names the report row and Recently Landed"
+assert_row "$frame_s" '^│ reported +08-22 +archive-owner-scout +Scout: who owns the archive bucket · data/archive-owner-scout/report.md ' "search report jump: the report row is on the grid, the pane scrolled to it"
+assert_contains "$frame_s" "8 above" "search report jump: the pane's foot counts the rows scrolled above"
+tags_s=$(render search.json --keys "f,a,r,c,h,i,v,e,space,o,w,n,e,r,enter" --tags) || fail "search report jump --tags: render exited non-zero"
+assert_row "$tags_s" "${SEL}reported.*${SEL}archive-owner-scout" "search report jump: the report row is selected in Recently Landed"
+# A hidden row is found, listed greyed and marked (hidden), and the jump turns H on for the session so
+# the selection is visible, the notice saying so; the view-state file keeps the row hidden and never
+# records the search (falsify: build the index with showHidden false, or unhide the row on the jump).
+# The hidden row is Recently Landed's legacy-import-scout, whose `legacy import path` words no other
+# row has as runs, so it ranks first.
+vs_s="$SCRATCH/search-view-state.json"
+printf '{"schema":"fm-board-view-state.v1","hidden":["landed:main:legacy-import-scout:2026-09-12"]}\n' > "$vs_s"
+q_hidden="f,l,e,g,a,c,y,space,i,m,p,o,r,t,space,p,a,t,h"
+frame_s=$(render search.json --view-state "$vs_s" --keys "$q_hidden") || fail "search hidden: render exited non-zero"
+assert_row "$frame_s" "^ $T_LANDED +reported +09-12 +legacy-import-scout +\(hidden\) Scout: legacy import path" "search hidden: the hidden Recently Landed row is listed first and marked"
+tags_s=$(render search.json --view-state "$vs_s" --keys "$q_hidden,down" --tags) || fail "search hidden --tags: render exited non-zero"
+assert_row "$tags_s" "\{grey-fg\}$T_LANDED.*legacy-import-scout" "search hidden: the hidden row is greyed once the bar moves off it, as H draws it"
+frame_s=$(render search.json --view-state "$vs_s" --keys "$q_hidden,enter") || fail "search hidden jump: render exited non-zero"
+assert_contains "$frame_s" "$T_LANDED (23, 1 hidden shown)" "search hidden jump: H is on, the pane header says shown"
+assert_contains "$frame_s" "legacy-import-scout in $T_LANDED · hidden row: H is on for this session" "search hidden jump: the notice says H was switched on"
+tags_s=$(render search.json --view-state "$vs_s" --keys "$q_hidden,enter" --tags) || fail "search hidden jump --tags: render exited non-zero"
+assert_row "$tags_s" "${SEL}reported.*${SEL}legacy-import-scout" "search hidden jump: the hidden row is selected in its pane"
+assert_file_contains "$vs_s" '"landed:main:legacy-import-scout:2026-09-12"' "search hidden jump: the row stays hidden in the view-state file"
+assert_file_not_contains "$vs_s" 'search' "search: nothing of the search reaches the view-state file"
+# A hidden pane's rows are found too and the jump shows the pane, saved like its number key would;
+# with every pane hidden f still opens the search from the landing page (falsify: skip the hidden
+# panes in the index, drop f from LANDING_KEYS, or drop the hiddenPanes.delete from jumpToResult).
+printf '{"schema":"fm-board-view-state.v1","hidden_panes":["landed"]}\n' > "$vs_s"
+frame_s=$(render search.json --view-state "$vs_s" --keys "f,s,h,i,p,-,1,7,enter") || fail "search hidden pane: render exited non-zero"
+assert_contains "$frame_s" "ship-17 in $T_LANDED · pane shown: $T_LANDED" "search hidden pane: the jump shows the pane and says so"
+assert_contains "$frame_s" "$T_LANDED (23)" "search hidden pane: Recently Landed is drawn again"
+assert_file_contains "$vs_s" '"hidden_panes": []' "search hidden pane: the shown pane is saved, as 6 would save it"
+printf '{"schema":"fm-board-view-state.v1","hidden_panes":%s}\n' "$ALL_PANE_IDS" > "$vs_s"
+frame_s=$(render search.json --view-state "$vs_s" --keys "f") || fail "search landing: render exited non-zero"
+assert_row "$frame_s" '^ Search:  \([0-9]+ matches\) +$' "search landing: f opens the search over every pane from the landing page, an empty query listing every row"
+assert_row "$frame_s" "^ $T_INFLIGHT +working +working +ship-cache " "search landing: the rows of the hidden panes are listed"
+frame_s=$(render search.json --view-state "$vs_s" --keys "f,s,h,i,p,-,c,a,c,h,e,enter") || fail "search landing jump: render exited non-zero"
+assert_contains "$frame_s" "ship-cache in $T_INFLIGHT · pane shown: $T_INFLIGHT" "search landing jump: the jump shows the row's pane"
+assert_contains "$frame_s" "$T_INFLIGHT (2)" "search landing jump: the grid is back with that pane"
+# The mouse over the results: a click selects the result under the pointer (y counts from the title
+# line: 0 title, 1 header, 2 column header, 3 the first match), a double-click jumps to it, the wheel
+# moves the cursor three rows (falsify: drop searchMouseAction from handleMouse, or the result zones
+# from renderSearch). An empty query lists the rows in pane order, so the first three results are
+# Captain's Call's three holds.
+tags_s=$(render search.json --mouse "f,click:10,5" --tags) || fail "search click --tags: render exited non-zero"
+assert_row "$tags_s" "^ ${SEL}$T_NEEDS" "search click: the third result is under y=5 and takes the bar"
+if [ "$(printf '%s\n' "$tags_s" | grep -n "$SEL_TAG" | head -n 1 | cut -d: -f1)" = "6" ]; then pass; else fail "search click: the bar is not on frame line 6 (y=5)"; fi
+frame_s=$(render search.json --mouse "f,dblclick:10,4") || fail "search dblclick: render exited non-zero"
+assert_contains "$frame_s" "portal-ingest-expired-token-scout in $T_NEEDS" "search dblclick: a double-click on the second result (the delegate's ExpiredToken hold) jumps to it"
+assert_not_contains "$frame_s" "Search:" "search dblclick: the prompt is closed by the jump"
+tags_s=$(render search.json --mouse "f,wheel:down:10,5" --tags) || fail "search wheel --tags: render exited non-zero"
+if [ "$(printf '%s\n' "$tags_s" | grep -n "$SEL_TAG" | head -n 1 | cut -d: -f1)" = "7" ]; then pass; else fail "search wheel: one wheel step down did not move the bar three rows, to frame line 7"; fi
 
 # ------------------------------------------------------------------ PR ages
 # My PRs' AGE is the time since the PR was opened when the live fetch carries created_at,
@@ -2284,7 +2487,7 @@ assert_row "$frame_tr" "^ PR source +board: the board's own GitHub fetch \\(conf
 frame_tr=$(render to-review.json --keys "?") || fail "to-review help: render exited non-zero"
 assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] Captain's Call" "help overlay documents 1-6"
 assert_contains "$frame_tr" "[4] Teammates' PRs" "help overlay lists the Teammates' PRs badge"
-assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes ' "the footer reads 1-6 panes"
+assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  f search  l/h expand  x hide  H hidden  1-6 panes ' "the footer reads 1-6 panes"
 
 # The fetch's pure pieces, straight from lib/sources.mjs, copy fm-bearings-snapshot.sh's rules: the
 # repository slug, the check mapping (gh's statusCheckRollup list and the GraphQL contexts alike),
@@ -3204,7 +3407,7 @@ assert_row "$frame_s" '^ +all panes hidden +$' "esc returns to the landing page"
 # Help: the overlay documents . and opens over the page (falsify: drop the . line from HELP_LINES).
 frame_k=$(render populated.json --keys "?") || fail "help settings: render exited non-zero"
 assert_contains "$frame_k" ".            settings page: installed version, latest release, upgrade or a beta" "help overlay documents ."
-assert_contains "$frame_k" "(each install asks y first; . or esc brings the board back)" "help overlay documents the confirm step"
+assert_contains "$frame_k" "upgrade or a beta (asks y first; . closes)" "help overlay documents the confirm step (folded onto the . line so the help box clears the footer at 44 rows)"
 frame_s=$(render populated.json --install-root "$INSTALL" --keys ".,?") || fail "help over settings: render exited non-zero"
 assert_contains "$frame_s" "firstmate-tui keys" "? opens the help over the settings page"
 # Narrow: the page fits the list-mode frame (falsify: pick the layout mode before the page check).
@@ -4559,6 +4762,19 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
 cwd=$FAKE_HOME_REAL
 argv=hold decide-vendor --reason Two quotes in the report --until 2027-01-15" "pty: the typed date reaches the stand-in home's fm-captain-hold.sh once, with the record's full reason (backspaces and digits both arrived)"
   assert_not_opened "pty: the D prompt opens no PR"
+  # The search prompt on a real terminal: f opens it, the typed query with its space bar reaches
+  # the prompt through the library's keypress path (one keypress event per character of the chunk,
+  # each redrawing the frame), and the carriage return jumps to the one match, the stand-in's tmux
+  # task, whose notice lands on the footer's blank right end; then f again and one 0x1b (the Escape
+  # key alone, which the library names 'escape') close the prompt so q quits the board (falsify:
+  # drop the search branch from promptKeyAction: the letters then go to the board's own keys, enter
+  # jumps to the first row of the empty query, ship-alpha, and the notice never names tmux-task;
+  # drop the search-cancel case: q types into the query and the board never exits). The waits name
+  # text on cells the previous frame left blank, since the library repaints changed cells only: the
+  # header's `Search:` replaces the Captain's Call border, the notice the footer's spaces.
+  run_pty xterm-256color search "wait:$PTY_URL" "send:f" "wait:Search:" "sleep:0.3" "send:tmux task" "sleep:0.6" "send:\r" "wait:tmux-taskin${T_INFLIGHT// /}" "sleep:0.4" "send:f" "wait:Search:" "sleep:0.3" "send:\x1b" "sleep:0.6" "send:q" exit
+  pty_ok search "pty: f opens the search, the typed query finds the tmux task, enter jumps to it, esc closes a second search and q quits"
+  assert_not_opened "pty: the search opens no PR"
   # A live start with the PR fetch on, against a stand-in whose snapshot sleeps 2 s and a gh that
   # sleeps 2 s before answering, so each state stays on screen long enough to be told apart. With
   # nothing to name the login (gh not logged in, github.user unset, the example config): both PR

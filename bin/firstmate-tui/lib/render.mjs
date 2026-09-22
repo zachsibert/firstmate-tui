@@ -3,9 +3,10 @@
 // styled segments so the neo-blessed adapter can color them and the
 // --render-once mode can print them plain. Nothing here touches a terminal.
 
-import { columns, GUTTER, layoutMode, MIN_COLS, MIN_ROWS, paneDemand, paneHeights } from './layout.mjs';
+import { columns, GUTTER, layoutMode, MIN_COLS, MIN_ROWS, PANES, paneDemand, paneHeights } from './layout.mjs';
 import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, settingsInfo, upgradeOffer } from './settings.mjs';
 import { promptText } from './card.mjs';
+import { searchIndex, searchResults } from './controller.mjs';
 import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
 const H = '─';
@@ -23,7 +24,8 @@ export const HELP_LINES = [
   '               Recently Landed row without a PR: view its report (glow, $EDITOR, vim, less), else',
   '               focus its worker pane. Underway group row: expand or collapse it',
   "               Underway worker or Captain's Call worker: focus its herdr pane",
-  "  f            focus the selected row's herdr pane, in any pane",
+  '  f            search all panes: type loosely (any order, any case, letters apart), enter jumps, esc closes',
+  "  F            focus the selected row's herdr pane, in any pane",
   '  d            discard the selected hold: asks y first, then runs fm-captain-hold.sh answer',
   '  D            defer the selected hold to a date (default today + 14 days): fm-captain-hold.sh hold',
   '  l / right    expand the selected Underway group',
@@ -35,8 +37,7 @@ export const HELP_LINES = [
   "               [2] Underway  [3] My PRs  [4] Teammates' PRs  [5] Charted Next  [6] Recently Landed",
   '  0            show every pane (with all six hidden the board lists these keys)',
   '  r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)',
-  '  .            settings page: installed version, latest release, upgrade or a beta',
-  '               (each install asks y first; . or esc brings the board back)',
+  '  .            settings page: installed version, latest release, upgrade or a beta (asks y first; . closes)',
   '  =            reset every column width to its automatic size',
   '  ?            toggle this help    q / ctrl-c   quit',
   '',
@@ -155,24 +156,26 @@ function titleLine(model, cols) {
   return fitSegments([seg(leftText, 'title'), seg(' '.repeat(gap), 'title'), ...right], cols, 'title');
 }
 
-const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  . settings  ? help  q quit';
-const FOOTER_KEYS_SHORT = ' j/k  tab  enter  l/h  x hide  H  1-6 panes  r  . settings  ? help  q quit';
+const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  f search  l/h expand  x hide  H hidden  1-6 panes  r refresh  . settings  ? help  q quit';
+const FOOTER_KEYS_SHORT = ' j/k  tab  enter  f search  l/h  x hide  H  1-6 panes  r  . settings  ? help  q quit';
 const FOOTER_KEYS_MIN = ' ? help';
 const BOARD_FOOTER_HINTS = [FOOTER_KEYS, FOOTER_KEYS_SHORT, FOOTER_KEYS_MIN];
 
 // The footer's key hints for the board: the prompt alone while one is up
-// (lib/card.mjs promptText); on a row with a hold card the enter, f, d and D
-// words that apply to it (`enter card  f focus  d discard  D defer`) in place
-// of `enter open/focus/view`, f only with a pane and the two hold actions
-// only with a hold in a readable home, and without `l/h expand`, which a
-// card row (never a group) has no use for and which would push the full
-// hint past its room at 160 columns; the standard hints otherwise.
+// (lib/card.mjs promptText); on a row with a hold card the enter, F, d and D
+// words that apply to it (`enter card  F focus  d discard  D defer`) in place
+// of `enter open/focus/view`, F only with a pane and the two hold actions
+// only with a hold in a readable home, and without `l/h expand` or `f
+// search`, which the full hint has no room for at 160 columns beside the
+// hold actions (the help and the standard hints name the search); the
+// standard hints otherwise. The search prompt's footer is drawn by
+// renderSearch, which knows the match count.
 function boardHints(model, view) {
   if (view.prompt) return [promptText(view.prompt)];
   const pane = model.panes[view.pane];
   const row = pane && !pane.hidden ? pane.rows[view.row] || null : null;
   if (!row || !row.card) return BOARD_FOOTER_HINTS;
-  const acts = ['enter card', row.paneId ? 'f focus' : null, row.hold && !row.hold.remote ? 'd discard  D defer' : null].filter(Boolean).join('  ');
+  const acts = ['enter card', row.paneId ? 'F focus' : null, row.hold && !row.hold.remote ? 'd discard  D defer' : null].filter(Boolean).join('  ');
   return [` j/k move  tab pane  ${acts}  x hide  H hidden  1-6 panes  r refresh  . settings  ? help  q quit`, ` ${acts}  x hide  H  1-6 panes  r  . settings  ? help  q quit`, FOOTER_KEYS_MIN];
 }
 
@@ -398,6 +401,60 @@ function renderLanding(model, cols, rows, view) {
   return { lines, zones: lines.map(() => null) };
 }
 
+// ------------------------------------------------------------ search results
+// While the f prompt is up (view.prompt.kind 'search') the results list
+// replaces the grid between the title line and the footer: a header line
+// `Search: <query> (<n> matches)`, one column header (PANE, then the shared
+// STATE INFO ID WHAT REPO HOME AGE set the narrow list uses, sized to the
+// matches) and the matches best first (lib/controller.mjs searchResults),
+// the prompt's cursor drawn as the selected row and kept on screen, a hidden
+// row greyed and marked (hidden) as H shows it. `no matches` when nothing
+// matches. Each match's line is a { kind: 'result', index } zone so a click
+// can land on it. The footer is the prompt's text with the match count. The
+// list's scroll offset lives past the pane slots in view.scroll
+// (SEARCH_SCROLL), so the panes keep theirs for the frame after the prompt.
+export const SEARCH_SCROLL = PANES.length;
+const PANE_COLUMN_CAP = 16;
+
+export function searchHeaderText(prompt, count) {
+  return ` Search: ${prompt.value} (${count} match${count === 1 ? '' : 'es'})`;
+}
+
+function renderSearch(model, cols, rows, view) {
+  const results = searchResults(model, view.prompt);
+  const cursor = searchIndex(view.prompt, results.length);
+  const lines = [titleLine(model, cols)];
+  const zones = [null];
+  lines.push(line([seg(searchHeaderText(view.prompt, results.length), 'heading')], cols));
+  zones.push(null);
+  const inner = cols - 1;
+  const drawRows = results.map((r) => ({ ...r.row, paneTitle: r.paneTitle }));
+  const paneWidth = Math.min(PANE_COLUMN_CAP, Math.max(width('PANE'), ...drawRows.map((r) => width(r.paneTitle))));
+  const spec = [{ key: 'paneTitle', label: 'PANE', width: paneWidth, flex: false, override: false }, ...columns(cols, inner - paneWidth - GUTTER, 'search', { rows: drawRows })];
+  lines.push(line([seg(' ', 'row'), ...headSegments(spec)], cols));
+  zones.push(null);
+  const height = Math.max(rows, MIN_ROWS) - 4; // title, header, column header, footer
+  view.scrollOut = [...view.scroll];
+  if (!results.length) {
+    lines.push(line([seg(' ', 'row'), seg(fit('no matches', inner), 'empty')], cols));
+    zones.push(null);
+  } else {
+    const start = scrollStart(results.length, height, cursor, view.scroll[SEARCH_SCROLL] || 0);
+    view.scrollOut[SEARCH_SCROLL] = start;
+    drawRows.slice(start, start + height).forEach((r, i) => {
+      lines.push(line([seg(' ', 'row'), ...rowSegments(r, spec, start + i === cursor, null)], cols));
+      zones.push({ kind: 'result', index: start + i });
+    });
+  }
+  while (lines.length < rows - 1) {
+    lines.push(line([], cols));
+    zones.push(null);
+  }
+  lines.push(footerLine(model, cols, view, [promptText(view.prompt, results.length)]));
+  zones.push(null);
+  return { lines: lines.slice(0, rows), zones: zones.slice(0, rows) };
+}
+
 // ------------------------------------------------------------ settings page
 // The `.` page replaces the grid between the title line and the footer. Pure
 // like the rest: view.settings (lib/settings.mjs) in, lines and zones out
@@ -556,12 +613,13 @@ function overlayHelp(lines, cols) {
 // view.settings. columns is the captain's column widths by pane id and column
 // key (view state) and drag the boundary being dragged, { paneId, index, ... }
 // (lib/controller.mjs), whose bar the pane draws. prompt is the discard or
-// defer prompt the footer shows (lib/card.mjs), or null.
+// defer prompt the footer shows (lib/card.mjs), the search prompt whose
+// results list replaces the grid (renderSearch), or null.
 // Returns { lines, cols, rows, mode, scroll, zones } where scroll holds the
 // start offsets actually used so the app can keep them for the next frame and
 // zones maps each line to what it shows (lib/layout.mjs hitTest). mode is
-// 'panes', 'list' (narrow), 'landing' (every pane hidden: the key page) or
-// 'settings'.
+// 'panes', 'list' (narrow), 'landing' (every pane hidden: the key page),
+// 'search' (the f prompt's results) or 'settings'.
 export function renderFrame(model, size, view = {}) {
   const cols = Math.max(MIN_COLS, size.cols | 0);
   const rows = Math.max(MIN_ROWS, size.rows | 0);
@@ -579,9 +637,11 @@ export function renderFrame(model, size, view = {}) {
     drag: view.drag || null,
     prompt: view.prompt || null,
   };
-  const mode = v.page === 'settings' ? 'settings' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
+  const searching = v.page === 'board' && v.prompt && v.prompt.kind === 'search';
+  const mode = v.page === 'settings' ? 'settings' : searching ? 'search' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
   let drawn;
   if (mode === 'settings') drawn = renderSettings(model, cols, rows, v);
+  else if (mode === 'search') drawn = renderSearch(model, cols, rows, v);
   else if (mode === 'landing') drawn = renderLanding(model, cols, rows, v);
   else if (mode === 'list') drawn = renderList(model, cols, rows, v);
   else drawn = renderPanes(model, cols, rows, v);

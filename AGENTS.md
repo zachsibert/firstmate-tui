@@ -141,8 +141,18 @@ PRs, toasts and the unread-report marker belong to later milestones.
   exit 75, which `run_board` in the launcher answers by starting the same path
   again. It never moves or closes a herdr
   pane; the captain splits panes himself, so do not bring back an `f` pane
-  toggle or a `pane move` action (since 0.6.0 `f` focuses the selected row's
-  herdr pane in any pane, `focusProblem` with `any`, and nothing more).
+  toggle or a `pane move` action (`F` focuses the selected row's herdr pane
+  in any pane, `focusProblem` with `any`, and nothing more; it was `f` from
+  0.6.0 through 0.6.6, and `f` is the search since: a footer prompt,
+  `view.prompt` kind `search` in `lib/card.mjs`, whose results list replaces
+  the grid, `renderSearch` in `lib/render.mjs`, ranked by the pure
+  `lib/search.mjs` over `model.search`, the index `buildModel` fills from
+  every pane's full row list: dismissed rows out, hidden rows marked, every
+  Underway group open, hidden panes included. Enter jumps: the row's pane
+  shown if hidden, its group expanded, `H` on for the session if the row is
+  hidden, the row selected by hide key. The query and cursor are session
+  state, never view state. `j` and `k` type into the query, so only the
+  arrows, the page keys, tab and the wheel move through the matches).
   `enter` is the one key that opens a PR; do not
   bring back the separate `o` key the scout report's M2 row still lists.
   Free-text answers, merges and dispatch stay with firstmate's own owners.
@@ -183,8 +193,8 @@ PRs, toasts and the unread-report marker belong to later milestones.
 ## Working on the code
 
 - Pure modules (`text`, `layout`, `model`, `render`, `settings`, `identity`,
-  `card`) take data and return data; keep them that way so `--render-once
-  --fixture` stays the test surface. I/O lives in `sources.mjs` (firstmate,
+  `card`, `search`) take data and return data; keep them that way so
+  `--render-once --fixture` stays the test surface. I/O lives in `sources.mjs` (firstmate,
   the GitHub searches and the identity rungs, the GitHub releases fetch
   through `--curl-cmd`, and the reads behind a hold card: `readHoldMaterials`
   and a delegate home's record through `readHoldRecord`), `herdr.mjs`

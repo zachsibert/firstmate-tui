@@ -246,13 +246,16 @@ Each pane title carries its key and its row count, as in `[1] Captain's Call (3)
 The selected row is drawn inverse, in your theme's own colours, and the focused pane's border is amber (palette colour 214 on a 256-colour terminal, your terminal's yellow on one with fewer colours); the other panes keep their blue border.
 In the HERDR column, `pane lost` in red means herdr no longer has that agent's pane, and `unknown` in grey means herdr is disconnected so the board cannot tell.
 The bottom line lists the keys, and `?` shows them all.
+`f` searches every pane at once, the way quick open works in an editor: type a few letters in any order and any case, even letters apart (`mdm gap` finds `portal-mdm-gap-analysis`), and the grid gives way to one list of the matching rows, best first, with the pane each row belongs to in its first column; hidden rows, rows below a pane's `+N more` foot and the children of a collapsed Underway group are all searched.
+`enter` jumps to the selected match in its pane, showing the pane, expanding the group or switching hidden rows on for the session when that is what it takes, so the next `enter` acts on the row as usual; `esc` closes the search and leaves the selection where it was.
 
 | Key or gesture | Action |
 | --- | --- |
 | `j` / `k`, arrows | move the selection |
 | `tab` / `shift-tab` | next / previous pane |
 | `enter`, or a double-click | act on the row: open its pull request in your browser; on a Captain's Call hold, decision or blocked row, on a Charted Next queued or held row, or on an Underway or Recently Landed row whose task is a captain hold, show its card in the terminal viewer; on an Underway group expand or collapse it; on an agent row focus its herdr pane; on a Recently Landed row without a pull request show its report, else focus its pane |
-| `f` | focus the selected row's herdr pane, whatever the pane; a row without one says so |
+| `f` | search every pane: the footer takes the query (printable keys and space type, `backspace` deletes), the frame lists the matches ranked with the pane name first, `up` / `down`, `pageup` / `pagedown` and `tab` move through them, `enter` jumps to the selected match in its pane and `esc` closes; a hidden row is listed greyed and marked `(hidden)`, and jumping to it turns `H` on for the session; a query with no match reads `no matches` |
+| `F` | focus the selected row's herdr pane, whatever the pane; a row without one says so (`f` through 0.6.6) |
 | `d` | discard the selected hold: the footer asks `y to discard, esc to cancel`, then firstmate's `fm-captain-hold.sh answer` closes the task in its home with the decision `Discarded by <your GitHub login> from firstmate-tui on <date>: no action; closed as not wanted.`; the task's rows leave the board at once, the cursor moves to the next row and a refresh follows so firstmate's own state catches up; a refusal from the command shows in red and changes nothing |
 | `D` | defer the selected hold: the footer takes a date (`YYYY-MM-DD`, prefilled with today plus 14 days; digits and dashes edit it, `enter` defers, `esc` cancels), then `fm-captain-hold.sh hold --until <date>` records it in the hold's home with the hold's own reason and the row leaves Captain's Call at once, as after `d`, to reappear in Charted Next as `dated` on the next refresh; a hold in a delegate home is deferred only when that home's full reason is readable here |
 | `l` / `right`, `h` / `left` | expand / collapse the selected Underway group |

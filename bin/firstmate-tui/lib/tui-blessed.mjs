@@ -9,8 +9,9 @@
 //                           paused and raw mode is off until resume()
 //   screen.resume()      -> take the terminal back and repaint everything
 //   screen.destroy()     -> restore the terminal
-// Keys are normalized to short names: j k h l x X H f d D 0-9 - up down left
-// right tab S-tab enter backspace r ? q escape ctrl-c. One key press must
+// Keys are normalized to short names: j k h l x X H f F d D 0-9 - up down left
+// right tab S-tab enter backspace r ? q escape ctrl-c, and any other printable
+// character as itself (the search prompt types them). One key press must
 // reach onKey once: the library reports the Enter key (\r) as two keypress
 // events, and normalizeKey() keeps one of them (see there).
 //

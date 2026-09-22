@@ -33,7 +33,7 @@ options:
                          line still starts the board)
   --opener-cmd <argv>    command that opens a URL in the browser (default: open on
                          macOS, xdg-open on Linux); quoted string, split on whitespace
-  --viewer-cmd <argv>    command that shows a Findings report or a hold card in the
+  --viewer-cmd <argv>    command that shows a report or a hold card in the
                          terminal (default: glow -p when glow is on PATH, else $EDITOR,
                          else vim, else less); quoted string, split on whitespace; the
                          path is appended
@@ -64,8 +64,10 @@ options:
   --fixture <json>       with --render-once: render this facts file instead of live reads
   --cols N / --rows N    frame size for --render-once (default: terminal, else 120x40)
   --keys <list>          with --render-once: press these keys first (comma or space
-                         separated, e.g. "tab,j,enter"); a PR open runs --opener-cmd
-                         when given and is only reported in the footer otherwise
+                         separated, e.g. "tab,j,enter"; the word space is the space
+                         bar, which the search prompt types); a PR open runs
+                         --opener-cmd when given and is only reported in the footer
+                         otherwise
   --no-mouse             ignore the mouse and leave the terminal's own text selection
                          alone (default: click selects, double-click is enter, the
                          wheel scrolls, dragging a column boundary in a pane's header
@@ -90,6 +92,13 @@ options:
   -h, --help             this text`;
 
 export const COMMANDS = ['run', 'open', 'focus'];
+
+// A key token of --keys or --mouse -> the key name the controller hears. The
+// lists split on spaces, so the space bar is spelled `space`; every other
+// token is already the name lib/tui-blessed.mjs normalizeKey would give.
+function keyName(token) {
+  return token === 'space' ? ' ' : token;
+}
 
 // One --mouse token -> the mouse events it stands for (lib/controller.mjs
 // mouseAction shape, without `time`), or null when the token is a key name.
@@ -269,7 +278,7 @@ export function parseArgs(argv, env = {}) {
         opts.tags = true;
         break;
       case '--keys':
-        for (const key of need(a).split(/[\s,]+/).filter(Boolean)) {
+        for (const key of need(a).split(/[\s,]+/).filter(Boolean).map(keyName)) {
           opts.keys.push(key);
           opts.inputs.push({ kind: 'key', key });
         }
@@ -287,8 +296,8 @@ export function parseArgs(argv, env = {}) {
           const events = parseMouseToken(token);
           if (events) opts.inputs.push({ kind: 'mouse', events });
           else {
-            opts.keys.push(token);
-            opts.inputs.push({ kind: 'key', key: token });
+            opts.keys.push(keyName(token));
+            opts.inputs.push({ kind: 'key', key: keyName(token) });
           }
         }
         break;
