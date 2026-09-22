@@ -1,10 +1,13 @@
-// lib/hold.mjs - the I/O behind the hold card and the board's two write
+// lib/hold.mjs - the I/O behind the hold card and the board's three write
 // actions. The card is written to a fresh mkdtemp directory under the OS
 // temp directory as <id>.md, handed to the viewer by the host (lib/app.mjs,
 // index.mjs) and removed afterwards; removeTempDir() only ever deletes a
-// directory makeTempDir() returned, never anything else. The two writes,
-// discard (`fm-captain-hold.sh answer <id> --decision-file <tmp>`) and defer
-// (`fm-captain-hold.sh hold <id> --reason <reason> --until <date>`), run
+// directory makeTempDir() returned, never anything else (the accept prompt
+// draws the same card in the frame instead, from loadHoldCard's text, and
+// writes no file for it). The three writes, accept (`fm-captain-hold.sh
+// answer <id> --decision-file <tmp> [--release]`), discard (the same
+// `answer` without --release) and defer (`fm-captain-hold.sh hold <id>
+// --reason <reason> --until <date>`), run
 // firstmate's own command in the home that owns the hold: an argv spawn of
 // `bash <home>/bin/fm-captain-hold.sh ...` with FM_HOME=<home> added to the
 // environment, cwd <home>, stdout and stderr captured and a HOLD_TIMEOUT_MS
@@ -15,7 +18,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildHoldCard, deferArgs, discardArgs, discardDecision, localDate } from './card.mjs';
+import { acceptArgs, acceptDecision, buildHoldCard, deferArgs, discardArgs, discardDecision, localDate } from './card.mjs';
 import { readHoldMaterials, readHoldRecord } from './sources.mjs';
 
 export const HOLD_TIMEOUT_MS = 60000;
@@ -103,29 +106,48 @@ function fileNameFor(id) {
   return String(id || 'card').replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
-// The card of one row (row.card, lib/model.mjs), written to a temp file:
-// { dir, path, text, partial }. A main-home row's record is the snapshot's;
-// a delegate home's is read from that home on demand through its own
-// fm-fleet-snapshot.sh (readHoldRecord), and when that read fails, or the
-// home is remote, the card is built from the ledger's fields and leads with
-// a partial notice saying why. onBusy(text) is called before a read that can
-// take a while. The caller runs the viewer on `path` and then calls
-// removeTempDir(dir).
-export async function prepareHoldCard(card, { timeoutMs, onBusy = () => {} } = {}) {
+// The card of one row (row.card, lib/model.mjs) as text, with the record it
+// was built from: { text, record, partial, full, error }. A main-home row's
+// record is the snapshot's; a delegate home's is read from that home on
+// demand through its own fm-fleet-snapshot.sh (readHoldRecord), and when
+// that read fails, or the home is remote, the card is built from the
+// ledger's fields and leads with a partial notice saying why. `full` says
+// the record is the home's own (the snapshot's, or a read that answered),
+// the one whose hold_reason and kind an accept may act on; `error` is the
+// read's failure otherwise. onBusy(text) is called before a read that can
+// take a while.
+export async function loadHoldCard(card, { timeoutMs, onBusy = () => {} } = {}) {
   let record = card.record || null;
   let partial = null;
+  let full = card.source === 'snapshot';
+  let error = null;
   const cut = 'the title, the reason (cut at 160 characters) and the hold fields come from its ledger';
   if (card.source !== 'snapshot') {
-    if (card.remote) partial = `${card.homeId} is a remote home whose files are not readable here; ${cut}.`;
-    else {
+    if (card.remote) {
+      partial = `${card.homeId} is a remote home whose files are not readable here; ${cut}.`;
+      error = 'remote home';
+    } else {
       onBusy(`reading the record of ${card.id} from ${card.homeId}...`);
       const r = await readHoldRecord(card.home, card.id, { timeoutMs });
-      if (r.record) record = r.record;
-      else partial = `${card.homeId}'s fm-fleet-snapshot.sh gave no record for ${card.id} (${r.error}); ${cut}.`;
+      if (r.record) {
+        record = r.record;
+        full = true;
+      } else {
+        partial = `${card.homeId}'s fm-fleet-snapshot.sh gave no record for ${card.id} (${r.error}); ${cut}.`;
+        error = r.error;
+      }
     }
   }
   const materials = card.remote ? null : readHoldMaterials(card.home, card.id);
   const text = buildHoldCard({ id: card.id, home: card.home, homeLabel: card.homeLabel || card.homeId, record, partial, materials });
+  return { text, record, partial, full, error };
+}
+
+// The same card written to a temp file for the viewer: { dir, path, text,
+// partial }. The caller runs the viewer on `path` and then calls
+// removeTempDir(dir).
+export async function prepareHoldCard(card, opts = {}) {
+  const { text, partial } = await loadHoldCard(card, opts);
   const dir = makeTempDir();
   const path = join(dir, `${fileNameFor(card.id)}.md`);
   writeFileSync(path, text);
@@ -142,6 +164,24 @@ export async function discardHold({ home, id, login, timeoutMs = HOLD_TIMEOUT_MS
   writeFileSync(file, `${decision}\n`);
   try {
     const r = await run(home, discardArgs(id, file), { timeoutMs });
+    return { ...r, ok: r.code === 0 && !r.error, decision };
+  } finally {
+    removeTempDir(dir);
+  }
+}
+
+// Accept a hold: write the captain's answer (acceptDecision: the picked
+// option or the typed line) to a temp file, run `answer` in the owning home,
+// with --release when `release` is set (a work item resumes) and without it
+// for a question (the task closes), remove the file. Resolves to the run's
+// result plus { ok, decision }.
+export async function acceptHold({ home, id, login, answer, release, timeoutMs = HOLD_TIMEOUT_MS, now = Date.now(), run = runCaptainHold }) {
+  const decision = acceptDecision(login, localDate(now), answer);
+  const dir = makeTempDir();
+  const file = join(dir, 'decision.txt');
+  writeFileSync(file, `${decision}\n`);
+  try {
+    const r = await run(home, acceptArgs(id, file, Boolean(release)), { timeoutMs });
     return { ...r, ok: r.code === 0 && !r.error, decision };
   } finally {
     removeTempDir(dir);

@@ -1,0 +1,281 @@
+{
+  "_comment": "The a key (accept), 160x44, over the same two placeholder homes as holds.json: /fixture/holds-main and /fixture/holds-delegate, which tests/fm-board.test.sh rewrites to the scratch homes it fills for the hold section (tests/fake-captain-hold.sh as bin/fm-captain-hold.sh, a fake bin/fm-fleet-snapshot.sh in the delegate home that prints its own records, and a 45-line report under data/option-hold/ so the card is longer than the frame). Captain's Call, in order: option-hold, a question-shaped call (kind captain) whose reason lists Options: a. b. c., so a letter picks and the answer closes the task; work-hold, a held work item (kind ship) whose answer releases it; nokind-hold, a record without a kind, which the board refuses to answer rather than guess; the delegate's delegate-hold (kind task in that home's own record, read through its snapshot); the remote home's remote-hold, refused; and the review row ship-review, where a says the board does not merge. The other panes are empty apart from Underway's ship-review worker.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 44,
+  "fm_home": "/fixture/holds-main",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/holds-main",
+    "generated": "2026-09-16T11:59:50Z",
+    "tasks": [
+      {
+        "id": "ship-review",
+        "kind": "ship",
+        "project": "/fixture/holds-main/projects/api",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": {
+          "state": "done",
+          "source": "status",
+          "detail": "PR https://github.com/acme/api/pull/7 checks green",
+          "observed_at": "2026-09-16T11:55:00Z",
+          "freshness": "fresh"
+        },
+        "endpoint": {
+          "target": "default:w1C:p1",
+          "exists": true,
+          "agent_alive": "not_checked",
+          "status": "unknown"
+        },
+        "pr": {
+          "url": "https://github.com/acme/api/pull/7",
+          "source": "meta",
+          "head": "fm/ship-review"
+        },
+        "hints": {
+          "pending_decision": false,
+          "blocked_event": false,
+          "open_decisions": [],
+          "scout_report_present": false,
+          "last_event_text": "done: PR https://github.com/acme/api/pull/7 checks green"
+        },
+        "paths": {
+          "status_log": {
+            "path": "/fixture/holds-main/state/ship-review.status",
+            "present": true,
+            "kind": "event_history"
+          }
+        },
+        "remote": null,
+        "backlog": {
+          "state": "in_flight",
+          "title": "Retry on 429 from the address API",
+          "repo": "acme/api"
+        }
+      }
+    ],
+    "backlog": {
+      "records": [
+        {
+          "id": "option-hold",
+          "state": "queued",
+          "title": "Choose the address API vendor",
+          "repo": "acme/api",
+          "kind": "captain",
+          "hold_kind": "captain",
+          "hold_reason": "Two quotes arrived. Options: a. Vendor North, the cheaper quote b. Vendor South, with the EU region c. Neither; keep the current API",
+          "hold_until": null,
+          "hold_set": "2026-09-13T12:00:00Z",
+          "hold_bucket": "live",
+          "hold_age_days": 3,
+          "captain_actionable": true,
+          "since": "2026-09-13",
+          "pr_url": null,
+          "report_path": "data/option-hold/report.md",
+          "body_lines": [
+            "Captain hold set: 2026-09-13T12:00:00Z",
+            "The report compares the two quotes."
+          ],
+          "links": [],
+          "completion": {
+            "verb": null,
+            "date": null
+          }
+        },
+        {
+          "id": "work-hold",
+          "state": "queued",
+          "title": "Cut over the nightly loader",
+          "repo": "acme/etl",
+          "kind": "ship",
+          "hold_kind": "captain",
+          "hold_reason": "Approve the cutover plan in the report before the worker starts",
+          "hold_until": null,
+          "hold_set": "2026-09-14T09:00:00Z",
+          "hold_bucket": "live",
+          "hold_age_days": 2,
+          "captain_actionable": true,
+          "since": "2026-09-14",
+          "pr_url": null,
+          "report_path": null,
+          "body_lines": [
+            "Captain hold set: 2026-09-14T09:00:00Z"
+          ],
+          "links": [],
+          "completion": {
+            "verb": null,
+            "date": null
+          }
+        },
+        {
+          "id": "nokind-hold",
+          "state": "queued",
+          "title": "Retire the legacy importer",
+          "repo": "acme/legacy",
+          "kind": null,
+          "hold_kind": "captain",
+          "hold_reason": "Decide whether the legacy importer stays",
+          "hold_until": null,
+          "hold_set": null,
+          "hold_bucket": "live",
+          "hold_age_days": null,
+          "captain_actionable": true,
+          "since": "2026-09-15",
+          "pr_url": null,
+          "report_path": null,
+          "body_lines": [],
+          "links": [],
+          "completion": {
+            "verb": null,
+            "date": null
+          }
+        },
+        {
+          "id": "ship-review",
+          "state": "in_flight",
+          "title": "Retry on 429 from the address API",
+          "repo": "acme/api",
+          "kind": "ship",
+          "hold_kind": null,
+          "hold_reason": null,
+          "hold_until": null,
+          "hold_set": null,
+          "hold_bucket": null,
+          "hold_age_days": null,
+          "captain_actionable": false,
+          "since": "2026-09-14",
+          "pr_url": "https://github.com/acme/api/pull/7",
+          "report_path": null,
+          "body_lines": [],
+          "links": [],
+          "completion": {
+            "verb": null,
+            "date": null
+          }
+        }
+      ]
+    },
+    "scout_reports": [],
+    "secondmate_current": {
+      "records": [
+        {
+          "id": "delegate",
+          "home": "/fixture/holds-delegate",
+          "host": null,
+          "remote": false,
+          "registered": true,
+          "provenance": {
+            "selected": "structured-home",
+            "summary_source": "local-ledger",
+            "summary_valid": true,
+            "trust": "complete"
+          },
+          "freshness": {
+            "status": "fresh",
+            "observed_at": "2026-09-16T11:58:00Z",
+            "age_seconds": 120
+          },
+          "active_children": [],
+          "endpoints": [],
+          "decisions_open": [
+            {
+              "id": "delegate-hold",
+              "key": "delegate-hold",
+              "verb": "captain-hold",
+              "summary": "Approve the warehouse index",
+              "reason": "Ledger copy of the reason, cut at 160 characters",
+              "hold_bucket": "live",
+              "hold_until": null,
+              "hold_age_days": 1,
+              "source": "backlog"
+            }
+          ],
+          "holds": [
+            {
+              "id": "delegate-hold",
+              "title": "Approve the warehouse index",
+              "reason": "Ledger copy of the reason, cut at 160 characters",
+              "source": "backlog"
+            }
+          ],
+          "landed": [],
+          "queued": [
+            {
+              "id": "delegate-hold",
+              "title": "Approve the warehouse index",
+              "repo": "acme/etl",
+              "kind": "task",
+              "hold_bucket": "live",
+              "captain_actionable": true
+            }
+          ]
+        },
+        {
+          "id": "remote-sm",
+          "home": "/fixture/holds-remote",
+          "host": "laptop2",
+          "remote": true,
+          "registered": true,
+          "provenance": {
+            "selected": "structured-home",
+            "summary_source": "remote-ledger-cache",
+            "summary_valid": true,
+            "trust": "complete"
+          },
+          "freshness": {
+            "status": "cached",
+            "observed_at": "2026-09-16T11:00:00Z",
+            "age_seconds": 3600
+          },
+          "active_children": [],
+          "endpoints": [],
+          "decisions_open": [
+            {
+              "id": "remote-hold",
+              "key": "remote-hold",
+              "verb": "captain-hold",
+              "summary": "Rotate the mobile signing key?",
+              "reason": "Remote ledger reason",
+              "hold_bucket": "live",
+              "hold_until": null,
+              "hold_age_days": 4,
+              "source": "backlog"
+            }
+          ],
+          "holds": [
+            {
+              "id": "remote-hold",
+              "title": "Rotate the mobile signing key",
+              "reason": "Remote ledger reason",
+              "source": "backlog"
+            }
+          ],
+          "landed": [],
+          "queued": [
+            {
+              "id": "remote-hold",
+              "title": "Rotate the mobile signing key",
+              "repo": "acme/mobile",
+              "kind": "task",
+              "hold_bucket": "live",
+              "captain_actionable": true
+            }
+          ]
+        }
+      ]
+    },
+    "secondmate_landed": {
+      "records": []
+    }
+  },
+  "herdr": {
+    "agents": [
+      {
+        "pane_id": "w1C:p1",
+        "agent_status": "done",
+        "terminal_title_stripped": "ship-review"
+      }
+    ]
+  }
+}

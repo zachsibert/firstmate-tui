@@ -145,6 +145,11 @@
 #                   its two home paths are placeholders the suite rewrites to
 #                   scratch homes holding the files, a fake fm-fleet-snapshot.sh
 #                   and tests/fake-captain-hold.sh (the hold section below)
+#   accept.json     160x44, the a key over the same two placeholder homes as
+#                   holds.json: option-hold (kind captain, a reason with
+#                   Options: a. b. c.), work-hold (kind ship), nokind-hold (no
+#                   kind), the delegate's and the remote home's holds and a
+#                   review row (the accept section below)
 #   search.json     160x44, the f key: a delegate home (delegate-a) whose
 #                   two live captain-hold decisions, portal-mdm-gap-analysis
 #                   and portal-ingest-expired-token-scout, are Captain's
@@ -545,8 +550,8 @@ assert_row "$frame" '^│ STATE +WHY +ID +WHAT +REPO +HOME +FILED │$' "Charted
 # Captain's Call's first row, where the board starts, is scout-beta's blocked row: it carries a hold
 # card and a pane, so the footer names enter card and F focus in place of enter open/focus/view and,
 # with no captain hold on that task, no d or D (falsify: drop . settings from FOOTER_KEYS, or the card branch from boardHints).
-assert_row "$(render populated.json)" '^ j/k move  tab pane  enter card  F focus  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group)"
-assert_row "$(render populated.json --keys "tab,tab")" '^ j/k move  tab pane  enter open/focus/view  f search  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a PR row (falsify: drop . settings or f search from FOOTER_KEYS)"
+assert_row "$(render populated.json)" '^ j/k move  tab pane  enter card  F focus  x hide  H hidden  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group; no 1-6 panes: the card row's full hint gives them up for a accept)"
+assert_row "$(render populated.json --keys "tab,tab")" '^ j/k move  tab pane  enter open/focus/view  f search  a accept  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a PR row (falsify: drop . settings, f search or a accept from FOOTER_KEYS; l/h expand gave way to a accept so the hint fits 136 columns)"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs). The board starts
 # on Captain's Call's first row, so an Underway row is one tab away; its group is the third row.
@@ -625,7 +630,7 @@ assert_no_row "$frame_med" ' TITLE +BASE' "medium: no BASE column"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
 assert_row "$(render populated.json --cols 90 --rows 30)" '^ enter card  F focus  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer (the card form: the board starts on scout-beta's card row with a pane)"
-assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab,tab")" '^ j/k  tab  enter  f search  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer on a PR row"
+assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab,tab")" '^ j/k  tab  enter  f search  a accept  x hide  H  1-6  r  \. settings  \? help  q quit +$' "medium width uses the short footer on a PR row (no l/h and 1-6 alone: the short hint must fit 90 columns and sit beside a long notice at 160)"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
 frame_tiny=$(render populated.json --rows 10) || fail "tiny: render exited non-zero"
@@ -771,7 +776,7 @@ assert_contains "$frame_il" "Captain's Call (4)" "inflight-live: a relayed decis
 assert_row "$frame_il" '^│ decide +vendor-pick +ask-home +Which vendor for the address API\? +ask-home +ask-home +1d │$' "the relayed decision of a home whose ledger does not carry it lists once, labelled with that home"
 assert_row "$frame_il" '^│ hold +- +fix-checks +Judge only the newest run of each check · The fix is ready but cannot be pushed: pull-o… +acme/firstmate +main +2d │$' "the held failed task is one hold row"
 assert_row "$frame_il" '^│ hold +- +price-hold +Revisit the pricing tiers · Two quotes in the report +acme/billing +held-home +2d │$' "the delegate's captain hold lists once, labelled with its home"
-assert_row "$(render inflight-live.json --keys j)" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "the held failed task's row carries the card and both hold actions, and no pane (a hold row is built from the backlog record)"
+assert_row "$(render inflight-live.json --keys j)" '^ j/k move  tab pane  enter card  a accept  d discard  D defer  x hide ' "the held failed task's row carries the card and both hold actions, and no pane (a hold row is built from the backlog record)"
 # Charted Next warns about what Underway no longer lists: the two endpoints whose panes are gone and
 # the one whose state is unavailable; a done endpoint and a live child with a lost pane are not warnings
 # (falsify: warn on a done or a live endpoint in warningRows).
@@ -864,7 +869,7 @@ assert_contains "$frame_v" "f            search all panes: type loosely (any ord
 assert_contains "$frame_v" "d            discard the selected hold: asks y first, then runs fm-captain-hold.sh answer" "help overlay documents d"
 assert_contains "$frame_v" "D            defer the selected hold to a date (default today + 14 days): fm-captain-hold.sh hold" "help overlay documents D"
 assert_contains "$frame_v" "show its card in the viewer" "help overlay documents enter on a held row"
-assert_contains "$frame_v" "Its two writes, d and D," "help overlay names the board's two writes (falsify: put the read-only sentence back)"
+assert_contains "$frame_v" "Its three writes, a, d and D," "help overlay names the board's three writes (falsify: put the read-only sentence back)"
 
 # ------------------------------------------------------------- lost panes
 frame_l=$(render lost.json --expand all) || fail "lost: render exited non-zero"
@@ -1158,11 +1163,11 @@ assert_row "$frame_h" '^│ dated +until 10-01 +held-worker +Move the cache to t
 assert_row "$frame_h" '^│ paused +idle +!child-held +Child held · waiting on the captain +acme/etl +delegate +- │$' "holds: the delegate's one worker, held for the captain, draws directly with the ! marker"
 assert_row "$frame_h" '^│ answered +09-14 +landed-hold +Rename the widget table +acme/widgets +main +2d │$' "holds: the finished hold lists in Recently Landed as usual"
 assert_row "$(render_hold "k")" '^ j/k move  tab pane  enter card  F focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
-assert_row "$(render_hold "j")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
+assert_row "$(render_hold "j")" '^ j/k move  tab pane  enter card  a accept  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
 # held-worker is Charted Next's first row, three tabs away (Underway, My PRs, then Teammates' PRs is empty).
-assert_row "$(render_hold "tab,tab,tab")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the dated hold in Charted Next has the card and both actions, no pane (a hold row is built from the backlog record)"
-assert_row "$(render_hold "tab,j")" '^ j/k move  tab pane  enter card  F focus  d discard  D defer  x hide ' "holds footer: the held worker in Underway has the card, the focus and both actions"
-assert_row "$(render_hold "j,j,j,j,j,j")" '^ j/k move  tab pane  enter open/focus/view  f search  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
+assert_row "$(render_hold "tab,tab,tab")" '^ j/k move  tab pane  enter card  a accept  d discard  D defer  x hide ' "holds footer: the dated hold in Charted Next has the card and both actions, no pane (a hold row is built from the backlog record)"
+assert_row "$(render_hold "tab,j")" '^ j/k move  tab pane  enter card  F focus  a accept  d discard  D defer  x hide ' "holds footer: the held worker in Underway has the card, the focus and both actions"
+assert_row "$(render_hold "j,j,j,j,j,j")" '^ j/k move  tab pane  enter open/focus/view  f search  a accept ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
 assert_row "$(render_hold "tab,tab,tab,tab,j")" '^ j/k move  tab pane  enter card  x hide ' "holds footer: the finished hold in Recently Landed has its card, no pane and nothing to act on"
 assert_widths "$frame_h" 160 "holds frame lines are 160 columns"
 
@@ -1342,7 +1347,7 @@ assert_contains "$frame_h" "Captain's Call (8)" "holds inflight: the live held w
 assert_contains "$frame_h" "Underway (4)" "holds inflight: Underway lists the working held task"
 assert_row "$frame_h" '^│ hold +- +held-worker +Move the cache to the new vendor · Waiting for the vendor contract before the cache' "holds inflight: the held worker's Captain's Call row"
 assert_row "$frame_h" '^│ working +idle +!held-worker +Move the cache to the new vendor · harness busy \(claude-hook\) ' "holds inflight: the held worker's Underway row, marked ! (falsify: drop the flag or the marker from mainTaskRow)"
-assert_row "$frame_h" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds inflight: j selects the held worker's Captain's Call row, a hold row built from the backlog record and so without the worker's pane"
+assert_row "$frame_h" '^ j/k move  tab pane  enter card  a accept  d discard  D defer  x hide ' "holds inflight: j selects the held worker's Captain's Call row, a hold row built from the backlog record and so without the worker's pane"
 rm -f "${HOLD_LOG:?}"
 frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-inflight.json" --no-herdr --keys "j,d,y") || fail "holds inflight d,y: render exited non-zero"
 assert_file_contains "$HOLD_LOG" "argv=answer held-worker --decision-file" "holds inflight d,y: the command ran for the held worker"
@@ -1512,6 +1517,272 @@ assert_row "$pure_h" '^none$' "the defer prompt takes no more than ten character
 assert_row "$pure_h" '^none discard$' "the discard prompt answers only a lower-case y"
 
 
+# --------------------------------------------------------------- accept (a)
+# tests/fixtures/accept.json over the same two scratch homes as holds.json (its placeholders are rewritten
+# the same way). Captain's Call, in order: option-hold (kind captain, a question whose reason lists
+# Options: a. b. c.), work-hold (kind ship, a held work item), nokind-hold (a record without a kind), the
+# delegate's delegate-hold (kind task in that home's own record, read through its fake snapshot), the
+# remote home's remote-hold, then the review row ship-review. HOLD_HOME gets a 45-line report under
+# data/option-hold/ so that card is longer than the frame and scrolls. A one-shot render really runs the
+# home's bin/fm-captain-hold.sh, which is why the homes are scratch.
+ACCEPT_FIX="$SCRATCH/accept.json"
+mkdir -p "$HOLD_HOME/data/option-hold"
+for i in $(seq 1 45); do echo "# Quote line $i"; done > "$HOLD_HOME/data/option-hold/report.md"
+# shellcheck disable=SC2016 # the template literal is node's, not the shell's
+node -e '
+  const fs = require("fs");
+  const [fixture, out, mainHome, delegateHome] = process.argv.slice(1);
+  fs.writeFileSync(out, fs.readFileSync(fixture, "utf8").split("/fixture/holds-main").join(mainHome).split("/fixture/holds-delegate").join(delegateHome));
+' "$FIX/accept.json" "$ACCEPT_FIX" "$HOLD_HOME" "$HOLD_DELEGATE"
+# render_accept <keys> [flags]: ACCEPT_FIX with every fake wired and every log reset first.
+render_accept() {
+  local keys=$1
+  shift
+  rm -f "${HOLD_LOG:?}" "${HOLD_CARD:?}" "${VIEWER_LOG:?}" "${OPENER_LOG:?}"
+  FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" FM_BOARD_TEST_VIEWER_COPY="$HOLD_CARD" FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" \
+    "$BOARD" --render-once --fixture "$ACCEPT_FIX" --no-herdr --keys "$keys" --viewer-cmd "$FAKE_VIEWER" --opener-cmd "$FAKE_OPENER" "$@"
+}
+type_keys() { printf '%s' "$1" | sed 's/./&,/g; s/,$//; s/ /space/g'; } # a line as key tokens: "go ahead" -> g,o,space,a,h,e,a,d
+decision_file() { grep -o -- '--decision-file [^ ]*' "$HOLD_LOG" 2>/dev/null | head -n 1 | cut -d' ' -f2; }
+
+# The rows and the footer (falsify: drop a accept from boardHints, or 1-6 panes back into the card row's
+# full hint, which then overflows 136 columns and the short hint draws instead).
+frame_a=$(render "$ACCEPT_FIX") || fail "accept: render exited non-zero"
+assert_contains "$frame_a" "Captain's Call (6)" "accept: three main holds, the delegate's and the remote home's holds, and the review row"
+assert_row "$frame_a" '^│ hold +- +option-hold +Choose the address API vendor · Two quotes arrived\. Options: a\. Vendor North' "accept: the question's row leads"
+assert_row "$frame_a" '^│ hold +- +work-hold +Cut over the nightly loader · Approve the cutover plan' "accept: the held work item's row"
+assert_row "$frame_a" '^│ hold +- +nokind-hold +Retire the legacy importer' "accept: the row of the record without a kind"
+assert_row "$frame_a" '^│ hold +- +delegate-hold ' "accept: the delegate's hold"
+assert_row "$frame_a" '^│ hold +- +remote-hold ' "accept: the remote home's hold"
+assert_row "$frame_a" '^│ review +#7 +ship-review ' "accept: the review row is last"
+assert_row "$frame_a" '^ j/k move  tab pane  enter card  a accept  d discard  D defer  x hide  H hidden  r refresh  \. settings  \? help  q quit +$' "accept footer: a hold row names a accept beside d and D, and the full hint drops 1-6 panes to fit 160 columns"
+assert_widths "$frame_a" 160 "accept frame lines are 160 columns"
+assert_lines "$frame_a" 44 "accept frame is 44 lines"
+
+# The prompt: the card in the frame with the options listed, the footer, nothing run (falsify: drop
+# renderAccept from renderFrame, break parseOptions, or route a through the viewer).
+frame_a=$(render_accept "a") || fail "accept a: render exited non-zero"
+assert_row "$frame_a" '^ Accept option-hold: Choose the address API vendor  \(card lines 1-37 of [0-9]+; up/down and pageup/pagedown scroll\) +$' "a: the heading names the task, the title and the visible card lines"
+assert_row "$frame_a" '^   a\. Vendor North, the cheaper quote +$' "a: option a is listed from the reason"
+assert_row "$frame_a" '^   b\. Vendor South, with the EU region +$' "a: option b"
+assert_row "$frame_a" '^   c\. Neither; keep the current API +$' "a: option c keeps its inner semicolon"
+assert_row "$frame_a" '^ # Choose the address API vendor +$' "a: the card's title line is in the frame"
+assert_row "$frame_a" '^ \| kind \| captain \| +$' "a: the card's facts table is in the frame"
+assert_row "$frame_a" '^ ## Hold reason +$' "a: the reason section"
+assert_row "$frame_a" '^ Two quotes arrived\. Options: a\. Vendor North, the cheaper quote b\. Vendor South, with the EU region c\. Neither; keep the current API +$' "a: the full reason verbatim"
+assert_contains "$frame_a" "data/option-hold/report.md (45 lines; the first 40 follow)" "a: the report head is part of the card"
+assert_not_contains "$frame_a" "Captain's Call (" "a: the grid gave way to the card"
+assert_row "$frame_a" '^ accept option-hold: a-c picks an option, or type an answer  enter records  esc cancels +$' "a: the footer prompt names the letters and the keys"
+assert_no_hold "a alone runs nothing"
+assert_not_viewed "a runs no viewer: the card is drawn in the frame"
+assert_widths "$frame_a" 160 "a: the accept frame lines are 160 columns"
+assert_lines "$frame_a" 44 "a: the accept frame is 44 lines"
+# Scrolling the card (falsify: drop accept-scroll, or the clamp in renderAccept).
+frame_a=$(render_accept "a,pagedown") || fail "accept a,pagedown: render exited non-zero"
+assert_row "$frame_a" '^ Accept option-hold: Choose the address API vendor  \(card lines 11-47 of ' "a,pagedown: the card scrolls ten lines"
+assert_no_row "$frame_a" '^ # Choose the address API vendor +$' "a,pagedown: the card's title line scrolled off"
+assert_row "$frame_a" '^   a\. Vendor North, the cheaper quote +$' "a,pagedown: the options stay in view above the card"
+frame_a=$(render_accept "a,pagedown,up") || fail "accept a,pagedown,up: render exited non-zero"
+assert_row "$frame_a" '^ Accept option-hold: Choose the address API vendor  \(card lines 10-46 of ' "a,pagedown,up: up scrolls one line back"
+frame_a=$(render_accept "a,up") || fail "accept a,up: render exited non-zero"
+assert_row "$frame_a" '^ Accept option-hold: Choose the address API vendor  \(card lines 1-37 of ' "a,up: the top stays the top"
+# Picking (falsify: let accept-edit run while picked, or drop the unpick from backspace).
+frame_a=$(render_accept "a,b") || fail "accept a,b: render exited non-zero"
+assert_row "$frame_a" '^ accept option-hold: option b \(Vendor South, with the EU region\)  enter records  backspace unpicks  esc cancels +$' "a,b: a lower-case option letter picks that option"
+tags_a=$(render_accept "a,b" --tags) || fail "accept a,b --tags: render exited non-zero"
+assert_row "$tags_a" "${SEL}   b\\. Vendor South, with the EU region${SEL_END}" "a,b: the picked option is drawn as the selection"
+assert_no_row "$tags_a" "${SEL}   a\\. " "a,b: the other options are not"
+assert_no_hold "a,b runs nothing yet"
+frame_a=$(render_accept "a,b,x") || fail "accept a,b,x: render exited non-zero"
+assert_row "$frame_a" '^ accept option-hold: option b \(' "a,b,x: a printable key does not type over a pick"
+assert_not_contains "$frame_a" "hidden option-hold" "a,b,x: x hid nothing"
+frame_a=$(render_accept "a,b,backspace") || fail "accept a,b,backspace: render exited non-zero"
+assert_row "$frame_a" '^ accept option-hold: a-c picks an option, or type an answer  enter records  esc cancels +$' "a,b,backspace: backspace unpicks"
+frame_a=$(render_accept "a,b,backspace,c") || fail "accept a,b,backspace,c: render exited non-zero"
+assert_row "$frame_a" '^ accept option-hold: option c \(Neither; keep the current API\)' "a,b,backspace,c: another letter picks again"
+# Recording a pick: the fixed decision text with the letter and the option's words, no --release for a
+# record of kind captain, the row gone at once (falsify: release every answer, drop the option text, or
+# drop dismissRow from holdAnswer).
+frame_a=$(render_accept "a,b,enter") || fail "accept a,b,enter: render exited non-zero"
+assert_hold_log "FM_HOME=$HOLD_HOME
+cwd=$HOLD_HOME_REAL
+argv=answer option-hold --decision-file $(decision_file)
+decision=Accepted by captain from firstmate-tui on $TODAY: option b Vendor South, with the EU region" "a,b,enter runs fm-captain-hold.sh answer once in the hold's home with the option's letter and text, and no --release for a record of kind captain"
+assert_row "$(cat "$HOLD_LOG")" '^argv=answer option-hold --decision-file /.*/firstmate-tui-[^/]+/decision\.txt$' "a,b,enter: the decision file lives in a firstmate-tui temp directory"
+if [ -e "$(decision_file)" ]; then fail "a,b,enter: the decision file is still there after the command exited"; else pass; fi
+assert_contains "$frame_a" "option-hold: answer recorded; closed · answered: option-hold" "a,b,enter: the footer says the answer is recorded and the question closed, then the command's first line"
+assert_not_contains "$frame_a" "firstmate dispatches" "a,b,enter: a closed question is not reported as dispatched"
+assert_not_contains "$frame_a" "Accept option-hold" "a,b,enter: the card view is gone"
+assert_contains "$frame_a" "Captain's Call (5)" "a,b,enter: the pane count drops by one in the same frame"
+assert_no_row "$frame_a" '^│ hold +- +option-hold ' "a,b,enter: the answered row is gone from Captain's Call at once"
+assert_not_contains "$frame_a" "(hidden)" "a,b,enter: the dismissed row is not drawn hidden"
+tags_a=$(render_accept "a,b,enter" --tags) || fail "accept a,b,enter --tags: render exited non-zero"
+assert_row "$tags_a" "${SEL}hold +${SEL_END}${SEL} +${SEL_END}${SEL}- +${SEL_END}${SEL} +${SEL_END}${SEL}work-hold +${SEL_END}" "a,b,enter: the selection lands on work-hold, the row that took the answered one's place"
+# A typed answer on a held work item: --release (falsify: close every answer).
+frame_a=$(render_accept "j,a") || fail "accept j,a: render exited non-zero"
+assert_row "$frame_a" '^ Accept work-hold: Cut over the nightly loader' "j,a: the heading names the work item"
+assert_row "$(render_accept "j,a" --rows 60)" '^ Accept work-hold: Cut over the nightly loader +$' "j,a at 60 rows: a card shorter than the frame has no line range"
+assert_no_row "$frame_a" '^   a\. ' "j,a: a reason without Options: lists no options"
+assert_row "$frame_a" '^ accept work-hold: type an answer  enter records  esc cancels +$' "j,a: the footer asks for a typed answer"
+assert_row "$frame_a" '^ \| kind \| ship \| +$' "j,a: the work item's kind is on the card"
+frame_a=$(render_accept "j,a,$(type_keys 'go ahead')") || fail "accept j,a typed: render exited non-zero"
+assert_row "$frame_a" '^ accept work-hold: go ahead  enter records  esc cancels +$' "j,a typed: printable keys and the space bar type into the answer"
+assert_no_hold "typing runs nothing"
+frame_a=$(render_accept "j,a,$(type_keys 'go ahead'),enter") || fail "accept j,a typed enter: render exited non-zero"
+assert_hold_log "FM_HOME=$HOLD_HOME
+cwd=$HOLD_HOME_REAL
+argv=answer work-hold --decision-file $(decision_file) --release
+decision=Accepted by captain from firstmate-tui on $TODAY: go ahead" "a typed answer on a record of kind ship runs answer with --release: a work item resumes"
+assert_contains "$frame_a" "work-hold: answer recorded; firstmate dispatches · answered: work-hold" "typed enter: the footer says firstmate dispatches, never that work started"
+assert_not_contains "$frame_a" "answer recorded; closed" "typed enter: a released work item is not reported as closed"
+assert_contains "$frame_a" "Captain's Call (5)" "typed enter: the row leaves at once"
+assert_no_row "$frame_a" '^│ hold +- +work-hold ' "typed enter: the work item's row is gone"
+assert_row "$frame_a" '^│ hold +- +option-hold ' "typed enter: the other holds stay"
+# Typing on a reason with options: any key but a lower-case option letter starts the line, and option
+# letters then type; the line is trimmed (falsify: pick on every option letter, or skip the trim).
+frame_a=$(render_accept "a,$(type_keys 'So b'),enter") || fail "accept typed over options: render exited non-zero"
+assert_file_contains "$HOLD_LOG" "decision=Accepted by captain from firstmate-tui on $TODAY: So b" "a capital letter starts a typed answer on a reason with options, and option letters then type"
+assert_no_row "$(cat "$HOLD_LOG")" 'release' "a typed answer on the question still closes it"
+frame_a=$(render_accept "a,S,o,backspace,backspace,b") || fail "accept backspace to empty: render exited non-zero"
+assert_row "$frame_a" '^ accept option-hold: option b \(' "backspaces back to an empty answer let a letter pick again"
+frame_a=$(render_accept "j,a,space,$(type_keys ok),space,enter") || fail "accept trimmed: render exited non-zero"
+assert_file_contains "$HOLD_LOG" "decision=Accepted by captain from firstmate-tui on $TODAY: ok" "the typed line is trimmed"
+# The refusals: an empty answer, spaces alone and the reserved word keep the prompt open and run
+# nothing (falsify: drop checkAcceptAnswer).
+frame_a=$(render_accept "a,enter") || fail "accept a,enter: render exited non-zero"
+assert_no_hold "enter on an empty answer runs nothing"
+assert_contains "$frame_a" "option-hold: an empty answer is refused; pick an option or type one" "an empty answer is refused by name"
+assert_row "$frame_a" '^ accept option-hold: a-c picks an option' "an empty answer keeps the prompt open"
+frame_a=$(render_accept "j,a,space,space,enter") || fail "accept spaces: render exited non-zero"
+assert_no_hold "spaces alone run nothing"
+assert_contains "$frame_a" "work-hold: an empty answer is refused" "spaces alone are an empty answer"
+frame_a=$(render_accept "j,a,$(type_keys reconcile),enter" --cols 200) || fail "accept reconcile: render exited non-zero"
+assert_no_hold "reconcile runs nothing"
+assert_contains "$frame_a" 'work-hold: "reconcile" is reserved by fm-captain-hold.sh (it means re-check reality); type another answer' "the reserved word is refused by name"
+assert_row "$frame_a" '^ accept work-hold: reconcile  enter records  esc cancels' "the reserved word keeps the prompt open with the value to change"
+frame_a=$(render_accept "j,a,$(type_keys 'reconcile the ledger'),enter") || fail "accept reconcile phrase: render exited non-zero"
+assert_file_contains "$HOLD_LOG" "decision=Accepted by captain from firstmate-tui on $TODAY: reconcile the ledger" "only the exact word is reserved"
+# esc cancels, with or without a pick; a key that is a board key elsewhere types here (falsify: drop
+# the prompt branch from handleKey).
+frame_a=$(render_accept "a,escape") || fail "accept a,escape: render exited non-zero"
+assert_no_hold "a,escape runs nothing"
+assert_contains "$frame_a" "cancelled; option-hold is unchanged" "a,escape: the footer says cancelled"
+assert_contains "$frame_a" "Captain's Call (6)" "a,escape: the grid is back with every row"
+assert_not_contains "$frame_a" "Accept option-hold" "a,escape: the card view is gone"
+frame_a=$(render_accept "a,b,escape") || fail "accept a,b,escape: render exited non-zero"
+assert_no_hold "a,b,escape runs nothing"
+assert_contains "$frame_a" "cancelled; option-hold is unchanged" "a,b,escape: a pick is cancelled too"
+frame_a=$(render_accept "a,x,escape") || fail "accept a,x,escape: render exited non-zero"
+assert_contains "$frame_a" "Captain's Call (6)" "a,x,escape: x typed into the answer and hid nothing"
+assert_not_contains "$frame_a" "hidden option-hold" "a,x,escape: no hide notice"
+# The rows a refuses: a record without a kind (never guessed), the review row (the board does not
+# merge), a remote home's hold, and rows without a hold (falsify: default acceptRelease to true, or
+# give the review row a hold).
+frame_a=$(render_accept "j,j,a") || fail "accept nokind: render exited non-zero"
+assert_no_hold "a on a record without a kind runs nothing"
+assert_contains "$frame_a" "nokind-hold: the backlog record carries no kind, so the board cannot tell a question from work; answer it with fm-captain-hold.sh in main" "a on a record without a kind is refused by name"
+assert_contains "$frame_a" "Captain's Call (6)" "a on a record without a kind opens no prompt"
+frame_a=$(render_accept "j,j,j,j,j,a") || fail "accept review: render exited non-zero"
+assert_no_hold "a on the review row runs nothing"
+assert_not_opened "a on the review row opens nothing"
+assert_contains "$frame_a" "ship-review: accepting a pull request means merging it, which the board does not do; enter opens it" "a on a review row says the board does not merge"
+frame_a=$(render_accept "j,j,j,j,j,enter") || fail "accept review enter: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/7" "enter on the same review row still opens its PR"
+frame_a=$(render_accept "j,j,j,j,a") || fail "accept remote: render exited non-zero"
+assert_no_hold "a on a remote hold runs nothing"
+assert_contains "$frame_a" "remote-hold: hold lives on another host (remote-sm (remote)); cannot accept from here" "a on a remote home's hold is refused with the host reason"
+frame_h=$(render_hold "k,a") || fail "accept decision row: render exited non-zero"
+assert_contains "$frame_h" "decide-task: no captain hold to accept" "a on a decision row whose task has no hold is refused with the no-hold notice"
+assert_no_hold "a on a decision row runs nothing"
+frame_h=$(render_hold "tab,tab,tab,tab,j,a") || fail "accept landed: render exited non-zero"
+assert_contains "$frame_h" "landed-hold: no captain hold to accept" "a on a finished hold in Recently Landed is refused: the task is done"
+frame_h=$(render_hold "tab,tab,tab,a") || fail "accept charted: render exited non-zero"
+assert_row "$frame_h" '^ Accept held-worker: Move the cache to the new vendor' "a on a dated hold in Charted Next opens the same prompt: a hold row is a hold row, whatever the pane"
+# A delegate hold: the home's own record is read first (the ledger keeps the reason cut and the kind
+# is that record's), the answer runs in that home, and a failed read refuses (falsify: answer against
+# the ledger's copy).
+frame_a=$(render_accept "j,j,j,a") || fail "accept delegate: render exited non-zero"
+assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "a on a delegate hold reads that home's own record first and runs no command"
+assert_row "$frame_a" '^ Accept delegate-hold: Approve the warehouse index' "a delegate: the prompt opens over the home's record"
+assert_row "$frame_a" '^ The full delegate reason, longer than the ledger keeps: approve the warehouse index before the nightly loader is scheduled +$' "a delegate: the card carries the full reason from the home"
+assert_not_contains "$frame_a" "Ledger copy of the reason" "a delegate: the ledger's cut reason is not shown"
+assert_row "$frame_a" '^ \| kind \| task \| +$' "a delegate: the kind comes from the home's record"
+frame_a=$(render_accept "j,j,j,a,$(type_keys approved),enter") || fail "accept delegate enter: render exited non-zero"
+assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE
+FM_HOME=$HOLD_DELEGATE
+cwd=$HOLD_DELEGATE_REAL
+argv=answer delegate-hold --decision-file $(decision_file) --release
+decision=Accepted by captain from firstmate-tui on $TODAY: approved" "a delegate hold of kind task is a work item: answered with --release in its own home"
+assert_contains "$frame_a" "delegate-hold: answer recorded; firstmate dispatches" "a delegate: the footer says firstmate dispatches"
+assert_contains "$frame_a" "Captain's Call (5)" "a delegate: the row leaves at once"
+frame_a=$(FAKE_SNAPSHOT_FAIL=1 render_accept "j,j,j,a") || fail "accept delegate fail: render exited non-zero"
+assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "a delegate whose snapshot fails runs no command"
+assert_contains "$frame_a" "delegate-hold: the full hold reason is not readable (exit 1: fm-fleet-snapshot: jq not found); accept it from delegate itself" "a delegate fail: refused rather than answering against the ledger's cut reason"
+assert_not_contains "$frame_a" "Accept delegate-hold" "a delegate fail: no prompt opens"
+# A refusal from the command: its stderr in red, the row untouched (falsify: dismiss before the exit
+# status is known).
+frame_a=$(FAKE_HOLD_FAIL=1 render_accept "a,b,enter") || fail "accept fail: render exited non-zero"
+assert_contains "$frame_a" "fm-captain-hold: task option-hold is not held for the captain; hold it first or name the right task" "a refused answer shows the command's stderr verbatim"
+assert_not_contains "$frame_a" "answer recorded" "a refused answer is not reported as recorded"
+assert_file_contains "$HOLD_LOG" "argv=answer option-hold --decision-file" "the refused command did run once"
+assert_contains "$frame_a" "Captain's Call (6)" "a refused answer leaves the pane count as it was"
+assert_row "$frame_a" '^│ hold +- +option-hold ' "a refused answer leaves the row"
+tags_a=$(FAKE_HOLD_FAIL=1 render_accept "a,b,enter" --tags) || fail "accept fail --tags: render exited non-zero"
+assert_row "$tags_a" '\{red-fg\}[^{]*fm-captain-hold: task option-hold is not held for the captain' "the refusal is red"
+# The identity unknown: the OS user signs and the footer says so (holds-noid.json, main-hold of kind
+# task) (falsify: fall back to `captain`).
+rm -f "${HOLD_LOG:?}"
+frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-noid.json" --no-herdr --keys "j,a,$(type_keys ok),enter") || fail "accept no identity: render exited non-zero"
+assert_file_contains "$HOLD_LOG" "decision=Accepted by $(id -un) from firstmate-tui on $TODAY: ok" "with the identity unknown the accept names the OS user"
+assert_row "$(cat "$HOLD_LOG")" '^argv=answer main-hold --decision-file .* --release$' "main-hold, kind task, is a work item: released"
+assert_contains "$frame_h" "main-hold: answer recorded; firstmate dispatches (signed as OS user $(id -un), GitHub login unknown)" "with the identity unknown the footer says who signed"
+# The refresh a success starts, against the live stand-in, as after d (falsify: forget the refresh).
+frame_h=$(render_hold_live "" "j,a,$(type_keys ok),enter") || fail "accept live: render exited non-zero"
+if [ "$(hold_log_sans_decision)" = "snapshot FM_HOME=$HOLD_LIVE
+FM_HOME=$HOLD_LIVE
+cwd=$HOLD_LIVE_REAL
+argv=answer main-hold --decision-file $(decision_file) --release
+snapshot FM_HOME=$HOLD_LIVE" ]; then pass; else fail "accept live: the answer call is not followed by the refresh's snapshot; the log is '$(hold_log_sans_decision | tr '\n' '|')'"; fi
+assert_contains "$frame_h" "main-hold: answer recorded; firstmate dispatches" "accept live: the footer keeps the notice through the refresh"
+assert_contains "$frame_h" "Captain's Call (3)" "accept live: the row stays gone after a refresh whose snapshot still lists the hold"
+# The help and the standard footer name a (falsify: drop the a line from HELP_LINES or a accept from
+# FOOTER_KEYS).
+frame_a=$(render_accept "?") || fail "accept ?: render exited non-zero"
+assert_contains "$frame_a" "a            accept the selected hold: pick an option letter or type a line; fm-captain-hold.sh answer" "help overlay documents a"
+assert_contains "$frame_a" "Its three writes, a, d and D," "help overlay counts three writes"
+frame_a=$(render_accept "tab") || fail "accept tab: render exited non-zero"
+assert_row "$frame_a" '^ j/k move  tab pane  enter open/focus/view  f search  a accept  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "the standard footer names a accept on a row without a card"
+# The pure pieces, straight from lib/card.mjs (falsify: change any of them).
+pure_a=$(node --input-type=module -e "
+  import { acceptArgs, acceptDecision, acceptProblem, acceptRelease, checkAcceptAnswer, parseOptions, promptKeyAction } from '$ROOT/bin/firstmate-tui/lib/card.mjs';
+  const j = (x) => JSON.stringify(x);
+  console.log(j(parseOptions('Pick one. Options: a. keep it; b) drop it, C. wait')));
+  console.log(j(parseOptions('no options here, e.g. a. thing')));
+  console.log(j(parseOptions('Options: b. starts at b c. then c')));
+  console.log(j(parseOptions('OPTIONS: a. first e.g. something b. second')));
+  console.log(acceptDecision('zachsibert', '2026-09-19', { option: { letter: 'b', text: 'drop it' } }));
+  console.log(acceptDecision('zachsibert', '2026-09-19', { text: 'go ahead' }));
+  console.log(j(acceptArgs('x', '/tmp/d', true)), j(acceptArgs('x', '/tmp/d', false)));
+  console.log(acceptRelease({ kind: 'captain' }), acceptRelease({ kind: 'ship' }), acceptRelease({ kind: 'task' }));
+  console.log(acceptProblem({ name: 'x', hold: { homeId: 'main' } }, { kind: '  ' }));
+  console.log(checkAcceptAnswer({ text: '' }), '|', checkAcceptAnswer({ text: 'reconcile' }), '|', checkAcceptAnswer({ option: { letter: 'a', text: '' } }));
+  const p = { kind: 'accept', row: {}, id: 'x', options: [{ letter: 'a', text: 'A' }, { letter: 'b', text: 'B' }], picked: null, value: '' };
+  console.log(promptKeyAction(p, 'b').type, promptKeyAction(p, 'B').type, promptKeyAction(p, 'c').type, promptKeyAction(p, 'ctrl-c').type, promptKeyAction(p, 'escape').type, promptKeyAction(p, 'down').by);
+  console.log(promptKeyAction({ ...p, picked: 'a' }, 'b').type, promptKeyAction({ ...p, picked: 'a' }, 'backspace').letter, promptKeyAction({ ...p, value: 'x' }, 'a').value);
+")
+assert_row "$pure_a" '^\[\{"letter":"a","text":"keep it"\},\{"letter":"b","text":"drop it"\},\{"letter":"c","text":"wait"\}\]$' "parseOptions takes a. b) and C. markers, drops a trailing ; or , and lower-cases the letters"
+assert_count "$pure_a" '[]' 2 "a reason without Options:, and a list not starting at a, give no options"
+assert_row "$pure_a" '^\[\{"letter":"a","text":"first e.g. something"\},\{"letter":"b","text":"second"\}\]$' "an e.g. inside an option is not a marker, and OPTIONS: matches in any case"
+assert_row "$pure_a" '^Accepted by zachsibert from firstmate-tui on 2026-09-19: option b drop it$' "acceptDecision for a pick"
+assert_row "$pure_a" '^Accepted by zachsibert from firstmate-tui on 2026-09-19: go ahead$' "acceptDecision for a typed line"
+assert_row "$pure_a" '^\["answer","x","--decision-file","/tmp/d","--release"\] \["answer","x","--decision-file","/tmp/d"\]$' "acceptArgs adds --release only when asked"
+assert_row "$pure_a" '^false true true$' "acceptRelease: captain closes, any other kind releases"
+assert_row "$pure_a" '^x: the backlog record carries no kind' "acceptProblem refuses a blank kind"
+assert_row "$pure_a" '^an empty answer is refused; pick an option or type one \| "reconcile" is reserved by fm-captain-hold.sh \(it means re-check reality\); type another answer \| null$' "checkAcceptAnswer: empty and reconcile refused, a pick accepted"
+assert_row "$pure_a" '^accept-pick accept-edit accept-edit quit prompt-cancel 1$' "the accept prompt: a lower-case option letter picks, a capital or another letter types, ctrl-c quits, esc cancels, down scrolls"
+assert_row "$pure_a" '^none null xa$' "while picked a letter is ignored and backspace unpicks; while typing an option letter types"
+
+
 # --------------------------------------------------------- placement rules
 # The four fleet panes follow the bearings digest's placement rules, one check per row type of the
 # README's Using the board section. relayed-hold.json is the duplicate-hold shape the 0.6.x board drew
@@ -1588,7 +1859,7 @@ assert_lines "$frame_ch" 60 "charted frame is 60 lines"
 # Captain's Call. The two PR panes are empty here, so two tabs reach the pane (falsify: drop the
 # charted case from keyAction, or mainCard from chartedRow's fields).
 frame_ch=$(render charted.json --keys "tab,tab") || fail "charted footer warning: render exited non-zero"
-assert_row "$frame_ch" '^ j/k move  tab pane  enter open/focus/view  f search  l/h expand ' "charted: a warning row keeps the standard hints"
+assert_row "$frame_ch" '^ j/k move  tab pane  enter open/focus/view  f search  a accept ' "charted: a warning row keeps the standard hints"
 frame_ch=$(render charted.json --keys "tab,tab,enter") || fail "charted enter warning: render exited non-zero"
 assert_contains "$frame_ch" "main inventory: a warning row; nothing to open" "charted: enter on a warning is a plain notice"
 frame_ch=$(render charted.json --keys "tab,tab,d") || fail "charted d warning: render exited non-zero"
@@ -1596,7 +1867,7 @@ assert_contains "$frame_ch" "main inventory: no captain hold to discard" "charte
 frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j") || fail "charted footer queued: render exited non-zero"
 assert_row "$frame_ch" '^ j/k move  tab pane  enter card  x hide ' "charted: a queued row carries its card and nothing to act on"
 frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j,j,j,j") || fail "charted footer held: render exited non-zero"
-assert_row "$frame_ch" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "charted: a held row carries its card and both hold actions"
+assert_row "$frame_ch" '^ j/k move  tab pane  enter card  a accept  d discard  D defer  x hide ' "charted: a held row carries its card and both hold actions"
 frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j,j,j,j,D") || fail "charted D held: render exited non-zero"
 assert_row "$frame_ch" "^ defer hold-blocked until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "charted: D on a held row opens the date prompt"
 frame_ch=$(render_view charted.json "tab,tab,j,j,j,j,j,j,j,j,j,enter") || fail "charted card: render exited non-zero"
@@ -1978,7 +2249,7 @@ assert_row "$frame_s" "^ $T_NEEDS +hold +- +portal-ingest-expired" "search: the 
 frame_s=$(render search.json --keys "f,m,d,m,space,g,a,p,enter") || fail "search jump: render exited non-zero"
 assert_not_contains "$frame_s" "Search:" "search jump: the prompt is closed"
 assert_contains "$frame_s" "portal-mdm-gap-analysis in $T_NEEDS" "search jump: the notice names the row and its pane"
-assert_row "$frame_s" '^ enter card  d discard  D defer  x hide  H  1-6 panes ' "search jump: the footer offers the row's card and hold actions, as on any selected card row (the short form: the notice takes the full hint's room)"
+assert_row "$frame_s" '^ enter card  a accept  d discard  D defer  x hide  H  1-6 panes ' "search jump: the footer offers the row's card and hold actions, as on any selected card row (the short form: the notice takes the full hint's room)"
 tags_s=$(render search.json --keys "f,m,d,m,space,g,a,p,enter" --tags) || fail "search jump --tags: render exited non-zero"
 assert_row "$tags_s" "${SEL}hold.*${SEL}portal-mdm-gap-analysis" "search jump: the cursor bar is on the found row in its pane"
 # The children of a collapsed Underway group are searched through the index built with every group
@@ -2487,7 +2758,7 @@ assert_row "$frame_tr" "^ PR source +board: the board's own GitHub fetch \\(conf
 frame_tr=$(render to-review.json --keys "?") || fail "to-review help: render exited non-zero"
 assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] Captain's Call" "help overlay documents 1-6"
 assert_contains "$frame_tr" "[4] Teammates' PRs" "help overlay lists the Teammates' PRs badge"
-assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  f search  l/h expand  x hide  H hidden  1-6 panes ' "the footer reads 1-6 panes"
+assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  f search  a accept  x hide  H hidden  1-6 panes ' "the footer reads 1-6 panes"
 
 # The fetch's pure pieces, straight from lib/sources.mjs, copy fm-bearings-snapshot.sh's rules: the
 # repository slug, the check mapping (gh's statusCheckRollup list and the GraphQL contexts alike),
@@ -4762,6 +5033,20 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
 cwd=$FAKE_HOME_REAL
 argv=hold decide-vendor --reason Two quotes in the report --until 2027-01-15" "pty: the typed date reaches the stand-in home's fm-captain-hold.sh once, with the record's full reason (backspaces and digits both arrived)"
   assert_not_opened "pty: the D prompt opens no PR"
+  # The a prompt on a real terminal: j, j, j selects decide-vendor as above; a replaces the grid with the
+  # card (the heading lands where the Captain's Call border was, every cell different); the typed line with
+  # its space bar reaches the answer through the library's keypress path; the carriage return runs the
+  # stand-in's fake fm-captain-hold.sh once with --release (decide-vendor's record is kind task, a work
+  # item) and the typed line, and the footer's notice lands on cells the prompt left blank. The decision
+  # line names whatever login this host resolves, so it is matched apart (falsify: drop the accept branch
+  # from promptKeyAction, and the letters go to the board's own keys).
+  run_pty xterm-256color accept-prompt "wait:$PTY_URL" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:a" "wait:Acceptdecide-vendor:" "sleep:0.4" "send:go ahead" "sleep:0.6" "send:\r" "wait:answerrecorded;firstmatedispatches" "sleep:1.0" "send:q" exit
+  pty_ok accept-prompt "pty: the a prompt opens on a real terminal, the typed answer is recorded and the board exits on q"
+  if [ "$(grep -v '^decision=' "$HOLD_LOG" 2>/dev/null)" = "FM_HOME=$FAKE_HOME
+cwd=$FAKE_HOME_REAL
+argv=answer decide-vendor --decision-file $(decision_file) --release" ]; then pass; else fail "pty: the a prompt's enter did not run answer --release once; the log is '$(tr '\n' '|' < "$HOLD_LOG" 2>/dev/null || echo '<absent>')', the driver reported: $(tr '\n' ';' < "$SCRATCH/pty-accept-prompt.out")"; fi
+  assert_row "$(cat "$HOLD_LOG" 2>/dev/null)" "^decision=Accepted by [^ ]+ from firstmate-tui on $TODAY: go ahead$" "pty: the typed line, space included, is the decision"
+  assert_not_opened "pty: the a prompt opens no PR"
   # The search prompt on a real terminal: f opens it, the typed query with its space bar reaches
   # the prompt through the library's keypress path (one keypress event per character of the chunk,
   # each redrawing the frame), and the carriage return jumps to the one match, the stand-in's tmux

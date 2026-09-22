@@ -122,9 +122,9 @@ import { renderFrame } from './render.mjs';
 import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
-import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openDeferPrompt, savedFocus, savedScroll, viewProblem } from './controller.mjs';
+import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openAcceptPrompt, openDeferPrompt, savedFocus, savedScroll, viewProblem } from './controller.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './viewer.mjs';
-import { deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, prepareHoldCard, removeTempDir } from './hold.mjs';
+import { acceptHold, deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, loadHoldCard, prepareHoldCard, removeTempDir } from './hold.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.mjs';
 import { cachedFlags, loadStateCache, resolveCachePath, saveStateCache } from './cache.mjs';
 import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsConfig, settingsFlags } from './settings.mjs';
@@ -708,8 +708,8 @@ export async function runApp(opts) {
     draw();
   };
 
-  // The login the discard decision names: the resolved GitHub identity, else
-  // the OS user, which the success notice then says.
+  // The login the discard and accept decisions name: the resolved GitHub
+  // identity, else the OS user, which the success notice then says.
   const holdLogin = () => (identityKnown(state.identity) ? { login: state.identity.login, os: false } : { login: userInfo().username, os: true });
 
   // One hold command to its end: the footer names the run, then its result.
@@ -757,6 +757,52 @@ export async function runApp(opts) {
     const said = firstLine(r.stdout);
     notice(`discarded ${row.hold.id}${who.os ? ` as OS user ${who.login} (GitHub login unknown)` : ''}${said ? ` · ${said}` : ''}`, false, 15000);
     refresh('discard');
+  };
+
+  // The a key: the row's card and full record loaded (a delegate home's
+  // record read through its own snapshot script, as the card does), then the
+  // accept prompt opened over them with the card drawn in the frame; refused
+  // when the full reason is not readable here (the ledger's cut copy is
+  // never answered against) or the record carries no kind (openAcceptPrompt).
+  const holdAccept = async (row) => {
+    if (state.view.busy) return;
+    const { hold } = row;
+    state.view.busy = `preparing the card of ${hold.id}`;
+    draw();
+    let loaded;
+    try {
+      loaded = await loadHoldCard(row.card, { timeoutMs: opts.snapshotTimeout * 1000, onBusy: (text) => notice(text, false, 60000) });
+    } catch (e) {
+      state.view.busy = null;
+      notice(`${hold.id}: ${e.message.slice(0, 80)}`, true, 15000);
+      draw();
+      return;
+    }
+    state.view.busy = null;
+    if (!loaded.full) {
+      notice(`${hold.id}: the full hold reason is not readable (${loaded.error || 'no record'}); accept it from ${hold.homeId} itself`, true, 15000);
+      draw();
+      return;
+    }
+    const problem = openAcceptPrompt(state.view, row, loaded);
+    notice(problem || '', Boolean(problem), problem ? 15000 : 1);
+    draw();
+  };
+
+  // The accept prompt's answer, recorded: `answer --decision-file`, with
+  // --release for a work item and without it for a question (release comes
+  // from the record's kind, lib/card.mjs acceptRelease). The row leaves at
+  // once as after d, and the footer says what firstmate does next: dispatch
+  // the released work on its next pass, or nothing more for a closed
+  // question. Never that work started.
+  const holdAnswer = async (row, { answer, release }) => {
+    const who = holdLogin();
+    const r = await runHold(row, 'accepting', (hold) => acceptHold({ home: hold.home, id: hold.id, login: who.login, answer, release, timeoutMs: HOLD_TIMEOUT_MS }));
+    if (!r) return;
+    dismissRow(row.hold);
+    const said = firstLine(r.stdout);
+    notice(`${row.hold.id}: answer recorded; ${release ? 'firstmate dispatches' : 'closed'}${who.os ? ` (signed as OS user ${who.login}, GitHub login unknown)` : ''}${said ? ` · ${said}` : ''}`, false, 15000);
+    refresh('accept');
   };
 
   const holdDefer = async (row, { reason, until }) => {
@@ -849,6 +895,12 @@ export async function runApp(opts) {
     },
     viewCard: (row) => {
       viewCard(row);
+    },
+    holdAccept: (row) => {
+      holdAccept(row);
+    },
+    holdAnswer: (row, o) => {
+      holdAnswer(row, o);
     },
     holdDiscard: (row) => {
       holdDiscard(row);

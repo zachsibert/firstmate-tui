@@ -45,17 +45,20 @@ firstmate's `.agents/skills/bearings/SKILL.md`), and the README's Using the
 board section is the current pane-to-data mapping, which
 `bin/firstmate-tui/lib/model.mjs` implements row for row. Check the plan
 before widening scope: of its M2 actions, discarding and deferring a hold are
-here since 0.6.0 (`d` and `D`, through `fm-captain-hold.sh`); free-text
-answers, `fm-send --resolve-key` routing, notes through `fm-inbox`, opening
-PRs, toasts and the unread-report marker belong to later milestones.
+here since 0.6.0 (`d` and `D`, through `fm-captain-hold.sh`) and accepting
+one with an option letter or a typed line is here too (`a`, the same
+command's `answer`, `--release` for a work item); `fm-send --resolve-key`
+routing, notes through `fm-inbox`, opening PRs, toasts and the unread-report
+marker belong to later milestones.
 
 ## Hard rules
 
 - The board reads firstmate homes and never edits a file under `FM_HOME`, a
-  project or a `state/` directory; its two writes are `fm-captain-hold.sh
-  answer` (`d`) and `hold` (`D`), run in the home that owns the hold
-  (`lib/hold.mjs`), so firstmate's own guards decide and the board never
-  touches `backlog.md` or a status file. Its files are the pane record under
+  project or a `state/` directory; its three writes are `fm-captain-hold.sh
+  answer` (`a` with the captain's own answer, `--release` for a work item;
+  `d` with the fixed discard text) and `hold` (`D`), run in the home that
+  owns the hold (`lib/hold.mjs`), so firstmate's own guards decide and the
+  board never touches `backlog.md` or a status file. Its files are the pane record under
   `${XDG_STATE_HOME:-~/.local/state}/fm-board/` (or `HERDR_PLUGIN_STATE_DIR`),
   `view-state.json` (hidden rows and panes, and since 0.5.0 the selection:
   focused pane, row by hide key with its index as the fallback, expanded
@@ -110,6 +113,25 @@ PRs, toasts and the unread-report marker belong to later milestones.
   starting a refresh, and a failure showing the command's stderr verbatim in
   red and changing nothing;
   a remote home's hold gets a notice and no prompt;
+  accepting a hold (`a`: the row's card and full record are loaded first,
+  `loadHoldCard` in `lib/hold.mjs`, a delegate home's through its own
+  `fm-fleet-snapshot.sh`, and the accept is refused when that read fails, as
+  `D` refuses; then `openAcceptPrompt` in `lib/controller.mjs` draws the card
+  in the frame, `renderAccept` in `lib/render.mjs`, while the footer takes
+  the answer, `view.prompt` kind `accept` in `lib/card.mjs`: the reason's
+  lettered options from `parseOptions`, whose exact grammar the README key
+  table states, a letter picks one, any other printable key types a line;
+  enter runs `fm-captain-hold.sh answer <id> --decision-file <tmp>` in the
+  owning home with the text `acceptDecision` fixes, plus `--release` when
+  `acceptRelease` says the record is a work item: its `kind` is anything but
+  `captain`, the kind `fm-captain-hold.sh hold` gives a question it creates;
+  a record without a kind is refused by `acceptProblem` and never guessed;
+  an empty answer and the reserved word `reconcile` are refused with the
+  prompt open, `checkAcceptAnswer`; a success dismisses the task's rows and
+  refreshes as `d` does and the footer reads `<id>: answer recorded;
+  firstmate dispatches` or `closed`, never that work started; `a` on a
+  Captain's Call `review` row is a notice, since the board has no merge
+  path, and enter opens the PR);
   refreshing its own data (`r`: the snapshot, drawn when it lands, then the
   live PR fetch behind it unless `--no-prs`; that fetch is the board's own
   read-only GitHub search through `gh api graphql` in `lib/sources.mjs`: at
@@ -199,14 +221,14 @@ PRs, toasts and the unread-report marker belong to later milestones.
   through `--curl-cmd`, and the reads behind a hold card: `readHoldMaterials`
   and a delegate home's record through `readHoldRecord`), `herdr.mjs`
   (herdr), `upgrade.mjs` (the install record and the upgrade child),
-  `hold.mjs` (the card's temp file and the two `fm-captain-hold.sh` runs),
+  `hold.mjs` (the card's text and temp file and the three `fm-captain-hold.sh` runs),
   `viewstate.mjs` and `config.mjs` (the board's two files; both hold their
   pure parse beside the read and write). A row's `card` and `hold` fields
-  (`lib/model.mjs` header) say what enter, `d` and `D` may do with it; the
+  (`lib/model.mjs` header) say what enter, `a`, `d` and `D` may do with it; the
   prompt state is `view.prompt` (`lib/card.mjs`), the busy guard `view.busy`,
-  so `--render-once --keys d,y` and `D,enter` drive both through the
-  controller, and the one-shot driver waits for a hold effect before the
-  next key while `view.busy` is set.
+  so `--render-once --keys d,y`, `D,enter` and `a,<letter or typed keys>,enter`
+  drive all three through the controller, and the one-shot driver waits for
+  a hold effect before the next key while `view.busy` is set.
 - The two PR panes share one candidate list; a row's `pane` (`mine` or
   `toreview`, absent means `mine`) says where it draws, and `facts.prs.mine`
   and `facts.prs.toreview` carry each pane's own fetch state so one pane can
@@ -334,10 +356,16 @@ PRs, toasts and the unread-report marker belong to later milestones.
   decision file to `FM_BOARD_TEST_HOLD_LOG` and refuses with a fixed stderr
   line under `FAKE_HOLD_FAIL`); the card's text is read back through the fake
   viewer's `FM_BOARD_TEST_VIEWER_COPY`, since the board removes the temp file
-  as soon as the viewer exits. `d,y` and `D,enter` in a one-shot render run
-  the home's script for real, so a fixture's homes must never be real ones;
-  the pty section types the `D` prompt (digits, backspace, enter) against the
-  stand-in home's copy of the fake.
+  as soon as the viewer exits. `d,y`, `D,enter` and `a,...,enter` in a
+  one-shot render run the home's script for real, so a fixture's homes must
+  never be real ones; the pty section types the `D` prompt (digits,
+  backspace, enter) and the `a` prompt (a line with a space, enter) against
+  the stand-in home's copy of the fake. The accept checks render
+  `accept.json` over the same two scratch homes (`option-hold` carries the
+  `Options:` grammar and kind `captain`, `work-hold` kind `ship`,
+  `nokind-hold` no kind); its `card lines M-N of T` heading counts the
+  wrapped card, so a change to `buildHoldCard` or to the wrap moves those
+  regexes on purpose.
   The pane order is `PANES` in `lib/layout.mjs` (Captain's Call, Underway,
   My PRs, Teammates' PRs, Charted Next, Recently Landed since 0.7.0); the
   pane ids are older than the titles (`needs`, `inflight`, `mine`,

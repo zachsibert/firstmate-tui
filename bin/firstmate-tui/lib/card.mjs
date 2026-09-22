@@ -19,6 +19,28 @@
 //   { kind: 'defer', row, id, reason, value }       D: digits and dashes edit
 //                                                   the date, backspace deletes,
 //                                                   enter defers, esc cancels
+//   { kind: 'accept', row, id, title, options,      a: the card is drawn in the
+//     picked, value, release, card }                frame (lib/render.mjs
+//                                                   renderAccept) while the footer
+//                                                   takes the answer. options are
+//                                                   the lettered choices parsed
+//                                                   from the full hold reason
+//                                                   (parseOptions); with nothing
+//                                                   typed, a lower-case letter that
+//                                                   names one picks it (picked) and
+//                                                   backspace unpicks; any other
+//                                                   printable key starts a typed
+//                                                   answer (value), after which
+//                                                   every printable key types and
+//                                                   backspace deletes; enter records
+//                                                   the pick or the trimmed line,
+//                                                   esc cancels; up/down, pageup/
+//                                                   pagedown scroll the card.
+//                                                   release says whether the answer
+//                                                   frees a work item (--release)
+//                                                   or closes a question
+//                                                   (acceptRelease); card is the
+//                                                   card's Markdown text
 //   { kind: 'search', value, index }                f: printable characters and
 //                                                   space append to the query,
 //                                                   backspace deletes, up/down,
@@ -32,6 +54,8 @@
 //                                                   lib/search.mjs over
 //                                                   model.search
 // Every other key is ignored while a prompt is up (ctrl-c still quits).
+
+import { charWidth, width } from './text.mjs';
 
 export const CARD_REPORT_LINES = 40;
 export const CARD_STATUS_LINES = 10;
@@ -74,18 +98,122 @@ export function discardDecision(login, date) {
   return `Discarded by ${login} from firstmate-tui on ${date}: no action; closed as not wanted.`;
 }
 
-// The fm-captain-hold.sh arguments behind the two actions (bin/fm-captain-hold.sh
-// usage: `answer <task-id> --decision-file <path>`, `hold <task-id> --reason
-// <reason> --until YYYY-MM-DD`).
+// The exact words an accept records: the picked option's letter and text, or
+// the line the captain typed. `answer` is acceptAnswer's { option } or { text }.
+export function acceptDecision(login, date, answer) {
+  const head = `Accepted by ${login} from firstmate-tui on ${date}:`;
+  if (answer && answer.option) return `${head} option ${answer.option.letter} ${answer.option.text}`;
+  return `${head} ${answer ? String(answer.text || '') : ''}`;
+}
+
+// The fm-captain-hold.sh arguments behind the three actions (bin/fm-captain-hold.sh
+// usage: `answer <task-id> --decision-file <path> [--release]`, `hold <task-id>
+// --reason <reason> --until YYYY-MM-DD`). --release lifts the hold so a
+// captain-gated work item resumes; without it the answer closes the task.
 export function discardArgs(id, decisionFile) {
   return ['answer', id, '--decision-file', decisionFile];
+}
+
+export function acceptArgs(id, decisionFile, release) {
+  return ['answer', id, '--decision-file', decisionFile, ...(release ? ['--release'] : [])];
 }
 
 export function deferArgs(id, reason, until) {
   return ['hold', id, '--reason', reason, '--until', until];
 }
 
-// Why d or D cannot act on this row, or null: the row's task must carry a
+// The lettered options of a hold reason, or []: the text after the first
+// `Options:` (any case) holds markers of one letter followed by `.` or `)`
+// and a space (`a.`, `a)`, `A.`, `A)`), the letters running a, b, c... in
+// order from a; each option's text runs to the next marker or the end of the
+// reason, with the spaces around it and one trailing `;` or `,` removed. The
+// letters come back lower case, the keys the accept prompt listens for.
+// Anything else in the reason (an `e.g.`, a letter mid-sentence) is not an
+// option, and a list that does not start at `a` is left alone. Pure.
+export function parseOptions(reason) {
+  const text = String(reason || '');
+  const at = text.search(/\boptions:/i);
+  if (at < 0) return [];
+  const rest = text.slice(at).replace(/^options:/i, '');
+  const markers = [];
+  const re = /(^|\s)([A-Za-z])[.)](?=\s)/g;
+  let m;
+  while ((m = re.exec(rest)) !== null) markers.push({ letter: m[2].toLowerCase(), start: m.index, end: m.index + m[0].length });
+  const out = [];
+  for (const [i, mk] of markers.entries()) {
+    const expected = String.fromCharCode('a'.charCodeAt(0) + out.length);
+    if (mk.letter !== expected) {
+      if (out.length) break;
+      continue;
+    }
+    const next = markers.slice(i + 1).find((x) => x.letter === String.fromCharCode('a'.charCodeAt(0) + out.length + 1));
+    const body = rest
+      .slice(mk.end, next ? next.start : rest.length)
+      .trim()
+      .replace(/[;,]$/, '')
+      .trim();
+    out.push({ letter: mk.letter, text: body });
+  }
+  return out;
+}
+
+// Whether an accepted answer frees the task to proceed (`--release`) or
+// closes it: fm-captain-hold.sh creates a question-shaped call with
+// `tasks-axi add --kind captain`, so a record of that kind is a question and
+// its answer closes it; any other kind (ship, scout, docs, task...) is a work
+// item the hold gated, released to resume as approved work. The caller checks
+// acceptProblem first: a record without a kind is never guessed at.
+export function acceptRelease(record) {
+  return String((record && record.kind) || '').trim() !== 'captain';
+}
+
+// Why an accept cannot start on this record, or null: the kind must be there
+// to read, since it alone tells a question from work.
+export function acceptProblem(row, record) {
+  const kind = record && record.kind;
+  if (typeof kind !== 'string' || !kind.trim()) return `${row.name}: the backlog record carries no kind, so the board cannot tell a question from work; answer it with fm-captain-hold.sh in ${row.hold.homeId}`;
+  return null;
+}
+
+// The reserved answer fm-captain-hold.sh refuses: it means "re-check reality".
+export const RESERVED_ANSWER = 'reconcile';
+export const ACCEPT_MAX_LENGTH = 200;
+
+// The accept prompt over a row's full record (the home's own, never the
+// ledger's cut copy) and the card text the frame shows meanwhile.
+export function acceptPrompt(row, record, cardText) {
+  return {
+    kind: 'accept',
+    row,
+    id: row.hold.id,
+    title: (record && record.title) || row.hold.id,
+    options: parseOptions(record && record.hold_reason),
+    picked: null,
+    value: '',
+    release: acceptRelease(record),
+    card: String(cardText || ''),
+  };
+}
+
+// What the prompt answers with: the picked option, else the typed line trimmed.
+export function acceptAnswer(prompt) {
+  if (prompt.picked) {
+    const option = prompt.options.find((o) => o.letter === prompt.picked) || { letter: prompt.picked, text: '' };
+    return { option };
+  }
+  return { text: String(prompt.value || '').trim() };
+}
+
+// Why the answer cannot be recorded, or null: it must say something, and it
+// must not be the reserved word.
+export function checkAcceptAnswer(answer) {
+  if (answer.option) return null;
+  if (!answer.text) return 'an empty answer is refused; pick an option or type one';
+  if (answer.text === RESERVED_ANSWER) return `"${RESERVED_ANSWER}" is reserved by fm-captain-hold.sh (it means re-check reality); type another answer`;
+  return null;
+}
+
+// Why a, d or D cannot act on this row, or null: the row's task must carry a
 // captain hold (`row.hold`, lib/model.mjs) recorded in a home whose files are
 // readable here. `verb` is the word the notice uses.
 export function holdActionProblem(row, verb = 'discard') {
@@ -112,11 +240,55 @@ export function searchPrompt() {
 
 export const SEARCH_MAX_LENGTH = 80;
 
+// The letters the accept prompt's options answer to, as the footer names
+// them: `a`, or `a-c`.
+function optionLetters(options) {
+  if (!options.length) return '';
+  return options.length === 1 ? options[0].letter : `${options[0].letter}-${options[options.length - 1].letter}`;
+}
+
+// The last `w` columns of `s`, led by an ellipsis when something was cut, so a
+// long typed answer shows its end, where the captain is typing.
+function tailFit(s, w) {
+  const str = String(s);
+  if (w <= 0) return '';
+  if (width(str) <= w) return str;
+  const chars = [...str];
+  let out = '';
+  let used = 0;
+  for (let i = chars.length - 1; i >= 0; i -= 1) {
+    const cw = charWidth(chars[i].codePointAt(0));
+    if (used + cw > w - 1) break;
+    out = chars[i] + out;
+    used += cw;
+  }
+  return `…${out}`;
+}
+
+// The accept prompt's footer: the pick, the typed answer so far, or what the
+// captain may do next, then the keys. `cols` bounds the line so a long answer
+// is cut from the left (tailFit) and the keys stay in view.
+export function acceptFooterText(prompt, cols = Infinity) {
+  const head = ` accept ${prompt.id}: `;
+  const tail = prompt.picked ? '  enter records  backspace unpicks  esc cancels' : '  enter records  esc cancels';
+  let body;
+  if (prompt.picked) {
+    const o = acceptAnswer(prompt).option;
+    body = `option ${o.letter} (${o.text})`;
+  } else if (prompt.value) body = prompt.value;
+  else if (prompt.options.length) body = `${optionLetters(prompt.options)} picks an option, or type an answer`;
+  else body = 'type an answer';
+  const room = cols - width(head) - width(tail);
+  if (Number.isFinite(room) && width(body) > room) body = tailFit(body, room);
+  return `${head}${body}${tail}`;
+}
+
 // The footer's text while a prompt is up. `matches` is the search prompt's
 // match count (the renderer and the controller compute it from model.search).
 export function promptText(prompt, matches = null) {
   if (!prompt) return '';
   if (prompt.kind === 'discard') return ` discard ${prompt.id}? y to discard, esc to cancel`;
+  if (prompt.kind === 'accept') return acceptFooterText(prompt);
   if (prompt.kind === 'search') {
     const n = Number.isInteger(matches) ? matches : 0;
     return ` search: ${prompt.value}  ${n} match${n === 1 ? '' : 'es'}  enter jumps  esc cancels`;
@@ -127,6 +299,10 @@ export function promptText(prompt, matches = null) {
 // The keys that move through the search matches, and how far: the arrows,
 // the page keys and tab / shift-tab. j and k are typed into the query.
 const SEARCH_MOVES = { up: -1, down: 1, tab: 1, 'S-tab': -1, pageup: -10, pagedown: 10 };
+// The keys that scroll the card behind the accept prompt, and how far; j and
+// k type, as in the search.
+const ACCEPT_MOVES = { up: -1, down: 1, pageup: -10, pagedown: 10 };
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
 // The meaning of a key while a prompt is up. Pure on (prompt, key).
 export function promptKeyAction(prompt, key) {
@@ -136,8 +312,24 @@ export function promptKeyAction(prompt, key) {
   if (prompt.kind === 'search') {
     if (key === 'enter') return { type: 'search-jump' };
     if (key === 'backspace') return { type: 'search-edit', value: prompt.value.slice(0, -1) };
-    if (Object.prototype.hasOwnProperty.call(SEARCH_MOVES, key)) return { type: 'search-move', by: SEARCH_MOVES[key] };
+    if (hasOwn(SEARCH_MOVES, key)) return { type: 'search-move', by: SEARCH_MOVES[key] };
     if (typeof key === 'string' && key.length === 1 && key >= ' ' && prompt.value.length < SEARCH_MAX_LENGTH) return { type: 'search-edit', value: prompt.value + key };
+    return { type: 'none' };
+  }
+  if (prompt.kind === 'accept') {
+    if (key === 'enter') return { type: 'accept-submit' };
+    if (key === 'backspace') {
+      if (prompt.value) return { type: 'accept-edit', value: prompt.value.slice(0, -1) };
+      if (prompt.picked) return { type: 'accept-pick', letter: null };
+      return { type: 'none' };
+    }
+    if (hasOwn(ACCEPT_MOVES, key)) return { type: 'accept-scroll', by: ACCEPT_MOVES[key] };
+    if (typeof key === 'string' && key.length === 1 && key >= ' ') {
+      // A pick waits for enter or backspace; nothing types over it.
+      if (prompt.picked) return { type: 'none' };
+      if (!prompt.value && prompt.options.some((o) => o.letter === key)) return { type: 'accept-pick', letter: key };
+      if (prompt.value.length < ACCEPT_MAX_LENGTH) return { type: 'accept-edit', value: prompt.value + key };
+    }
     return { type: 'none' };
   }
   if (key === 'enter') return { type: 'defer-submit' };
