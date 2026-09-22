@@ -28,9 +28,9 @@ options:
                          ~/.config/fm-board/config.json; never inside FM_HOME). Written
                          once from docs/config.example.json when absent
   --no-herdr             skip the herdr overlay and the socket subscription
-  --all-homes-needs      Needs you also lists every secondmate home's open decisions
-                         (default: main home only; secondmate decisions flag their
-                         In flight group instead)
+  --all-homes-needs      accepted and ignored: since 0.7.0 Captain's Call lists every
+                         home's live captain holds by default (kept so an old launcher
+                         line still starts the board)
   --opener-cmd <argv>    command that opens a URL in the browser (default: open on
                          macOS, xdg-open on Linux); quoted string, split on whitespace
   --viewer-cmd <argv>    command that shows a Findings report or a hold card in the
@@ -77,7 +77,7 @@ options:
                          (one motion report with the left button held)  release:X,Y,
                          X and Y the cell from 0 at the top-left; any other token is a
                          key, so "click:12,5 x" selects a row and hides it
-  --expand <all|ids>     with --render-once: expand these In flight groups (secondmate
+  --expand <all|ids>     with --render-once: expand these Underway groups (secondmate
                          ids, or all) before rendering
   --tags                 with --render-once: print the frame with its color tags
                          ({red-fg}...{/red-fg}) instead of plain text

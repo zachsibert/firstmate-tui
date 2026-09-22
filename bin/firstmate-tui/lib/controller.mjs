@@ -85,8 +85,8 @@ import { checkDeferDate, deferPrompt, discardPrompt, holdActionProblem, localDat
 
 const OPEN_PANES = new Set(['mine', 'toreview', 'needs']);
 const FOCUS_PANES = new Set(['inflight', 'needs']);
-const VIEW_PANES = new Set(['findings']);
 const LANDED_PANE = 'landed';
+const CHARTED_PANE = 'charted';
 
 export const DBLCLICK_MS = 400;
 export const WHEEL_ROWS = 3;
@@ -214,7 +214,7 @@ export function scrollFromSaved(saved) {
 export function focusProblem(pane, row, herdrOn, { any = false } = {}) {
   if (!row) return 'nothing selected';
   if (any && !row.paneId) return `${row.name}: no herdr pane to focus${row.extra === 'tmux' ? ' (tmux-backed task)' : ''}`;
-  if (!any && !FOCUS_PANES.has(pane.id) && !(pane.id === LANDED_PANE && row.paneId)) return 'enter focuses a worker: pick a row in In flight';
+  if (!any && !FOCUS_PANES.has(pane.id) && !(pane.id === LANDED_PANE && row.paneId)) return 'enter focuses a worker: pick a row in Underway';
   if (row.lost) return `${row.name}: pane ${row.paneId} is gone from herdr (pane lost); nothing to focus`;
   if (!herdrOn) return 'herdr is off (--no-herdr); cannot focus';
   if (!row.paneId) return `${row.name}: no herdr pane to focus${row.extra === 'tmux' ? ' (tmux-backed task)' : ''}`;
@@ -222,11 +222,10 @@ export function focusProblem(pane, row, herdrOn, { any = false } = {}) {
   return null;
 }
 
-// Why a Findings row (or a Landed row that records a report) cannot be
-// viewed, or null.
+// Why a Recently Landed row that records a report cannot be viewed, or null.
 export function viewProblem(pane, row) {
   if (!row) return 'nothing selected';
-  if (!VIEW_PANES.has(pane.id) && !(pane.id === LANDED_PANE && (row.reportPath || row.reportRemote))) return 'enter views a report: pick a row in Findings';
+  if (!(pane.id === LANDED_PANE && (row.reportPath || row.reportRemote))) return 'enter views a report: pick a Recently Landed row with one';
   if (row.reportRemote) return `${row.name}: report lives on another host (${row.home}); not reachable from here`;
   if (!row.reportPath) return `${row.name}: no report path on this row`;
   return null;
@@ -323,7 +322,8 @@ export function keyAction(model, view, key) {
       }
       if (OPEN_PANES.has(pane.id) && row.url) return { type: 'open', row };
       if (FOCUS_PANES.has(pane.id)) return { type: 'focus', row };
-      if (VIEW_PANES.has(pane.id)) return { type: 'view', row };
+      // A Charted Next row without a card is a warning: nothing to open.
+      if (pane.id === CHARTED_PANE) return { type: 'notice', text: `${row.name}: a warning row; nothing to open`, bad: false };
       // A PR pane without a PR URL (every other pane is covered above).
       return { type: 'notice', text: `${row.name}: no PR URL on this row`, bad: true };
     default:

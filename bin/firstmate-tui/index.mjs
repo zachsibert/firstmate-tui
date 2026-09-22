@@ -14,7 +14,7 @@
 //                  focus is reported, never run; r against a live home re-runs
 //                  the snapshot and then the PR fetch (unless --no-prs) and
 //                  against a fixture only reports that it cannot; enter on a
-//                  Findings row, or a Landed row whose report is its first
+//                  Recently Landed row whose report is its first
 //                  reachable target, runs --viewer-cmd when given and otherwise only
 //                  reports the viewer the chain resolved to, naming the binary
 //                  found on PATH, so a test can shadow glow with a fake without
@@ -32,7 +32,7 @@
 //                  longer lists the hold as live; a fixture has nothing to
 //                  re-read, so its frame shows the dismissal alone);
 //                  --expand <all|ids>
-//                  expands In flight groups; --tags prints the color tags;
+//                  expands Underway groups; --tags prints the color tags;
 //                  --view-state <file> loads hidden rows, hidden panes,
 //                  dragged column widths and the saved selection (the focused
 //                  pane, the selected row by its hide key else its index, the
@@ -100,8 +100,8 @@
 // {"fetching": true} is the app's GitHub cycle in flight: it marks each PR
 // pane that has rows (or an earlier fetch's empty text) ` (updating)` in its
 // title and touches the title line not at all. With {"refreshing": true} a
-// fixture that omits "snapshot" (or sets it null) puts Needs you, In flight,
-// Findings and Landed into the loading state, and with either flag one that
+// fixture that omits "snapshot" (or sets it null) puts Captain's Call,
+// Underway, Charted Next and Recently Landed into the loading state, and with either flag one that
 // omits "prs" (or sets it null) puts My PRs and To review there: each such
 // pane draws the spinner line, `⠋ loading fleet snapshot…`, `⠋ loading
 // GitHub checks…` or `⠋ loading GitHub review requests…`, in place of its

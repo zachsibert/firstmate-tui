@@ -101,7 +101,7 @@
 #                   IN REVIEW, APPROVED, CLOSED, MERGED), a merged PR 11h59m and
 #                   one 12h01m before now, an open PR of a done task, a closed PR
 #                   with no time stamp, a closed draft and an unlisted recorded PR
-#   review-rows.json  160x60, Needs you review rows and the words that go
+#   review-rows.json  160x60, Captain's Call review rows and the words that go
 #                   with them: a done and a paused main-home task with clean
 #                   open PRs, a task repairing a conflicting PR after a done
 #                   line (status_logs), one on its first pass, a closed and a
@@ -112,25 +112,25 @@
 #   column-widths.json  160x40, the column-spacing screenshot's shape: three
 #                   captain holds with a long organisation/repo name and HOME
 #                   main, seven live PRs with long titles and BASE main, three
-#                   workers on one repository, Findings and Landed empty
-#   grouped.json    160x44, In flight grouping: two secondmate homes, one with
+#                   workers on one repository, Findings and Recently Landed empty
+#   grouped.json    160x44, Underway grouping: two secondmate homes, one with
 #                   four children (a keyed decision, a blocked child with a hold
 #                   reason) plus live and dated captain holds, one quiet
-#   inflight-live.json  160x60, In flight from live work only: six delegate
+#   inflight-live.json  160x60, Underway from live work only: six delegate
 #                   homes whose own records all read done (no children; two
 #                   working children; endpoints only, one done, one unknown
 #                   on tmux, one unknown with its pane gone, one unknown with a
 #                   pane; one relayed decision; one ledger captain hold; one
 #                   failed child), a failed main-home task under a live captain
 #                   hold, a done one with an unmerged PR, and a merged one whose
-#                   record was cleaned up (Landed only)
+#                   record was cleaned up (Recently Landed only)
 #   empty.json      120x40, every pane empty, no herdr block
 #   narrow.json     70x24, list mode with section headers, a cached local home
 #   lost.json       160x40, a main worker and a secondmate child whose panes
 #                   are absent from the herdr block (pane lost), a live one, a
 #                   main scout report and a secondmate landed report
 #   lost-disconnected.json  160x30, the same lost pane with herdr disconnected
-#   landed-targets.json  160x44, one Landed row per target shape for the enter
+#   landed-targets.json  160x44, one Recently Landed row per target shape for the enter
 #                   fallback: main-home done rows with a PR (and a lost pane),
 #                   a report only, a live pane only and nothing; a local
 #                   secondmate's landed entries with a PR, a live pane, a report
@@ -139,8 +139,8 @@
 #                   decision on a working task with a pane, two live captain
 #                   holds (one with a PR, a report, a brief, other files and a
 #                   status log on disk, one with none), a review row, a paused
-#                   task whose record is a dated captain hold (In flight), a
-#                   done task that was a captain hold (Landed), a delegate
+#                   task whose record is a dated captain hold (Underway), a
+#                   done task that was a captain hold (Recently Landed), a delegate
 #                   home with two captain holds and a remote home with one;
 #                   its two home paths are placeholders the suite rewrites to
 #                   scratch homes holding the files, a fake fm-fleet-snapshot.sh
@@ -181,7 +181,7 @@ chmod +x "$FAKE_BIN/glow"
 # that no fetch reaches GitHub.
 cp "$ROOT/tests/fake-gh.sh" "$FAKE_BIN/gh"
 chmod +x "$FAKE_BIN/gh"
-# Fake on HERDR_BIN_PATH and PATH: `herdr`, for the wrapper checks and the Landed focus checks: it logs every call to
+# Fake on HERDR_BIN_PATH and PATH: `herdr`, for the wrapper checks and the Recently Landed focus checks: it logs every call to
 # FM_BOARD_TEST_HERDR_LOG, answers `plugin config-dir` with a scratch directory and fails
 # everything else, so no wrapper path can reach the captain's live server.
 HERDR_LOG="$SCRATCH/herdr-calls.log"
@@ -355,57 +355,63 @@ assert_fetch_log() {
 frame=$(render populated.json) || fail "populated: render exited non-zero"
 
 # Pane order and counts (falsify: reorder PANES in lib/layout.mjs, or delete a row source in the fixture).
-assert_contains "$frame" "Needs you (4)" "populated needs-you count (main home only)"
+# Captain's Call lists every home's live calls: four main-home rows plus the delegate's hold and its
+# relayed decision; Underway is the live workers only: four main rows, the delegate-a group and the
+# remote home's one worker; Charted Next is the dated hold; Recently Landed is four completions plus
+# the report whose task has no Done row.
+assert_contains "$frame" "Captain's Call (6)" "populated Captain's Call count (every home's live calls)"
 assert_contains "$frame" "My PRs (3)" "populated review count (two recorded PRs plus the live candidate; live PR data is the default)"
-assert_contains "$frame" "In flight (7)" "populated in-flight count (five main rows, two home groups)"
-assert_contains "$frame" "Findings (3)" "populated findings count"
-assert_contains "$frame" "Landed (4)" "populated landed count"
-assert_before "$frame" "In flight \(7\)" "Needs you \(4\)" "pane order 1: In flight leads (falsify: put needs first in PANES)"
-assert_before "$frame" "Needs you \(4\)" "My PRs \(3\)" "pane order 2"
-assert_before "$frame" "My PRs \(3\)" "Findings \(3\)" "pane order 3"
-assert_before "$frame" "Findings \(3\)" "Landed \(4\)" "pane order 4"
+assert_contains "$frame" "Underway (6)" "populated Underway count (four main rows, one group, one delegate worker drawn directly)"
+assert_contains "$frame" "Charted Next (1)" "populated Charted Next count (the dated hold)"
+assert_contains "$frame" "Recently Landed (5)" "populated Recently Landed count (four completions and one report)"
+assert_before "$frame" "Captain's Call \(6\)" "Underway \(6\)" "pane order 1: Captain's Call leads (falsify: put inflight first in PANES)"
+assert_before "$frame" "Underway \(6\)" "My PRs \(3\)" "pane order 2"
+assert_before "$frame" "My PRs \(3\)" "Charted Next \(1\)" "pane order 3"
+assert_before "$frame" "Charted Next \(1\)" "Recently Landed \(5\)" "pane order 4"
 
 # Every pane title leads with its toggle key, btop-style (falsify: drop the badge segment from the
 # top border in renderPanes, or change paneBadge).
-assert_contains "$frame" "┌─ [2] Needs you (4) ─" "badge on Needs you"
+assert_contains "$frame" "┌─ [1] Captain's Call (6) ─" "badge on Captain's Call"
 assert_contains "$frame" "┌─ [3] My PRs (3) ─" "badge on My PRs"
-assert_contains "$frame" "┌─ [1] In flight (7) ─" "badge on In flight"
-assert_contains "$frame" "┌─ [5] Findings (3) ─" "badge on Findings"
-assert_contains "$frame" "┌─ [6] Landed (4) ─" "badge on Landed"
+assert_contains "$frame" "┌─ [2] Underway (6) ─" "badge on Underway"
+assert_contains "$frame" "┌─ [5] Charted Next (1) ─" "badge on Charted Next"
+assert_contains "$frame" "┌─ [6] Recently Landed (5) ─" "badge on Recently Landed"
 assert_count "$frame" "┌─ [" 6 "exactly six badges, one per pane"
+assert_no_row "$frame" '^┌─ \[[1-6]\] Findings' "no Findings pane: reports live in Recently Landed (falsify: put findings back in PANES)"
 # With --tags the badge is its own grey segment between the border segments (falsify: give the badge the
 # border style, or drop `badge` from STYLE_TAGS).
 tags=$(render populated.json --tags) || fail "populated --tags: render exited non-zero"
 assert_row "$tags" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[3\]\{/grey-fg\}\{blue-fg\} My PRs \(3\)' "--tags: the badge is grey and the title keeps the border color"
 assert_count "$tags" "{grey-fg}[" 6 "--tags: six grey badges"
-# The focused pane's whole border is bold amber 214 (In flight holds the focus at start), its badge
+# The focused pane's whole border is bold amber 214 (Captain's Call holds the focus at start), its badge
 # still grey between the border segments, and an unfocused border is plain blue; no cyan is left
 # anywhere (falsify: put {cyan-fg} back in STYLE_TAGS['border-focus'], or give the badge the border
 # style).
-assert_row "$tags" '\{bold\}\{214-fg\}┌─ \{/214-fg\}\{/bold\}\{grey-fg\}\[1\]\{/grey-fg\}\{bold\}\{214-fg\} In flight \(7\)' "--tags: the focused pane's title line is bold amber around a grey badge"
+assert_row "$tags" '\{bold\}\{214-fg\}┌─ \{/214-fg\}\{/bold\}\{grey-fg\}\[1\]\{/grey-fg\}\{bold\}\{214-fg\} Captain.s Call \(6\)' "--tags: the focused pane's title line is bold amber around a grey badge"
 assert_row "$tags" '\{bold\}\{214-fg\}│ \{/214-fg\}\{/bold\}.*\{bold\}\{214-fg\} │\{/214-fg\}\{/bold\}$' "--tags: the focused pane's side borders are bold amber"
 assert_row "$tags" '^\{bold\}\{214-fg\}└─+┘\{/214-fg\}\{/bold\}$' "--tags: the focused pane's bottom border is bold amber"
 assert_not_contains "$tags" "{cyan-fg}" "--tags: no cyan anywhere in the frame (falsify: keep the cyan focus border)"
 # The cursor bar is the terminal's inverse video on every cell of the selected row, as before 0.6.1,
 # and nothing in a frame carries the amber background or, beyond the title line's black on white, the
 # black text 0.6.1 drew the bar with. A selected row's base style is `selected` alone (lib/render.mjs
-# rowSegments), so a selected decide row's yellow flag gives way to the plain inverse bar, while a
+# rowSegments), so a selected flagged row's yellow gives way to the plain inverse bar, while a
 # cell with its own colour keeps it inside the bar: a selected pane-lost cell stays red, a selected
 # unknown HERDR cell stays grey; the unselected rows keep their colours (falsify: put
 # {214-bg}{black-fg} back in STYLE_TAGS.selected, or filter names out of tagsFor for a selected cell).
-assert_row "$tags" "^.*${SEL}working +${SEL_END}.*${SEL}ship-alpha +${SEL_END}.*${SEL} 5m${SEL_END}" "--tags: the selected In flight row is drawn inverse, first cell to last"
+# The flagged row is Underway's delegate-a group, whose home has a call in Captain's Call.
+assert_row "$tags" "^.*${SEL}blocked *${SEL_END}.*${SEL}scout-beta +${SEL_END}.*${SEL} 2h${SEL_END}" "--tags: the selected Captain's Call row is drawn inverse, first cell to last"
 assert_count "$tags" "$SEL_TAG" 1 "--tags: one row carries the bar"
 assert_not_contains "$tags" "{214-bg}" "--tags: nothing is drawn on the amber background (falsify: keep the 0.6.1 bar)"
 assert_count "$tags" "{black-fg}" 1 "--tags: the title line is the one line with black text (falsify: keep the 0.6.1 bar's black text)"
-assert_row "$tags" '\{yellow-fg\}decide +\{/yellow-fg\}' "--tags: an unselected decide row keeps its yellow flag text"
-tags_sel=$(render populated.json --tags --keys "tab,j") || fail "populated --tags tab,j: render exited non-zero"
-assert_row "$tags_sel" "${SEL}decide +${SEL_END}.*${SEL}db-choice *${SEL_END}" "--tags: the selected decide row is plain inverse, its yellow flag given way"
+assert_row "$tags" '\{yellow-fg\}working +\{/yellow-fg\}\{yellow-fg\} +\{/yellow-fg\}\{yellow-fg\}1 live' "--tags: the unselected flagged group row is yellow (falsify: drop flag from ledgerEntry's group row)"
+assert_no_row "$tags" '\{yellow-fg\}decide' "--tags: a Captain's Call decide row is not yellow: the flag marks a worker whose task is also the captain's, never a call (falsify: set flag on taskDecisionRows)"
+tags_sel=$(render populated.json --tags --keys "tab,j,j") || fail "populated --tags tab,j,j: render exited non-zero"
+assert_row "$tags_sel" "${SEL}working +${SEL_END}.*${SEL}!▸ delegate-a *${SEL_END}" "--tags: the selected flagged group row is plain inverse, its yellow given way"
 assert_no_row "$tags_sel" "${SEL}\{yellow-fg\}" "--tags: no yellow text inside the bar"
-assert_row "$tags_sel" '\{yellow-fg\}decide +\{/yellow-fg\}' "--tags: In flight's decide group row, unselected, is still yellow"
-tags_sel=$(render populated.json --tags --keys "j,j,j,j,j,j") || fail "populated --tags lost row: render exited non-zero"
+tags_sel=$(render populated.json --tags --rows 48 --keys "tab,j,j,l,j,j") || fail "populated --tags lost row: render exited non-zero"
 assert_row "$tags_sel" "${SEL}\{red-fg\}pane lost\{/red-fg\}${SEL_END}" "--tags: a selected row's pane-lost cell keeps its red text inside the bar"
-assert_row "$tags_sel" "${SEL}done +${SEL_END}" "--tags: the rest of that row is plain inverse"
-tags_sel=$(render lost-disconnected.json --tags --keys "j") || fail "lost-disconnected --tags j: render exited non-zero"
+assert_row "$tags_sel" "${SEL}failed +${SEL_END}" "--tags: the rest of that row is plain inverse"
+tags_sel=$(render lost-disconnected.json --tags --keys "tab,j") || fail "lost-disconnected --tags tab,j: render exited non-zero"
 assert_row "$tags_sel" "${SEL}\{grey-fg\}unknown *\{/grey-fg\}${SEL_END}" "--tags: a selected row's unknown HERDR cell keeps its grey text inside the bar"
 assert_row "$(render lost-disconnected.json --tags)" '\{grey-fg\}unknown *\{/grey-fg\}' "--tags: the same cell unselected is still grey"
 
@@ -416,26 +422,29 @@ assert_no_row "$frame" '^┌─ \[[1-6]\] [^─]*(ago|snapshot|herdr|checks)' "n
 assert_count "$frame" " ago" 0 "nothing on the populated frame says N ago: no header age, and the title counts down instead"
 assert_row "$frame" '^ firstmate-tui · /fixture/firstmate · 3 homes ' "the title line leads with firstmate-tui and counts the main home plus two secondmate homes (falsify: put fm-board back in titleLine)"
 
-# Needs you rows (falsify: remove scout-beta's blocked_event, ship-alpha's open_decisions entry,
+# Captain's Call rows (falsify: remove scout-beta's blocked_event, ship-alpha's open_decisions entry,
 # decide-vendor's hold_bucket=live, or ship-gamma's pr.url).
 assert_row "$frame" '^│ blocked +- +scout-beta +blocked: gh auth expired +acme/api +main +2h │$' "blocked worker row with repo, home and age"
 assert_row "$frame" '^│ decide +db-choice +ship-alpha +Postgres or SQLite for the cache\? +acme/widgets +main +5m │$' "keyed decision row shows key, task, summary"
 assert_row "$frame" '^│ hold +- +decide-vendor +Pick the vendor for the address API · Two quotes in the report +acme/api +main +3d │$' "live captain hold row with title and reason"
 assert_row "$frame" '^│ review +#7 +ship-gamma +acme/api#7 · Retry on 429 from the address API +acme/api +main +1m~ │$' "green-unmerged PR row: a review row on the task state alone, since the fetch does not carry PR 7, so its age is marked ~ (falsify: bring the merge? row back, or drop the fallback in reviewRow)"
-assert_not_contains "$frame" "later-hold" "dated hold is not actionable and stays out of Needs you"
+assert_no_row "$frame" '^│ (hold|decide|blocked|review) +[^│]*later-hold' "dated hold is not actionable and stays out of Captain's Call"
+assert_row "$frame" '^│ dated +until 10-01 +later-hold +Revisit the pricing page after launch · Deferred until launch +acme/web +main +09-13 │$' "the dated hold is one Charted Next row: STATE its bucket, WHY its until date, FILED its since date (falsify: drop the dated branch from chartedWhy, or let chartedItem take a live hold)"
+assert_count "$frame" "later-hold" 1 "a captain hold sits in exactly one pane"
 assert_before "$frame" '^│ blocked +- +scout-beta' '^│ decide +db-choice' "blocked sorts before decide"
 assert_before "$frame" '^│ decide +db-choice' '^│ hold +- +decide-vendor' "decide sorts before hold"
 assert_before "$frame" '^│ hold +- +decide-vendor' '^│ review ' "hold sorts before review"
-# Secondmate decisions stay out of Needs you by default and flag their In flight group instead
-# (falsify: drop the opts.allHomesNeeds guard in needsRows, or the flag in ledgerGroup).
-assert_not_contains "$frame" "etl-cutover" "secondmate captain hold is not in Needs you by default (and delegate-a is collapsed)"
-assert_not_contains "$frame" "etl-window" "a decision the secondmate record relays into the main home is not in Needs you by default"
-assert_row "$frame" '^│ decide +1 live +!▸ delegate-a ' "the home holding those decisions is flagged with ! in In flight and reads decide"
+# Every home's live calls list here by default: the delegate's ledger hold and the decision its task
+# record relays into the main home, each once, both labelled with the delegate's home (falsify: put
+# the opts.allHomesNeeds guard back in needsRows, drop relayedDecisionRows, or drop the home fields it
+# passes to taskDecisionRows).
+assert_row "$frame" '^│ hold +- +etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +delegate-a +1d │$' "the delegate's captain hold, labelled with its home, by default"
+assert_row "$frame" '^│ decide +etl-window +delegate-a +Which maintenance window for the ETL cutover\? +acme/etl +delegate-a +- │$' "the keyed decision the delegate's record relays and its ledger does not carry, labelled with the delegate's home (the KEY column grows to fit the key; falsify: cap extra below 10 in columnSpec)"
+assert_count "$frame" "etl-cutover" 1 "the delegate's hold is one row on the whole board: not under its Underway group, not in Charted Next"
+assert_before "$frame" '^│ hold +- +etl-cutover' '^│ review ' "a delegate's hold sorts with the holds, before review"
+assert_row "$frame" '^│ working +1 live +!▸ delegate-a ' "the home with a live call is flagged with ! in Underway; its STATE comes from its workers, never from the call (falsify: rank hold or decide in STATE_RANK)"
 frame_all=$(render populated.json --all-homes-needs) || fail "populated --all-homes-needs: render exited non-zero"
-assert_contains "$frame_all" "Needs you (6)" "--all-homes-needs adds the secondmate ledger decision and the relayed one"
-assert_row "$frame_all" '^│ hold +- +etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +delegate-a +1d │$' "--all-homes-needs: secondmate captain hold row labelled with its home"
-assert_row "$frame_all" '^│ decide +etl-window +delegate-a +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "--all-homes-needs: the relayed keyed decision on the secondmate record (the KEY column grows to fit the key; falsify: cap extra below 10 in columnSpec)"
-assert_before "$frame_all" '^│ hold +- +etl-cutover' '^│ review ' "--all-homes-needs: hold sorts before review"
+if [ "$frame_all" = "$frame" ]; then pass; else fail "--all-homes-needs changes the frame although every home's calls list by default: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_all") | head -n 5)"; fi
 
 # My PRs with --no-prs: the recorded PRs only, tagged PR and marked off (falsify: drop the
 # --no-prs case in parseArgs, or the !prs.enabled branch in unlistedChecks).
@@ -450,58 +459,59 @@ assert_not_contains "$frame_noprs" "fetching" "--no-prs never says fetching"
 assert_no_row "$frame_noprs" '^│ PR +- +ship-old ' "a task whose backlog row is done does not list its PR without a fetched record"
 assert_no_row "$frame_noprs" '^│ PR +- +delegate-a ' "a PR mentioned on a secondmate record is not ready for review"
 
-# In flight rows: state, herdr join, tmux (falsify: remove the herdr agents block, or change
+# Underway rows: state, herdr join, tmux (falsify: remove the herdr agents block, or change
 # tmux-task's endpoint target).
 assert_row "$frame" '^│ STATE +HERDR +ID +WHAT +REPO +HOME +AGE │$' "in-flight column headers"
-assert_row "$frame" '^│ working +working +ship-alpha +harness busy \(claude-hook\) +acme/widgets +main +5m │$' "task with herdr working and status-log age"
-assert_row "$frame" '^│ blocked +blocked +scout-beta +\(scout\) gh auth expired +acme/api +main +2h │$' "task with herdr blocked"
-assert_row "$frame" '^│ awaiting merge +done +ship-gamma +PR https://github.com/acme/api/pull/7 checks green +acme/api +main +1m │$' "worker said done with an unmerged PR: STATE reads awaiting merge (falsify: drop awaitingMerge from mainTaskRow)"
-assert_row "$frame" '^│ done +pane lost +ship-old +PR https://github.com/acme/widgets/pull/30 merged +acme/widgets +main +2d │$' "done task whose backlog row is done stays done; its closed pane reads pane lost"
-assert_row "$frame" '^│ working +tmux +tmux-task +running the migration +acme/legacy +main +- │$' "tmux-backed task shows tmux in HERDR"
-assert_row "$frame" '^│ STATE {11}HERDR ' "In flight's STATE column widens to fit awaiting merge, then the two-cell gutter (falsify: cap tag below 14 in columnSpec, or change GUTTER)"
-assert_row "$frame" '^│ STATE {4}KEY ' "Needs you's STATE column is only as wide as its own widest word, blocked: fixed columns size per pane (falsify: size tag over the whole board again)"
+assert_row "$frame" '^│ working +working +ship-alpha +Add the widget cache · harness busy \(claude-hook\) +acme/widgets +main +5m │$' "task with herdr working and status-log age; WHAT leads with the task's title, then what it is doing (falsify: drop the title from whatText)"
+assert_row "$frame" '^│ blocked +blocked +scout-beta +\(scout\) Scout: rate limits on the address API · gh auth expired +acme/api +main +2h │$' "task with herdr blocked"
+assert_row "$frame" '^│ awaiting merge +done +ship-gamma +Retry on 429 from the address API · PR https://github.com/acme/api/pull/7 ch… +acme/api +main +1m │$' "worker said done with an unmerged PR: STATE reads awaiting merge (falsify: drop awaitingMerge from mainTaskRow)"
+assert_no_row "$frame" '^│ done +[^│]*ship-old ' "a done task whose backlog row is done is finished work: no Underway row, only its Recently Landed row (falsify: drop the done skip from mainTaskRow)"
+assert_row "$frame" '^│ working +tmux +tmux-task +Migrate the legacy import · running the migration +acme/legacy +main +- │$' "tmux-backed task shows tmux in HERDR"
+assert_row "$frame" '^│ STATE {11}HERDR ' "Underway's STATE column widens to fit awaiting merge, then the two-cell gutter (falsify: cap tag below 14 in columnSpec, or change GUTTER)"
+assert_row "$frame" '^│ STATE {4}KEY ' "Captain's Call's STATE column is only as wide as its own widest word, blocked: fixed columns size per pane (falsify: size tag over the whole board again)"
 assert_row "$frame" '^│ CHECKS +STATUS +ID +TITLE +BASE  AGE │$' "My PRs: BASE hugs its widest value, main, and AGE its ages, so TITLE gets the rest (falsify: give base or age a fixed width)"
 assert_before "$frame" '^│ working +working +ship-alpha' '^│ blocked +blocked +scout-beta' "in flight: working sorts before blocked"
 assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ awaiting merge +done +ship-gamma' "in flight: blocked sorts before awaiting merge"
-assert_before "$frame" '^│ awaiting merge +done +ship-gamma' '^│ done +pane lost +ship-old' "in flight: awaiting merge keeps the done slot, before plain done"
 
-# In flight groups, collapsed: one row per secondmate home with worst state, live count, child ids,
-# shared repo and newest child age; the mate's own agent row is folded into its group (falsify:
-# remove child-one from delegate-a's active_children, w2A:p2 from the herdr block, or the mateTaskFor
-# fold in inflightRows).
-assert_row "$frame" '^│ decide +1 live +!▸ delegate-a +child-one, child-failed +acme/etl +delegate-a +1h │$' "delegate-a group: the relayed decision is the worst state, one live worker, flagged, newest age 1h"
-assert_row "$frame" '^│ working +1 live +▸ remote-sm +remote-child +acme/mobile +remote-sm \(remote\) +- │$' "remote home group row, not flagged"
+# Underway delegate homes, collapsed: a home with two or more live worker rows draws one group row with
+# the worst worker state, the live count, the child ids, the shared repo and the newest child age; a
+# home with one live worker draws that row directly, HOME naming the home; the mate's own agent row is
+# folded away either way (falsify: remove child-one from delegate-a's active_children, w2A:p2 from the
+# herdr block, the mateTaskFor fold in inflightRows, or the one-worker branch of ledgerEntry).
+assert_row "$frame" '^│ working +1 live +!▸ delegate-a +child-one, child-failed +acme/etl +delegate-a +1h │$' "delegate-a group: two worker rows make a group, STATE working from its workers (the failed child does not rank), one live, flagged for its live call, newest age 1h"
+assert_row "$frame" '^│ working +remote +remote-child +Remote child · porting the login screen +acme/mobile +remote-sm \(remote\) +- │$' "remote home with one live worker: the worker row drawn directly, HOME naming the home, HERDR remote"
+assert_no_row "$frame" '▸ remote-sm' "no group row over a home with one worker (falsify: draw a group over one worker)"
 assert_no_row "$frame" '^│ working +idle +delegate-a ' "the secondmate agent row is folded into its group when collapsed"
 assert_not_contains "$frame" "child-one  " "children are hidden while collapsed (id appears only in the group text)"
 assert_not_contains "$frame" "↳" "no child rows while collapsed"
-assert_before "$frame" '^│ working +1 live +▸ remote-sm' '^│ blocked +blocked +scout-beta' "a working group sorts with the working rows, before blocked"
-assert_before "$frame" '^│ blocked +blocked +scout-beta' '^│ decide +1 live +!▸ delegate-a' "a group with a pending decision sorts with the blocked/decide rows"
+assert_before "$frame" '^│ working +remote +remote-child' '^│ blocked +blocked +scout-beta' "a delegate's working row sorts with the working rows, before blocked"
+assert_before "$frame" '^│ working +1 live +!▸ delegate-a' '^│ blocked +blocked +scout-beta' "a working group sorts with the working rows: its live call flags it and never sets its STATE"
 
-# In flight groups, expanded with --expand all (falsify: drop the children list in ledgerGroup, or
-# the etl-cutover decision from delegate-a's decisions_open).
+# Underway groups, expanded with --expand all: the worker rows and nothing else (falsify: list
+# decisions or relays among ledgerEntry's children).
 frame_x=$(render populated.json --expand all --rows 48) || fail "populated --expand all: render exited non-zero"
-assert_contains "$frame_x" "In flight (12)" "expanding both groups adds the children, the home decision and the relayed decision, never the delegate's own record"
-assert_row "$frame_x" '^│ decide +1 live +!▾ delegate-a +child-one, child-failed +acme/etl +delegate-a +1h │$' "expanded group row shows ▾"
-assert_no_row "$frame_x" '↳ delegate-a +\(secondmate\)' "expanded: the delegate's own task record is not a child row (falsify: list mateRow among ledgerGroup's children)"
-assert_row "$frame_x" '^│ decide +etl-window +↳ delegate-a +Which maintenance window for the ETL cutover\? +acme/etl +main +- │$' "expanded: the relayed keyed decision lists under the group (falsify: drop relayed from ledgerGroup)"
-assert_row "$frame_x" '^│ working +working +↳ child-one +writing the loader +acme/etl +delegate-a +3d │$' "expanded: active child with age from its home state file"
+assert_contains "$frame_x" "Underway (8)" "expanding adds delegate-a's two worker rows: no decision, no relay, no delegate record"
+assert_row "$frame_x" '^│ working +1 live +!▾ delegate-a +child-one, child-failed +acme/etl +delegate-a +1h │$' "expanded group row shows ▾"
+assert_no_row "$frame_x" '↳ delegate-a +\(secondmate\)' "expanded: the delegate's own task record is not a child row (falsify: list mateRow among ledgerEntry's children)"
+assert_no_row "$frame_x" '↳ delegate-a +Which maintenance' "expanded: the relayed decision is not a child row; it is Captain's Call's"
+assert_row "$frame_x" '^│ working +working +↳ child-one +Child one · writing the loader +acme/etl +delegate-a +3d │$' "expanded: active child with its title, its doing and the age from its home state file"
 assert_row "$frame_x" '^│ failed +pane lost +↳ child-failed +endpoint default:w2B:p2 \(run-step\) +- +delegate-a +1h │$' "expanded: failed endpoint child whose pane is gone reads pane lost"
-assert_row "$frame_x" '^│ hold +- +↳ etl-cutover +Cut over the nightly ETL on Friday\? +acme/etl +delegate-a +1d │$' "expanded: the home's live captain hold lists under the group"
-assert_row "$frame_x" '^│ working +remote +↳ remote-child +porting the login screen +acme/mobile +remote-sm \(remote\) +- │$' "expanded: remote home child row reads remote in HERDR, never pane lost (falsify: drop the remote branch in herdrColumn)"
+assert_no_row "$frame_x" '↳ etl-cutover' "expanded: the home's live captain hold is not a child row; it is Captain's Call's"
 assert_before "$frame_x" '!▾ delegate-a' '↳ child-one' "children follow their group row"
-assert_before "$frame_x" '↳ remote-child' '^│ blocked +blocked +scout-beta' "the next top-level row starts after the previous group's children"
-assert_before "$frame_x" '↳ etl-cutover' '↳ delegate-a +Which maintenance' "the ledger's home decisions come before the relayed ones"
-assert_before "$frame_x" '↳ delegate-a +Which maintenance' '^│ awaiting merge' "the group's rows end before the next top-level row"
+assert_before "$frame_x" '↳ child-failed' '^│ working +remote +remote-child' "the next top-level row starts after the group's children"
 assert_before "$frame_x" '↳ child-one' '↳ child-failed' "children sort working before failed"
 
-# Findings (falsify: remove scout_reports[0], the mobile-fix report_path, or the report mtimes).
-assert_row "$frame" '^│ scout +- +scout-beta +data/scout-beta/report.md +acme/api +main +10m │$' "scout report with age from the report mtime"
-assert_row "$frame" '^│ report +reported +mobile-fix +data/mobile-fix/report.md +- +remote-sm \(remote\) +4d │$' "remote home report in findings"
-assert_row "$frame" '^│ scout +reported +old-scout +data/old-scout/report.md +acme/legacy +main +10d │$' "older scout report with backlog verb"
-assert_before "$frame" 'data/scout-beta/report.md' 'data/mobile-fix/report.md' "findings newest first (1)"
-assert_before "$frame" 'data/mobile-fix/report.md' 'data/old-scout/report.md' "findings newest first (2)"
+# Reports fold into Recently Landed: a report whose task has no Done row lists as VERB report, dated
+# by the file, once (falsify: remove scout_reports[0], the mobile-fix report_path, the report mtimes,
+# or the `reported` set in landedRows).
+assert_row "$frame" '^│ report +09-16 +scout-beta +Scout: rate limits on the address API · data/scout-beta/report.md +acme/api +main +10m │$' "a report with no Done row: VERB report, the file's date, the title from the backlog record, the path in WHAT"
+assert_row "$frame" '^│ reported +09-12 +mobile-fix +Fix the crash on launch · https://github.com/acme/mobile/pull/3 +acme/mobile +remote-sm \(remote\) +4d │$' "a remote home's reported row names its PR first"
+assert_row "$frame" '^│ reported +09-06 +old-scout +Scout: legacy import path · data/old-scout/report.md +acme/legacy +main +10d │$' "older scout report with its backlog verb and its report path"
+assert_count "$frame" "data/scout-beta/report.md" 1 "a report lists once on the board"
+assert_count "$frame" "data/old-scout/report.md" 1 "a report with a Done row lists through that row alone (falsify: list scout_reports beside the Done row that names the same report)"
+assert_before "$frame" '^│ report +09-16 +scout-beta' '^│ merged +09-15 +etl-index' "a report dated by its file sorts with the completions, newest first"
 
-# Landed (falsify: change ship-old's state from done, or etl-index's completion date).
+# Recently Landed (falsify: change ship-old's state from done, or etl-index's completion date).
 assert_row "$frame" '^│ merged +09-14 +ship-old +Rename the widget table · https://github.com/acme/widgets/pu' "landed merged row with PR (text truncated to the flex column at 160 cols)"
 assert_row "$frame" '^│ merged +09-14 +ship-old .* acme/widgets +main +2d │$' "landed merged row keeps repo, home and age"
 assert_row "$frame" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +delegate-a +1d │$' "secondmate landed row"
@@ -511,45 +521,45 @@ assert_before "$frame" '^│ merged +09-15 +etl-index' '^│ merged +09-14 +ship
 # Frame geometry (falsify: change the fixture cols/rows, or break padding in render.mjs).
 assert_lines "$frame" 44 "populated frame is 44 lines"
 assert_widths "$frame" 160 "populated frame lines are 160 columns"
-# Teammates' PRs sits between My PRs and In flight, so the two PR panes read side by side, with the
+# Teammates' PRs sits between My PRs and Underway, so the two PR panes read side by side, with the
 # empty text of a pane whose scope has PRs but no request (falsify: reorder PANES in lib/layout.mjs,
 # or change the toreview empty text).
 assert_before "$frame" "My PRs \(3\)" "Teammates' PRs \(0\)" "pane order 5: Teammates' PRs is the fourth pane, below My PRs"
-assert_before "$frame" "Teammates' PRs \(0\)" "Findings \(3\)" "pane order 6: Findings follows Teammates' PRs"
+assert_before "$frame" "Teammates' PRs \(0\)" "Charted Next \(1\)" "pane order 6: Charted Next follows Teammates' PRs"
 assert_contains "$frame" "┌─ [4] Teammates' PRs (0) ─" "badge on Teammates' PRs"
 assert_row "$frame" '^│ no pull requests waiting for your review +│$' "populated: Teammates' PRs is empty (no toreview rows in the fixture)"
 assert_row "$frame" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' "populated: the empty Teammates' PRs pane still heads its AUTHOR column (falsify: size the column set by the rows present)"
 assert_row "$frame" '^│ STATE +KEY +ID +WHAT +REPO +HOME +AGE │$' "wide layout keeps REPO and AGE"
-# Needs you's first row (tab from the In flight row the board starts on), scout-beta's blocked row, carries
-# a hold card and a pane, so the footer names enter card and f focus in place of enter open/focus/view and,
+assert_row "$frame" '^│ STATE +WHY +ID +WHAT +REPO +HOME +FILED │$' "Charted Next heads WHY and FILED in the KEY and AGE slots (falsify: drop AGE_LABEL or the charted labels in lib/layout.mjs)"
+# Captain's Call's first row, where the board starts, is scout-beta's blocked row: it carries a hold
+# card and a pane, so the footer names enter card and f focus in place of enter open/focus/view and,
 # with no captain hold on that task, no d or D (falsify: drop . settings from FOOTER_KEYS, or the card branch from boardHints).
-assert_row "$(render populated.json --keys "tab")" '^ j/k move  tab pane  enter card  f focus  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group)"
+assert_row "$(render populated.json)" '^ j/k move  tab pane  enter card  f focus  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a card row with a pane (no l/h expand: a card row is never a group)"
 assert_row "$(render populated.json --keys "tab,tab")" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes  r refresh  \. settings  \? help  q quit +$' "footer keys on a PR row (falsify: drop . settings from FOOTER_KEYS)"
 
 # Keys through --render-once --keys (falsify: change keyAction in lib/controller.mjs). The board starts
-# on In flight's first row, so its rows need no tab.
-frame_k=$(render populated.json --keys "j,j,j,j,l") || fail "keys l: render exited non-zero"
-assert_row "$frame_k" '^│ decide +1 live +!▾ delegate-a ' "l on the fifth In flight row expands the delegate-a group"
+# on Captain's Call's first row, so an Underway row is one tab away; its group is the third row.
+frame_k=$(render populated.json --keys "tab,j,j,l") || fail "keys l: render exited non-zero"
+assert_row "$frame_k" '^│ working +1 live +!▾ delegate-a ' "l on the third Underway row expands the delegate-a group"
 assert_contains "$frame_k" "↳ child-one" "expanded by key: child rows appear"
-assert_contains "$frame_k" "In flight (11)" "expanded by key: only delegate-a's rows are added"
-assert_not_contains "$frame_k" "▾ remote-sm" "expanded by key: the other group stays collapsed"
-frame_k=$(render populated.json --keys "j,j,j,j,l,j,h") || fail "keys h: render exited non-zero"
+assert_contains "$frame_k" "Underway (8)" "expanded by key: only delegate-a's rows are added"
+frame_k=$(render populated.json --keys "tab,j,j,l,j,h") || fail "keys h: render exited non-zero"
 assert_not_contains "$frame_k" "▾" "h from a child row collapses its group"
-assert_contains "$frame_k" "In flight (7)" "collapsed again by key"
-frame_k=$(render populated.json --keys "j,j,j,j,enter") || fail "keys enter group: render exited non-zero"
-assert_row "$frame_k" '^│ decide +1 live +!▾ delegate-a ' "enter on a group row expands it"
-frame_k=$(render populated.json --keys "enter") || fail "keys enter worker: render exited non-zero"
-assert_contains "$frame_k" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus"
+assert_contains "$frame_k" "Underway (6)" "collapsed again by key"
+frame_k=$(render populated.json --keys "tab,j,j,enter") || fail "keys enter group: render exited non-zero"
+assert_row "$frame_k" '^│ working +1 live +!▾ delegate-a ' "enter on a group row expands it"
+frame_k=$(render populated.json --keys "tab,enter") || fail "keys enter worker: render exited non-zero"
+assert_contains "$frame_k" "herdr is off (--no-herdr); cannot focus" "enter on an Underway worker still means herdr focus"
 frame_k=$(render populated.json --keys "?") || fail "keys ?: render exited non-zero"
-assert_contains "$frame_k" "enter        My PRs, Teammates' PRs, Landed or Needs-you PR row: open it in the browser" "help overlay documents enter on Landed and names the two PR panes"
+assert_contains "$frame_k" "enter        My PRs, Teammates' PRs, Recently Landed or Captain's Call PR row: open it in the browser" "help overlay documents enter on Recently Landed and names the two PR panes"
 assert_not_contains "$frame_k" "open the PR of the selected row" "help overlay no longer documents o"
-assert_contains "$frame_k" "l / right    expand the selected In flight group" "help overlay documents l/right"
-# The help lists the pane keys the way the badges show them (falsify: change the 1 - 5 lines in HELP_LINES).
-assert_contains "$frame_k" "each pane title carries its key: [1] In flight" "help overlay ties the 1-6 keys to the title badges"
-assert_contains "$frame_k" "[2] Needs you  [3] My PRs  [4] Teammates' PRs  [5] Findings  [6] Landed" "help overlay lists every badge in screen order (falsify: leave the old order in HELP_LINES)"
+assert_contains "$frame_k" "l / right    expand the selected Underway group" "help overlay documents l/right"
+# The help lists the pane keys the way the badges show them (falsify: change the 1 - 6 lines in HELP_LINES).
+assert_contains "$frame_k" "each pane title carries its key: [1] Captain's Call" "help overlay ties the 1-6 keys to the title badges"
+assert_contains "$frame_k" "[2] Underway  [3] My PRs  [4] Teammates' PRs  [5] Charted Next  [6] Recently Landed" "help overlay lists every badge in screen order (falsify: leave the old order in HELP_LINES)"
 assert_contains "$frame_k" "0            show every pane (with all six hidden the board lists these keys)" "help overlay documents 0 and the landing page"
 
-# Opening a PR: enter in My PRs, on a Needs-you PR row and on a Landed row with a PR,
+# Opening a PR: enter in My PRs, on a Captain's Call PR row and on a Recently Landed row with a PR,
 # through the injected opener only (falsify: drop the url field from fetchedPrRow, reviewRow or
 # landedRows, drop the PR rung from landedTarget, or drop the 'open' case in keyAction). The opener
 # receives the exact URL as its only argument.
@@ -559,16 +569,19 @@ assert_contains "$frame_o" "opened https://github.com/acme/widgets/pull/41 (ship
 frame_o=$(render_open populated.json "tab,tab,j,enter") || fail "open review second row: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "enter on the second My PRs row (the failing live candidate nobody recorded) opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/api/pull/8 (api#8)" "footer notice names the opened URL"
-frame_o=$(render_open populated.json "tab,j,j,j,enter") || fail "open needs enter: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/7" "enter on the Needs-you review row opens its PR"
-frame_o=$(render_open populated.json "tab,tab,tab,tab,enter") || fail "open landed enter: render exited non-zero"
-assert_opened "https://github.com/acme/etl/pull/12" "enter on the first Landed row opens its PR"
-assert_contains "$frame_o" "opened https://github.com/acme/etl/pull/12 (etl-index)" "footer notice names the Landed URL"
-frame_o=$(render_open populated.json "tab,tab,tab,tab,j,j,j,enter") || fail "open landed no url: render exited non-zero"
-assert_not_opened "enter on a Landed row without a PR URL calls no opener"
-assert_not_contains "$frame_o" "no PR URL on this row" "a Landed row without a PR is no longer an error: enter falls back to its report (the landed targets section below)"
-frame_o=$(render_open populated.json "enter") || fail "enter inflight: render exited non-zero"
-assert_not_opened "enter on an In flight worker calls no opener"
+frame_o=$(render_open populated.json "j,j,j,j,j,enter") || fail "open needs enter: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/7" "enter on the Captain's Call review row, its sixth row, opens its PR"
+frame_o=$(render_open populated.json "tab,tab,tab,tab,j,enter") || fail "open landed enter: render exited non-zero"
+assert_opened "https://github.com/acme/etl/pull/12" "enter on the second Recently Landed row (four tabs reach the pane past the empty Teammates' PRs) opens its PR"
+assert_contains "$frame_o" "opened https://github.com/acme/etl/pull/12 (etl-index)" "footer notice names the Recently Landed URL"
+frame_o=$(render_open populated.json "tab,tab,tab,tab,enter") || fail "open landed report: render exited non-zero"
+assert_not_opened "enter on the first Recently Landed row, the report, calls no opener"
+assert_contains "$frame_o" "would view /fixture/firstmate/data/scout-beta/report.md" "enter on a report row falls to the viewer (the landed targets section below)"
+frame_o=$(render_open populated.json "tab,tab,tab,tab,j,j,j,j,enter") || fail "open landed no url: render exited non-zero"
+assert_not_opened "enter on a Recently Landed row without a PR URL calls no opener"
+assert_not_contains "$frame_o" "no PR URL on this row" "a Recently Landed row without a PR is no longer an error: enter falls back to its report (the landed targets section below)"
+frame_o=$(render_open populated.json "tab,enter") || fail "enter inflight: render exited non-zero"
+assert_not_opened "enter on an Underway worker calls no opener"
 rm -f "$OPENER_LOG"
 frame_o=$(render populated.json --keys "tab,tab,enter") || fail "open without opener: render exited non-zero"
 assert_contains "$frame_o" "would open https://github.com/acme/widgets/pull/41" "without --opener-cmd, --render-once only reports the open"
@@ -591,7 +604,7 @@ assert_before "$frame_prs" '^│ passing +IN REVIEW +ship-alpha' '^│ failing +
 
 # Medium width: REPO and AGE drop below 100 columns (falsify: change WIDE_BREAKPOINT in lib/layout.mjs).
 frame_med=$(render populated.json --cols 90 --rows 30) || fail "medium: render exited non-zero"
-assert_contains "$frame_med" "Needs you (4)" "medium keeps the six panes"
+assert_contains "$frame_med" "Captain's Call (6)" "medium keeps the six panes"
 assert_contains "$frame_med" "Teammates' PRs (0)" "medium: Teammates' PRs is drawn too"
 assert_row "$frame_med" '^│ STATE +HERDR +ID +WHAT +HOME +│$' "medium keeps the HERDR column and drops REPO and AGE"
 assert_no_row "$frame_med" ' REPO +HOME' "medium drops REPO"
@@ -600,7 +613,7 @@ assert_row "$frame_med" '^│ CHECKS +STATUS +ID +TITLE +AGE │$' "medium: My P
 assert_no_row "$frame_med" ' TITLE +BASE' "medium: no BASE column"
 assert_widths "$frame_med" 90 "medium frame lines are 90 columns"
 assert_lines "$frame_med" 30 "medium frame is 30 lines"
-assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab")" '^ enter card  f focus  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer (the card form: tab to scout-beta's card row with a pane)"
+assert_row "$(render populated.json --cols 90 --rows 30)" '^ enter card  f focus  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer (the card form: the board starts on scout-beta's card row with a pane)"
 assert_row "$(render populated.json --cols 90 --rows 30 --keys "tab,tab")" '^ j/k  tab  enter  l/h  x hide  H  1-6 panes  r  \. settings  \? help  q quit +$' "medium width uses the short footer on a PR row"
 
 # Minimum height (falsify: change MIN_ROWS in lib/layout.mjs).
@@ -610,12 +623,12 @@ assert_row "$frame_tiny" '\+[0-9]+ more ──┘$' "tiny frame marks hidden row
 
 # ----------------------------------------------------------------- empty
 frame_empty=$(render empty.json) || fail "empty: render exited non-zero"
-assert_contains "$frame_empty" "Needs you (0)" "empty needs-you count"
-assert_row "$frame_empty" '^│ no captain decisions, holds or blocked workers +│$' "empty needs-you message"
+assert_contains "$frame_empty" "Captain's Call (0)" "empty Captain's Call count"
+assert_row "$frame_empty" '^│ nothing needs your action right now +│$' "empty Captain's Call message"
 assert_row "$frame_empty" '^│ no pull requests of yours +│$' "empty My PRs message"
-assert_row "$frame_empty" '^│ no workers in flight +│$' "empty in-flight message"
-assert_row "$frame_empty" '^│ no scout reports +│$' "empty findings message"
-assert_row "$frame_empty" '^│ nothing landed yet +│$' "empty landed message"
+assert_row "$frame_empty" '^│ nothing is underway +│$' "empty Underway message"
+assert_row "$frame_empty" '^│ nothing is queued +│$' "empty Charted Next message"
+assert_row "$frame_empty" '^│ no recent completions +│$' "empty Recently Landed message"
 assert_row "$frame_empty" '^│ no pull requests waiting for your review +│$' "empty Teammates' PRs message (falsify: change the toreview empty text in PANES)"
 # No herdr block under --no-herdr is the state "off" with the reason --no-herdr: the title line warns
 # once and no pane header says anything about herdr (falsify: drop the detail from factsFromFixture's
@@ -631,20 +644,20 @@ assert_lines "$frame_empty" 40 "empty frame is 40 lines"
 frame_narrow=$(render narrow.json) || fail "narrow: render exited non-zero"
 # Section headers carry the same key badge as the pane titles (falsify: drop `badge` from the section
 # entry in flattenRows, or the badge segment in renderList).
-assert_row "$frame_narrow" '^── \[2\] Needs you \(1\) ─+$' "narrow: section header with its badge and count only, padded with dashes"
+assert_row "$frame_narrow" '^── \[1\] Captain.s Call \(1\) ─+$' "narrow: section header with its badge and count only, padded with dashes"
 assert_contains "$frame_narrow" "── [3] My PRs (0)" "narrow: My PRs section badge"
 assert_contains "$frame_narrow" "── [4] Teammates' PRs (0)" "narrow: Teammates' PRs section badge, fourth in screen order"
-assert_contains "$frame_narrow" "── [1] In flight (2)" "narrow: in-flight section badge, first in screen order"
-assert_contains "$frame_narrow" "── [5] Findings (0)" "narrow: findings section badge"
-assert_contains "$frame_narrow" "── [6] Landed (1)" "narrow: landed section badge"
+assert_contains "$frame_narrow" "── [2] Underway (2)" "narrow: Underway section badge, second in screen order"
+assert_contains "$frame_narrow" "── [5] Charted Next (0)" "narrow: Charted Next section badge"
+assert_contains "$frame_narrow" "── [6] Recently Landed (1)" "narrow: Recently Landed section badge"
 assert_count "$frame_narrow" "── [" 6 "narrow: six badges, one per section"
 assert_not_contains "$frame_narrow" "┌" "narrow: no pane borders"
 assert_row "$frame_narrow" '^ STATE +ID +WHAT +HOME +$' "narrow: single shared column header without REPO, AGE, HERDR or AUTHOR"
 assert_row "$frame_narrow" '^ hold +decide-vendor +Pick the vendor for the addr… +main +$' "narrow: hold row in list mode, text truncated to the flex column (which is what the fixed columns leave after sizing to their values)"
-assert_row "$frame_narrow" '^ working +ship-alpha +harness busy \(claude-hook\) +main +$' "narrow: in-flight row"
-assert_row "$frame_narrow" '^ working +▸ notes +notes-child +notes \(cached\) *$' "narrow: cached home group row in list mode"
+assert_row "$frame_narrow" '^ working +ship-alpha +Add the widget cache · harne… +main +$' "narrow: Underway row, its title first"
+assert_row "$frame_narrow" '^ working +notes-child +Notes child · summarizing Mo… +notes \(cached\) *$' "narrow: a cached home with one worker draws that worker directly with the cached home label (falsify: draw a group row over one worker)"
 frame_narrow_x=$(render narrow.json --expand all) || fail "narrow --expand all: render exited non-zero"
-assert_row "$frame_narrow_x" '^ working +↳ notes-child +summarizing Monday +notes \(cached\) *$' "narrow expanded: cached home label on a ledger child"
+if [ "$frame_narrow_x" = "$frame_narrow" ]; then pass; else fail "narrow --expand all: a home with one worker has no group to expand, so the frame should not change"; fi
 assert_contains "$frame_narrow" "firstmate-tui · firstmate · 2 homes" "narrow: title uses the home basename"
 assert_widths "$frame_narrow" 70 "narrow frame lines are 70 columns"
 assert_lines "$frame_narrow" 24 "narrow frame is 24 lines"
@@ -659,109 +672,125 @@ assert_contains "$frame_g" "┌─ [3] My PRs (1) ─" "grouped: the review head
 assert_row "$frame_g" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "grouped: recorded PR row says checks fetching before the first fetch, STATUS unknown, AGE marked as the fallback"
 assert_not_contains "$frame_g" "not fetched" "grouped: nothing reads not fetched before the first fetch"
 
-# Needs you is main-home only (falsify: remove the opts.allHomesNeeds guard in needsRows).
-assert_contains "$frame_g" "Needs you (0)" "grouped: no main-home needs"
-assert_row "$frame_g" '^│ no captain decisions, holds or blocked workers +│$' "grouped: Needs you empty although delegate-a has two live decisions"
-assert_not_contains "$frame_g" "cutover-day" "grouped: the keyed child decision is not in Needs you"
-assert_not_contains "$frame_g" "etl-vendor" "grouped: the secondmate captain hold is not in Needs you"
+# Captain's Call lists the delegate's two live decisions by default, and never its dated hold (falsify:
+# put the opts.allHomesNeeds guard back in needsRows, or drop the dated-hold filter in liveDecisions).
+assert_contains "$frame_g" "Captain's Call (2)" "grouped: the delegate's two live decisions"
+assert_row "$frame_g" '^│ decide +cutover-day +etl-cutover-runbook +Cut over Friday or Monday\? +- +delegate-a +- │$' "grouped: the keyed child decision, labelled with its home"
+assert_row "$frame_g" '^│ hold +- +etl-vendor +Pick the ETL vendor · Two quotes in the report +acme/etl +delegate-a +2d │$' "grouped: the delegate's captain hold with the repo from its queued entry"
+assert_no_row "$frame_g" '^│ (hold|decide) +[^│]*etl-later' "grouped: the dated hold is not a Captain's Call row"
+# The dated hold is one Charted Next row, its until date read from the ledger's decision when the
+# queued entry lacks it (falsify: drop the decisions_open merge in chartedRows).
+assert_contains "$frame_g" "Charted Next (1)" "grouped: the dated hold is Charted Next's one row"
+assert_row "$frame_g" '^│ dated +until 10-01 +etl-later +Revisit ETL pricing +acme/etl +delegate-a +- │$' "grouped: the delegate's dated hold with its until date, no filed date in the ledger"
+assert_count "$frame_g" "etl-later" 1 "grouped: the dated hold sits in exactly one pane"
 
-# Collapsed groups (falsify: remove etl-backfill from delegate-a's endpoints (state), the decisions_open
-# entries, or the notes ledger).
-assert_contains "$frame_g" "In flight (3)" "grouped: one main worker plus two home groups"
+# Collapsed groups: a home's rows are its workers, a group over two or more (falsify: remove
+# etl-backfill from delegate-a's endpoints (state), or the notes ledger).
+assert_contains "$frame_g" "Underway (3)" "grouped: one main worker plus two home groups"
 assert_row "$frame_g" '^│ STATE {4}HERDR ' "STATE column stays 8 wide when no longer state word is on the board"
-assert_row "$frame_g" '^│ working +working +ship-alpha +harness busy \(claude-hook\) +acme/widgets +main +5m │$' "grouped: main-home worker stays one row"
-assert_row "$frame_g" '^│ blocked +4 live +!▸ delegate-a +etl-loader, etl-schema, etl-cutover-runbook, etl-backfill +acme/etl +delegate-a +5m │$' "delegate-a group: blocked is the worst child state, four live, flagged, newest child 5m"
+assert_row "$frame_g" '^│ working +working +ship-alpha +Add the widget cache · harness busy \(claude-hook\) +acme/widgets +main +5m │$' "grouped: main-home worker stays one row"
+assert_row "$frame_g" '^│ blocked +4 live +!▸ delegate-a +etl-loader, etl-schema, etl-cutover-runbook, etl-backfill +acme/etl +delegate-a +5m │$' "delegate-a group: blocked is the worst worker state, four live, flagged for its live calls, newest child 5m"
 assert_row "$frame_g" '^│ working +2 live +▸ notes +brag-week-37, notes-monday +acme/brag +notes +40m │$' "notes group: working, two live, no flag"
 assert_before "$frame_g" '^│ working +2 live +▸ notes' '^│ blocked +4 live +!▸ delegate-a' "grouped: working group sorts before blocked group"
 assert_not_contains "$frame_g" "↳" "grouped: collapsed by default"
 
-# Expanded (falsify: drop the decision text lookup or the hold text lookup in ledgerChildRows, or
-# the dated-hold filter in liveDecisions).
+# Expanded: the worker rows only; a child with a keyed decision keeps its worker state and its doing,
+# a blocked child shows its hold title and reason (falsify: draw decision text on a worker row, drop
+# the hold text lookup in ledgerChildRows, or list decisions among ledgerEntry's children).
 frame_gx=$(render grouped.json --expand all) || fail "grouped --expand all: render exited non-zero"
-assert_contains "$frame_gx" "In flight (10)" "grouped expanded: 3 top rows + 5 under delegate-a + 2 under notes"
-assert_not_contains "$frame_gx" "(secondmate)" "expanded: neither delegate's own record is a row (falsify: list mateRow among ledgerGroup's children)"
+assert_contains "$frame_gx" "Underway (9)" "grouped expanded: 3 top rows + 4 under delegate-a + 2 under notes"
+assert_not_contains "$frame_gx" "(secondmate)" "expanded: neither delegate's own record is a row (falsify: list mateRow among ledgerEntry's children)"
 assert_row "$frame_gx" '^│ working +working +↳ etl-loader +writing the loader +acme/etl +delegate-a +3h │$' "expanded: working child with doing"
 assert_row "$frame_gx" '^│ working +working +↳ etl-schema +adding the schema migration +acme/etl +delegate-a +20m │$' "expanded: second working child"
-assert_row "$frame_gx" '^│ decide +idle +↳ etl-cutover-runbook +Cut over Friday or Monday\? +acme/etl +delegate-a +5m │$' "expanded: child with a keyed decision shows the decision text and tag decide"
+assert_row "$frame_gx" '^│ working +idle +↳ etl-cutover-runbook +drafting the cutover runbook +acme/etl +delegate-a +5m │$' "expanded: the child with a keyed decision keeps its worker state and doing; the decision is Captain's Call's"
 assert_row "$frame_gx" '^│ blocked +blocked +↳ etl-backfill +Backfill the ETL history · waiting on the prod snapshot +- +delegate-a +1h │$' "expanded: blocked child shows its hold title and reason"
-assert_row "$frame_gx" '^│ hold +- +↳ etl-vendor +Pick the ETL vendor · Two quotes in the report +acme/etl +delegate-a +2d │$' "expanded: the home's live captain hold lists last"
-assert_not_contains "$frame_gx" "etl-later" "expanded: a dated hold is not live and stays out"
+assert_no_row "$frame_gx" '↳ etl-vendor' "expanded: the home's live captain hold is not a child row"
+assert_not_contains "$(printf '%s\n' "$frame_gx" | sed -n '/\[2\] Underway/,/^└/p')" "etl-later" "expanded: the dated hold is not a child row either"
 assert_row "$frame_gx" '^│ working +working +↳ brag-week-37 +drafting week 37 +acme/brag +notes +2h │$' "expanded: notes child"
-assert_before "$frame_gx" '↳ etl-loader' '↳ etl-cutover-runbook' "children: working before decide"
-assert_before "$frame_gx" '↳ etl-cutover-runbook' '↳ etl-backfill' "children: decide before blocked (ledger order within a rank)"
-assert_before "$frame_gx" '↳ etl-backfill' '↳ etl-vendor' "home decisions come after the workers"
+assert_before "$frame_gx" '↳ etl-loader' '↳ etl-cutover-runbook' "children: working rows in ledger order"
+assert_before "$frame_gx" '↳ etl-cutover-runbook' '↳ etl-backfill' "children: working before blocked"
 frame_gh=$(render grouped.json --expand delegate-a) || fail "grouped --expand delegate-a: render exited non-zero"
 assert_contains "$frame_gh" "!▾ delegate-a" "--expand by id expands that home"
 assert_contains "$frame_gh" "▸ notes" "--expand by id leaves the other home collapsed"
 assert_not_contains "$frame_gh" "↳ brag-week-37" "--expand by id: no children of the collapsed home"
 
-# --all-homes-needs restores the secondmate decisions (falsify: drop the flag in lib/args.mjs).
+# --all-homes-needs is accepted and changes nothing (falsify: give the flag an effect again).
 frame_ga=$(render grouped.json --all-homes-needs) || fail "grouped --all-homes-needs: render exited non-zero"
-assert_contains "$frame_ga" "Needs you (2)" "--all-homes-needs: both live secondmate decisions"
-assert_row "$frame_ga" '^│ decide +cutover-day +etl-cutover-runbook +Cut over Friday or Monday\? +- +delegate-a +- │$' "--all-homes-needs: keyed child decision"
-assert_row "$frame_ga" '^│ hold +- +etl-vendor +Pick the ETL vendor · Two quotes in the report +acme/etl +delegate-a +2d │$' "--all-homes-needs: captain hold with repo from queued"
-assert_not_contains "$frame_ga" "etl-later" "--all-homes-needs: dated hold still out"
+if [ "$frame_ga" = "$frame_g" ]; then pass; else fail "--all-homes-needs changes the grouped frame: $(diff <(printf '%s\n' "$frame_g") <(printf '%s\n' "$frame_ga") | head -n 5)"; fi
 
 # Geometry (falsify: change the fixture cols/rows).
 assert_widths "$frame_g" 160 "grouped frame lines are 160 columns"
 assert_lines "$frame_g" 44 "grouped frame is 44 lines"
 
 # ---------------------------------------------------------- inflight-live
-# In flight is built from live work only: a group's STATE, rows and count come from its live children
-# and its open decisions, never from the delegate's own task record, whose state is the last verb of
-# its own status log and reads done after any done relay (falsify: put mateRow back into ledgerGroup's
-# ranking or children, drop the done or the unknown-without-a-pane skip from the endpoint loop of
-# ledgerChildRows, drop the held branch from mainTaskRow, or give an unranked tag a rank in STATE_RANK).
-# Every delegate record in the fixture reads done with a done relay as its detail, so any row built from
-# one brings the word done into the pane.
+# Underway is built from live work only: a group's STATE, rows and count come from its live children,
+# never from the delegate's own task record, whose state is the last verb of its own status log and
+# reads done after any done relay, and never from the home's calls, which are Captain's Call's. Every
+# delegate record in the fixture reads done with a done relay as its detail, so any row built from one
+# brings the word done into the pane.
 pane_lines() { # <frame> <pane key 1-6>: that pane's lines, title to bottom border
   printf '%s\n' "$1" | sed -n "/^┌─ \[$2\]/,/^└/p"
 }
 frame_il=$(render inflight-live.json) || fail "inflight-live: render exited non-zero"
-inflight_il=$(pane_lines "$frame_il" 1)
-assert_contains "$frame_il" "In flight (8)" "inflight-live: six group rows and two main-home rows, none for the delegates' own records"
-assert_not_contains "$inflight_il" "done" "inflight-live: nothing in In flight reads done, in STATE or in WHAT"
+inflight_il=$(pane_lines "$frame_il" 2)
+# Underway is the live workers alone: the busy home's group, the awaiting-merge main task and the
+# failed home's one child drawn directly. An idle home, a home whose ledger lists only done and
+# unknown endpoints, a home with only a call and a held failed task have no worker and draw nothing
+# here (falsify: put mateRow back into ledgerEntry, drop the done or the unknown skip from the
+# endpoint loop of ledgerChildRows, drop the held or the done skip from mainTaskRow, or draw a group
+# over a home with no worker).
+assert_contains "$frame_il" "Underway (3)" "inflight-live: one group, one main row and one delegate worker drawn directly, none for the delegates' own records"
+assert_not_contains "$inflight_il" "done" "inflight-live: nothing in Underway reads done, in STATE or in WHAT"
 assert_not_contains "$inflight_il" "(secondmate)" "inflight-live: no delegate record row"
-assert_row "$frame_il" '^│ idle +0 live +▸ idle-home +idle +- +idle-home +- │$' "idle delegate: STATE idle, 0 live, WHAT idle, no age, no flag, although its record reads done"
+assert_not_contains "$inflight_il" "idle-home" "idle delegate: no Underway row, however its record reads"
 assert_row "$frame_il" '^│ working +2 live +▸ busy-home +child-a, child-b +acme/etl +busy-home +20m │$' "delegate with two working children and a stale done relay: working, 2 live, newest child 20m"
-assert_row "$frame_il" '^│ idle +1 live +▸ stale-home +peek +- +stale-home +1h │$' "delegate whose ledger lists only endpoints: the unknown one with a herdr pane counts as live, the done and paneless ones do not, and unknown does not rank"
-assert_row "$frame_il" '^│ decide +0 live +!▸ ask-home +idle +- +ask-home +1d │$' "delegate with no children and one relayed decision: decide, flagged, WHAT idle, AGE from the decision"
-assert_row "$frame_il" '^│ hold +0 live +!▸ held-home +idle +- +held-home +2d │$' "delegate with a ledger captain hold and no children: hold, flagged, AGE from the hold (falsify: leave homeDecisions out of groupState)"
-assert_row "$frame_il" '^│ idle +0 live +▸ failed-home +backfill +- +failed-home +1h │$' "delegate with one failed child: idle, 0 live, the child named in WHAT"
-assert_row "$frame_il" '^│ hold +idle +fix-checks +run failed +acme/firstmate +main +2d │$' "failed main-home task under a live captain hold reads hold, not failed"
-assert_row "$frame_il" '^│ awaiting merge +idle +ship-unmerged +PR https://github.com/acme/api/pull/9 checks green +acme/api +main +1m │$' "done main-home task with an unmerged PR and an open backlog row still reads awaiting merge"
-assert_not_contains "$inflight_il" "ship-merged" "done-and-merged main-home task whose record was cleaned up has no In flight row"
-assert_before "$frame_il" '▸ busy-home' '^│ hold +idle +fix-checks' "a working group sorts before the held main task"
-assert_before "$frame_il" '^│ hold +idle +fix-checks' '!▸ ask-home' "a held main-home row sorts with the decide and hold groups, main rows first"
-assert_before "$frame_il" '!▸ held-home' '▸ idle-home' "idle groups sort after the flagged ones"
-assert_before "$frame_il" '▸ failed-home' '^│ awaiting merge' "idle groups sort before awaiting merge"
-assert_row "$(render inflight-live.json --keys j)" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "the held failed task carries the card, its pane and both hold actions"
+assert_not_contains "$inflight_il" "stale-home" "delegate whose ledger lists only done and unknown endpoints: no worker, no Underway row"
+assert_not_contains "$inflight_il" "ask-home" "delegate with no children and one relayed decision: no Underway row; the decision is Captain's Call's"
+assert_not_contains "$inflight_il" "held-home" "delegate with a ledger captain hold and no children: no Underway row; the hold is Captain's Call's"
+assert_row "$frame_il" '^│ failed +pane lost +backfill +endpoint default:w10A:p1 \(run-step\) +- +failed-home +1h │$' "delegate with one failed child: the child drawn directly, HOME naming the home, its lost pane in red"
+assert_not_contains "$inflight_il" "fix-checks" "failed main-home task under a live captain hold has no Underway row: nothing runs, and the hold is Captain's Call's"
+assert_row "$frame_il" '^│ awaiting merge +idle +ship-unmerged +Retry on 429 from the address API · PR https://github.com/acme/api/pull/9 checks green +acme/api +main +1m │$' "done main-home task with an unmerged PR and an open backlog row still reads awaiting merge"
+assert_not_contains "$inflight_il" "ship-merged" "done-and-merged main-home task whose record was cleaned up has no Underway row"
+assert_before "$frame_il" '▸ busy-home' '^│ awaiting merge' "a working group sorts before awaiting merge"
+assert_before "$frame_il" '^│ awaiting merge' '^│ failed +pane lost +backfill' "awaiting merge sorts before failed"
+# Captain's Call carries every home's calls once: the relayed decision of a home whose ledger does not
+# hold it, the held failed main task, the delegate's ledger hold and the review row (falsify: drop
+# relayedDecisionRows, or the ledger loop in needsRows).
+assert_contains "$frame_il" "Captain's Call (4)" "inflight-live: a relayed decision, two holds and a review row"
+assert_row "$frame_il" '^│ decide +vendor-pick +ask-home +Which vendor for the address API\? +ask-home +ask-home +1d │$' "the relayed decision of a home whose ledger does not carry it lists once, labelled with that home"
+assert_row "$frame_il" '^│ hold +- +fix-checks +Judge only the newest run of each check · The fix is ready but cannot be pushed: pull-o… +acme/firstmate +main +2d │$' "the held failed task is one hold row"
+assert_row "$frame_il" '^│ hold +- +price-hold +Revisit the pricing tiers · Two quotes in the report +acme/billing +held-home +2d │$' "the delegate's captain hold lists once, labelled with its home"
+assert_row "$(render inflight-live.json --keys j)" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "the held failed task's row carries the card and both hold actions, and no pane (a hold row is built from the backlog record)"
+# Charted Next warns about what Underway no longer lists: the two endpoints whose panes are gone and
+# the one whose state is unavailable; a done endpoint and a live child with a lost pane are not warnings
+# (falsify: warn on a done or a live endpoint in warningRows).
+assert_contains "$frame_il" "Charted Next (0, 3 warnings)" "inflight-live: three warnings, no queued work; the count leaves the warnings out"
+assert_row "$frame_il" '^│ warning +- +ghost-tmux +endpoint 0:fm-ghost-tmux is gone \(exists: false\) +- +stale-home +- │$' "an unknown endpoint on a tmux target that no longer exists is a warning"
+assert_row "$frame_il" '^│ warning +- +ghost-lost +endpoint default:w9B:p1 is gone \(exists: false\) +- +stale-home +- │$' "an unknown endpoint whose pane is gone is a warning"
+assert_row "$frame_il" '^│ warning +- +peek +child current state unavailable \(endpoint default:w9C:p1, none\) +- +stale-home +- │$' "an unknown endpoint whose pane exists is a warning about its state, not an Underway row"
+assert_no_row "$frame_il" '^│ warning +- +(stale-done|backfill|child-a) ' "no warning for a done endpoint or a live worker"
 frame_ilx=$(render inflight-live.json --expand all) || fail "inflight-live --expand all: render exited non-zero"
-inflight_ilx=$(pane_lines "$frame_ilx" 1)
-assert_contains "$frame_ilx" "In flight (14)" "expanded: two children, one unknown endpoint, one relayed decision, one ledger hold and one failed child join the eight rows"
+inflight_ilx=$(pane_lines "$frame_ilx" 2)
+assert_contains "$frame_ilx" "Underway (5)" "expanded: the busy home's two children join the three rows, and nothing else"
 assert_not_contains "$inflight_ilx" "done" "expanded: still nothing reads done"
 assert_not_contains "$inflight_ilx" "(secondmate)" "expanded: no delegate record row among the children"
-assert_count "$inflight_ilx" "↳" 6 "expanded: six child rows in all"
-assert_count "$inflight_ilx" "↳ child-" 2 "expanded: exactly two rows under busy-home, its two children"
+assert_count "$inflight_ilx" "↳" 2 "expanded: two child rows in all"
 assert_row "$frame_ilx" '^│ working +working +↳ child-a +writing the loader +acme/etl +busy-home +3h │$' "expanded: the first working child"
 assert_row "$frame_ilx" '^│ working +working +↳ child-b +adding the schema migration +acme/etl +busy-home +20m │$' "expanded: the second working child"
 assert_not_contains "$inflight_ilx" "stale-done" "expanded: a done endpoint is not listed"
-assert_not_contains "$inflight_ilx" "ghost-tmux" "expanded: an unknown endpoint on a tmux target, no herdr pane, is not listed"
+assert_not_contains "$inflight_ilx" "ghost-tmux" "expanded: an unknown endpoint on a tmux target is not listed"
 assert_not_contains "$inflight_ilx" "ghost-lost" "expanded: an unknown endpoint whose herdr pane is gone is not listed"
-assert_row "$frame_ilx" '^│ unknown +idle +↳ peek +endpoint default:w9C:p1 \(none\) +- +stale-home +1h │$' "expanded: an unknown endpoint with a herdr pane lists as unknown with that pane's status"
-assert_row "$frame_ilx" '^│ decide +vendor-pick +↳ ask-home +Which vendor for the address API\? +ask-home +main +1d │$' "expanded: the relayed decision lists under its group"
-assert_row "$frame_ilx" '^│ hold +- +↳ price-hold +Revisit the pricing tiers · Two quotes in the report +acme/billing +held-home +2d │$' "expanded: the ledger's captain hold lists under its group"
-assert_row "$frame_ilx" '^│ failed +pane lost +↳ backfill +endpoint default:w10A:p1 \(run-step\) +- +failed-home +1h │$' "expanded: the failed child lists under its idle group"
-assert_before "$frame_ilx" '▾ idle-home' '▾ stale-home' "expanded: the idle group is followed by the next group, with nothing under it"
-frame_ilk=$(render inflight-live.json --keys "j,j,j,j,l") || fail "inflight-live keys l: render exited non-zero"
-assert_contains "$frame_ilk" "▾ idle-home" "l on the idle group marks it expanded"
-assert_contains "$frame_ilk" "In flight (8)" "expanding a delegate with nothing live adds no row (falsify: list the delegate's record as a child)"
-assert_not_contains "$frame_ilk" "↳" "expanded idle group: no child rows"
-# Landed is the one place the finished children appear (falsify: filter Landed by the In flight rule).
-assert_contains "$frame_il" "Landed (4)" "inflight-live: the cleaned-up main task and the three delegate landed entries"
-assert_row "$frame_il" '^│ merged +09-20 +ship-merged +Add the widget cache · https://github.com/acme/widgets/pull/41 +acme/widgets +main +1d │$' "Landed: the cleaned-up merged task lists from its backlog record"
-assert_row "$frame_il" '^│ merged +09-20 +stale-done +Ship the loader · https://github.com/acme/etl/pull/14 +acme/etl +stale-home +1d │$' "Landed: the delegate's done endpoint lists from its ledger's landed entries"
-assert_row "$frame_il" '^│ merged +09-19 +child-c +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +busy-home +2d │$' "Landed: the busy delegate's finished child"
+assert_not_contains "$inflight_ilx" "peek" "expanded: an unknown endpoint with a herdr pane is not listed either; it is a Charted Next warning"
+assert_not_contains "$inflight_ilx" "vendor-pick" "expanded: the relayed decision is not a child row"
+assert_not_contains "$inflight_ilx" "price-hold" "expanded: the ledger's captain hold is not a child row"
+frame_ilk=$(render inflight-live.json --keys "tab,l") || fail "inflight-live keys l: render exited non-zero"
+assert_contains "$frame_ilk" "▾ busy-home" "l on the busy group marks it expanded"
+assert_contains "$frame_ilk" "Underway (5)" "expanding the busy group adds its two children"
+# Recently Landed is the one place the finished children appear (falsify: filter Recently Landed by the Underway rule).
+assert_contains "$frame_il" "Recently Landed (4)" "inflight-live: the cleaned-up main task and the three delegate landed entries"
+assert_row "$frame_il" '^│ merged +09-20 +ship-merged +Add the widget cache · https://github.com/acme/widgets/pull/41 +acme/widgets +main +1d │$' "Recently Landed: the cleaned-up merged task lists from its backlog record"
+assert_row "$frame_il" '^│ merged +09-20 +stale-done +Ship the loader · https://github.com/acme/etl/pull/14 +acme/etl +stale-home +1d │$' "Recently Landed: the delegate's done endpoint lists from its ledger's landed entries"
+assert_row "$frame_il" '^│ merged +09-19 +child-c +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +busy-home +2d │$' "Recently Landed: the busy delegate's finished child"
 assert_widths "$frame_il" 160 "inflight-live frame lines are 160 columns"
 assert_lines "$frame_il" 60 "inflight-live frame is 60 lines"
 assert_widths "$frame_gx" 160 "grouped expanded frame lines are 160 columns"
@@ -790,28 +819,28 @@ assert_row "$chain" "^vim $chain_dir/b/vim\$" "chain: without glow or EDITOR, vi
 assert_row "$chain" '^less less$' "chain: less is the last resort"
 assert_row "$chain" '^viewer-cmd bash fake$' "chain: --viewer-cmd overrides everything"
 
-# Enter in Findings without --viewer-cmd only reports the viewer the chain resolved to, naming the fake glow
-# shadowing PATH; nothing runs (falsify: run the viewer without --viewer-cmd in driveOnce, or drop whichOnPath).
+# Enter on a Recently Landed report row without --viewer-cmd only reports the viewer the chain resolved to,
+# naming the fake glow shadowing PATH; nothing runs (falsify: run the viewer without --viewer-cmd in
+# driveOnce, or drop whichOnPath). In lost.json the two PR panes and Charted Next are empty, so two tabs
+# from Captain's Call reach Recently Landed, whose first row is the scout-beta report.
 rm -f "$VIEWER_LOG"
 frame_v=$(FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" PATH="$FAKE_BIN:$PATH" render lost.json --keys "tab,tab,enter") || fail "viewer report-only: render exited non-zero"
 assert_contains "$frame_v" "would view /fixture/firstmate/data/scout-beta/report.md with $FAKE_BIN/glow -p (glow)" "fake glow on PATH is the resolved viewer, reported with its path and -p"
 assert_not_viewed "without --viewer-cmd the resolved viewer is never spawned"
-# With --viewer-cmd the report path is the only appended argument (falsify: drop reportPath from findingsRows).
+# With --viewer-cmd the report path is the only appended argument (falsify: drop reportPath from the
+# report rows of landedRows).
 frame_v=$(render_view lost.json "tab,tab,enter") || fail "viewer main: render exited non-zero"
 assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "enter on a main-home scout report hands its absolute path to the viewer"
 assert_contains "$frame_v" "viewed /fixture/firstmate/data/scout-beta/report.md (viewer-cmd)" "footer names the viewed report"
-frame_v=$(render_view lost.json "tab,tab,j,enter") || fail "viewer secondmate: render exited non-zero"
+frame_v=$(render_view lost.json "tab,tab,j,j,enter") || fail "viewer secondmate: render exited non-zero"
 assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "a secondmate report resolves against its own home, not FM_HOME (falsify: use fmHome for ledger reports)"
 frame_v=$(render_view lost.json "tab,tab,enter" "$FAKE_VIEWER -p") || fail "viewer flags: render exited non-zero"
 assert_viewed "-p
 /fixture/firstmate/data/scout-beta/report.md" "viewer flags stay separate argv elements, the path last (falsify: join argv into one string)"
-frame_v=$(render_view populated.json "tab,tab,tab,j,enter") || fail "viewer remote: render exited non-zero"
-assert_not_viewed "a remote home's report is never opened"
-assert_contains "$frame_v" "mobile-fix: report lives on another host (remote-sm (remote)); not reachable from here" "remote report: red notice instead (falsify: drop reportRemote)"
-frame_v=$(render_view lost.json "enter") || fail "viewer wrong pane: render exited non-zero"
-assert_not_viewed "enter on an In flight worker row never runs the viewer (a Needs you row would show its hold card through it; the hold section covers that)"
+frame_v=$(render_view lost.json "tab,enter") || fail "viewer wrong pane: render exited non-zero"
+assert_not_viewed "enter on an Underway worker row never runs the viewer (a Captain's Call row would show its hold card through it; the hold section covers that)"
 frame_v=$(render lost.json --keys "?") || fail "help: render exited non-zero"
-assert_contains "$frame_v" "Findings row: open the report in the viewer (glow, \$EDITOR, vim, less)" "help overlay documents the viewer"
+assert_contains "$frame_v" "Recently Landed row without a PR: view its report (glow, \$EDITOR, vim, less), else" "help overlay documents the viewer"
 assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
 assert_contains "$frame_v" "1 - 6        show or hide a pane" "help overlay documents 1-5"
 assert_contains "$frame_v" "r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)" "help overlay documents r"
@@ -822,48 +851,48 @@ assert_not_contains "$frame_v" "firstmate pane" "help overlay does not mention t
 assert_contains "$frame_v" "f            focus the selected row's herdr pane, in any pane" "help overlay documents f as a focus"
 assert_contains "$frame_v" "d            discard the selected hold: asks y first, then runs fm-captain-hold.sh answer" "help overlay documents d"
 assert_contains "$frame_v" "D            defer the selected hold to a date (default today + 14 days): fm-captain-hold.sh hold" "help overlay documents D"
-assert_contains "$frame_v" "show its hold card in the viewer" "help overlay documents enter on a held row"
+assert_contains "$frame_v" "show its card in the viewer" "help overlay documents enter on a held row"
 assert_contains "$frame_v" "Its two writes, d and D," "help overlay names the board's two writes (falsify: put the read-only sentence back)"
 
 # ------------------------------------------------------------- lost panes
 frame_l=$(render lost.json --expand all) || fail "lost: render exited non-zero"
 tags_l=$(render lost.json --expand all --tags) || fail "lost --tags: render exited non-zero"
 # A recorded pane absent from the herdr overlay reads "pane lost" (falsify: drop the lost branch in herdrColumn).
-assert_row "$frame_l" '^│ working +pane lost +ship-lost +adding the retry loop +acme/api +main +10m │$' "main worker whose pane is gone: HERDR reads pane lost"
-assert_row "$frame_l" '^│ working +pane lost +↳ child-lost +indexing the warehouse +acme/etl +delegate-a +1h │$' "secondmate child whose pane is gone: HERDR reads pane lost"
+assert_row "$frame_l" '^│ working +pane lost +ship-lost +Retry on 429 from the address API · adding the retry loop +acme/api +main +10m │$' "main worker whose pane is gone: HERDR reads pane lost"
+assert_row "$frame_l" '^│ working +pane lost +↳ child-lost +Child lost · indexing the warehouse +acme/etl +delegate-a +1h │$' "secondmate child whose pane is gone: HERDR reads pane lost"
 assert_row "$frame_l" '^│ working +working +ship-alpha ' "a worker whose pane is present keeps its agent status"
 assert_count "$tags_l" "{red-fg}pane lost{/red-fg}" 2 "--tags: both lost HERDR cells carry the red tag (falsify: drop the lost style in rowSegments)"
-# Needs you has no HERDR column, so the whole lost row is red; the live decision row is not (falsify: drop
+# Captain's Call has no HERDR column, so the whole lost row is red; the live decision row is not (falsify: drop
 # the `row.lost && !herdrCell` term from bad in rowSegments).
-assert_row "$tags_l" '\{red-fg\}decide.*\{red-fg\}ship-lost' "Needs you row of the lost worker is red"
-assert_no_row "$tags_l" '\{red-fg\}decide.*ship-alpha' "Needs you row of the live worker is not red"
+assert_row "$tags_l" '\{red-fg\}decide.*\{red-fg\}ship-lost' "Captain's Call row of the lost worker is red"
+assert_no_row "$tags_l" '\{red-fg\}decide.*ship-alpha' "Captain's Call row of the live worker is not red"
 # Enter on a lost row: a footer notice, never a focus (falsify: drop the lost check in focusProblem).
-frame_k=$(render lost.json --keys "j,enter") || fail "lost enter inflight: render exited non-zero"
-assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "enter on the lost In flight row says pane lost"
-frame_k=$(render lost.json --keys "tab,j,f") || fail "lost f needs: render exited non-zero"
-assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "f on the lost Needs you row says pane lost (enter there shows the hold card since 0.6.0)"
+frame_k=$(render lost.json --keys "tab,j,enter") || fail "lost enter inflight: render exited non-zero"
+assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "enter on the lost Underway row says pane lost"
+frame_k=$(render lost.json --keys "j,f") || fail "lost f needs: render exited non-zero"
+assert_contains "$frame_k" "ship-lost: pane w1L:p1 is gone from herdr (pane lost); nothing to focus" "f on the lost Captain's Call row says pane lost (enter there shows the hold card since 0.6.0)"
 # Disconnected herdr: absence is unproved, so the cell reads unknown in grey and nothing is red (falsify: drop
 # the unknown branch in herdrColumn, or the grey style in rowSegments).
 frame_d=$(render lost-disconnected.json) || fail "disconnected: render exited non-zero"
 tags_d=$(render lost-disconnected.json --tags) || fail "disconnected --tags: render exited non-zero"
 assert_row "$frame_d" '^ firstmate-tui · /fixture/firstmate · 1 home +herdr disconnected \(ECONNREFUSED\) $' "disconnected fixture: the title line warns with the socket error as the reason"
-assert_row "$frame_d" '^│ working +unknown +ship-lost +adding the retry loop ' "disconnected: the missing pane reads unknown, not pane lost"
+assert_row "$frame_d" '^│ working +unknown +ship-lost +Retry on 429 from the address API · adding the retry loop ' "disconnected: the missing pane reads unknown, not pane lost"
 assert_row "$tags_d" '\{grey-fg\}unknown *\{/grey-fg\}' "disconnected: the unknown cell is grey"
 assert_count "$tags_d" "{red-fg}" 1 "disconnected: the title warning is the only red text; no row is red"
 assert_contains "$tags_d" "{red-fg}herdr disconnected (ECONNREFUSED){/red-fg}" "disconnected: the warning carries the red tag the lost cell uses (falsify: give the warning the title style only)"
 assert_widths "$frame_l" 160 "lost frame lines are 160 columns"
 
 # ---------------------------------------------------------- landed targets
-# Enter on a Landed row takes the first target the row has that this board can reach: its PR, else
+# Enter on a Recently Landed row takes the first target the row has that this board can reach: its PR, else
 # its report on this host, else its worker pane while herdr lists it, else an ordinary footer notice
-# (landedTarget in lib/controller.mjs). landed-targets.json at 160x44 (Teammates' PRs takes four lines
-# between My PRs and In flight, so every pane below it sits four lines lower): Landed's rows are lines 33-41
-# (etl-index, ship-done, etl-pane, ship-old, etl-report, plain-done, mobile-fix, etl-none, old-scout)
-# and tab reaches the pane in four presses. The WHAT text names the first target that exists
+# (landedTarget in lib/controller.mjs). landed-targets.json at 160x44: Recently Landed's rows are lines
+# 34-42 (etl-index, ship-done, etl-pane, ship-old, etl-report, plain-done, mobile-fix, etl-none,
+# old-scout) and tab reaches the pane in four presses from Captain's Call (Underway, My PRs, then the
+# empty Teammates' PRs and Charted Next are skipped). The WHAT text names the first target that exists
 # (falsify: drop a rung from landedWhat in lib/model.mjs, the task or endpoint lookup that gives a
 # done row its pane, or the report_path resolution).
 frame_t=$(render landed-targets.json) || fail "landed targets: render exited non-zero"
-assert_contains "$frame_t" "┌─ [6] Landed (9) ─" "landed targets: nine rows, one per target shape"
+assert_contains "$frame_t" "┌─ [6] Recently Landed (9) ─" "landed targets: nine rows, one per target shape"
 assert_row "$frame_t" '^│ merged +09-15 +etl-index +Add the ETL index · https://github.com/acme/etl/pull/12 +acme/etl +delegate-a +1d │$' "secondmate row with a PR names the PR"
 assert_row "$frame_t" '^│ done +09-14 +ship-done +Apply the widget migration · pane w1F:p1 +acme/widgets +main +2d │$' "main row whose done task still has its pane names the pane"
 assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table · pane w2C:p2 +- +delegate-a +3d │$' "secondmate row whose ledger endpoint herdr lists names the pane"
@@ -880,9 +909,9 @@ assert_widths "$frame_t" 160 "landed targets frame lines are 160 columns"
 frame_t=$(render "$(variant landed-targets.json landed-nopanes '{"herdr": {"agents": []}}')") || fail "landed targets no panes: render exited non-zero"
 assert_row "$frame_t" '^│ done +09-14 +ship-done +Apply the widget migration +acme/widgets +main +2d │$' "with the pane lost the main pane-only row is the bare title"
 assert_row "$frame_t" '^│ done +09-13 +etl-pane +Backfill the ETL audit table +- +delegate-a +3d │$' "with the pane lost the secondmate pane-only row is the bare title"
-assert_not_contains "$frame_t" "pane w" "no Landed row names a pane once every pane is lost"
+assert_not_contains "$frame_t" "pane w" "no Recently Landed row names a pane once every pane is lost"
 
-# render_targets <keys> [flags]: enter on a Landed row of landed-targets.json with the fake opener
+# render_targets <keys> [flags]: enter on a Recently Landed row of landed-targets.json with the fake opener
 # and the fake viewer recording (logs reset first) and --no-herdr unless the flags say otherwise
 render_targets() {
   local keys=$1
@@ -892,78 +921,76 @@ render_targets() {
 }
 # Rung 1, a PR: the opener gets the URL, the viewer nothing (falsify: drop the PR rung from
 # landedTarget, or order the report rung first).
-frame_t=$(render_targets "tab,tab,tab,tab,enter" --no-herdr) || fail "landed enter PR: render exited non-zero"
-assert_opened "https://github.com/acme/etl/pull/12" "enter on a secondmate Landed row with a PR opens it"
-assert_not_viewed "a Landed row with a PR never reaches the viewer"
+frame_t=$(render_targets "tab,tab,tab,enter" --no-herdr) || fail "landed enter PR: render exited non-zero"
+assert_opened "https://github.com/acme/etl/pull/12" "enter on a secondmate Recently Landed row with a PR opens it"
+assert_not_viewed "a Recently Landed row with a PR never reaches the viewer"
 assert_contains "$frame_t" "opened https://github.com/acme/etl/pull/12 (etl-index)" "footer names the opened PR"
-frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,enter" --no-herdr) || fail "landed enter PR lost pane: render exited non-zero"
-assert_opened "https://github.com/acme/widgets/pull/30" "enter on a main Landed row with a PR and a lost pane opens the PR"
+frame_t=$(render_targets "tab,tab,tab,j,j,j,enter" --no-herdr) || fail "landed enter PR lost pane: render exited non-zero"
+assert_opened "https://github.com/acme/widgets/pull/30" "enter on a main Recently Landed row with a PR and a lost pane opens the PR"
 assert_not_contains "$frame_t" "nothing to focus" "the lost pane is not reported when the PR opens"
 # Rung 2, a report on this host: the viewer gets the absolute path resolved against the owning home,
 # the opener nothing (falsify: drop reportPath from landedRows, or the report rung from landedTarget).
-frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,enter" --no-herdr) || fail "landed enter secondmate report: render exited non-zero"
-assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "enter on a secondmate Landed row with a report views it against its own home"
-assert_not_opened "a Landed row with a report and no PR calls no opener"
+frame_t=$(render_targets "tab,tab,tab,j,j,j,j,enter" --no-herdr) || fail "landed enter secondmate report: render exited non-zero"
+assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "enter on a secondmate Recently Landed row with a report views it against its own home"
+assert_not_opened "a Recently Landed row with a report and no PR calls no opener"
 assert_contains "$frame_t" "viewed /fixture/homes/delegate-a/data/etl-report/report.md (viewer-cmd)" "footer names the viewed report"
-frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter main report: render exited non-zero"
-assert_viewed "/fixture/firstmate/data/old-scout/report.md" "enter on a main Landed row with a report views it against the main home"
-assert_not_contains "$frame_t" "no PR URL" "a report-only Landed row is no longer an error"
+frame_t=$(render_targets "tab,tab,tab,j,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter main report: render exited non-zero"
+assert_viewed "/fixture/firstmate/data/old-scout/report.md" "enter on a main Recently Landed row with a report views it against the main home"
+assert_not_contains "$frame_t" "no PR URL" "a report-only Recently Landed row is no longer an error"
 # A remote home's report is skipped, not refused: nothing here can show it, so with no pane either
 # the row ends at the notice (falsify: let the report rung ignore reportRemote, or make the notice
 # bad).
-frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter remote report: render exited non-zero"
-assert_not_viewed "a remote home's Landed report is never opened"
-assert_not_opened "a remote home's Landed report calls no opener"
+frame_t=$(render_targets "tab,tab,tab,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter remote report: render exited non-zero"
+assert_not_viewed "a remote home's Recently Landed report is never opened"
+assert_not_opened "a remote home's Recently Landed report calls no opener"
 assert_contains "$frame_t" "mobile-fix: nothing to open (no PR, report or pane)" "remote report-only row: the plain notice, not the Findings refusal"
 assert_not_contains "$frame_t" "lives on another host" "the remote report is skipped silently, no red notice"
 # Rung 3, a live pane: without --no-herdr a fixture render reports the focus it would run (a fixture
 # render makes no herdr call of its own; the fake herdr on HERDR_BIN_PATH and PATH proves it) and the
 # opener and viewer stay idle (falsify: drop the pane rung from landedTarget, or the task lookup in
 # landedRows).
-frame_t=$(fake_herdr_env render_targets "tab,tab,tab,tab,j,enter") || fail "landed enter main pane: render exited non-zero"
-assert_contains "$frame_t" "would focus w1F:p1 (ship-done); --render-once never runs herdr agent focus" "enter on a main Landed row whose done task still has its pane focuses it"
-assert_not_opened "a pane-only Landed row calls no opener"
-assert_not_viewed "a pane-only Landed row runs no viewer"
+frame_t=$(fake_herdr_env render_targets "tab,tab,tab,j,enter") || fail "landed enter main pane: render exited non-zero"
+assert_contains "$frame_t" "would focus w1F:p1 (ship-done); --render-once never runs herdr agent focus" "enter on a main Recently Landed row whose done task still has its pane focuses it"
+assert_not_opened "a pane-only Recently Landed row calls no opener"
+assert_not_viewed "a pane-only Recently Landed row runs no viewer"
 if [ -e "$HERDR_LOG" ]; then fail "a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
-frame_t=$(fake_herdr_env render_targets "tab,tab,tab,tab,j,j,enter") || fail "landed enter secondmate pane: render exited non-zero"
-assert_contains "$frame_t" "would focus w2C:p2 (etl-pane); --render-once never runs herdr agent focus" "enter on a secondmate Landed row whose endpoint herdr lists focuses it"
+frame_t=$(fake_herdr_env render_targets "tab,tab,tab,j,j,enter") || fail "landed enter secondmate pane: render exited non-zero"
+assert_contains "$frame_t" "would focus w2C:p2 (etl-pane); --render-once never runs herdr agent focus" "enter on a secondmate Recently Landed row whose endpoint herdr lists focuses it"
 if [ -e "$HERDR_LOG" ]; then fail "a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
 # Under --no-herdr the pane rung is skipped, so a pane-only row ends at the notice rather than the
 # focus refusal (falsify: pass true for herdrOn under --no-herdr, or drop the herdrOn check from
 # landedTarget).
-frame_t=$(render_targets "tab,tab,tab,tab,j,enter" --no-herdr) || fail "landed enter pane no-herdr: render exited non-zero"
-assert_contains "$frame_t" "ship-done: nothing to open (no PR, report or pane)" "with --no-herdr a pane-only Landed row reads nothing to open"
+frame_t=$(render_targets "tab,tab,tab,j,enter" --no-herdr) || fail "landed enter pane no-herdr: render exited non-zero"
+assert_contains "$frame_t" "ship-done: nothing to open (no PR, report or pane)" "with --no-herdr a pane-only Recently Landed row reads nothing to open"
 assert_not_contains "$frame_t" "cannot focus" "with --no-herdr the pane rung is skipped, not refused"
 # A lost pane is skipped the same way: ship-old's pane is lost but its PR wins; with the herdr block's
 # agents emptied ship-done's pane is lost too and the row ends at the notice (falsify: drop the lost
 # check from landedTarget).
-frame_t=$(fake_herdr_env "$BOARD" --render-once --fixture "$(variant landed-targets.json landed-nopanes '{"herdr": {"agents": []}}')" --keys "tab,tab,tab,tab,j,enter") || fail "landed enter lost pane: render exited non-zero"
-assert_contains "$frame_t" "ship-done: nothing to open (no PR, report or pane)" "a pane-only Landed row whose pane is lost reads nothing to open"
+frame_t=$(fake_herdr_env "$BOARD" --render-once --fixture "$(variant landed-targets.json landed-nopanes '{"herdr": {"agents": []}}')" --keys "tab,tab,tab,j,enter") || fail "landed enter lost pane: render exited non-zero"
+assert_contains "$frame_t" "ship-done: nothing to open (no PR, report or pane)" "a pane-only Recently Landed row whose pane is lost reads nothing to open"
 assert_not_contains "$frame_t" "would focus" "a lost pane is never focused"
 # Rung 4, nothing: an ordinary notice, not red (falsify: set bad: true on the notice, or fall through
 # to the Ready for review text).
-frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,enter" --no-herdr) || fail "landed enter none main: render exited non-zero"
-assert_contains "$frame_t" "plain-done: nothing to open (no PR, report or pane)" "enter on a main Landed row with nothing reads nothing to open"
-assert_not_opened "a Landed row with nothing calls no opener"
-assert_not_viewed "a Landed row with nothing runs no viewer"
-tags_t=$(render landed-targets.json --keys "tab,tab,tab,tab,j,j,j,j,j,enter" --tags) || fail "landed enter none --tags: render exited non-zero"
+frame_t=$(render_targets "tab,tab,tab,j,j,j,j,j,enter" --no-herdr) || fail "landed enter none main: render exited non-zero"
+assert_contains "$frame_t" "plain-done: nothing to open (no PR, report or pane)" "enter on a main Recently Landed row with nothing reads nothing to open"
+assert_not_opened "a Recently Landed row with nothing calls no opener"
+assert_not_viewed "a Recently Landed row with nothing runs no viewer"
+tags_t=$(render landed-targets.json --keys "tab,tab,tab,j,j,j,j,j,enter" --tags) || fail "landed enter none --tags: render exited non-zero"
 assert_not_contains "$tags_t" "{red-fg}plain-done: nothing to open" "the nothing-to-open notice is not red"
-frame_t=$(render_targets "tab,tab,tab,tab,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter none secondmate: render exited non-zero"
-assert_contains "$frame_t" "etl-none: nothing to open (no PR, report or pane)" "enter on a secondmate Landed row with nothing reads nothing to open"
+frame_t=$(render_targets "tab,tab,tab,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter none secondmate: render exited non-zero"
+assert_contains "$frame_t" "etl-none: nothing to open (no PR, report or pane)" "enter on a secondmate Recently Landed row with nothing reads nothing to open"
 # A double-click follows the same rungs, because mouseAction reuses keyAction enter (falsify: give
 # 'activate' a PR-only action of its own). Line 37 is etl-report, the report-only secondmate row.
 frame_t=$(render_mouse landed-targets.json "dblclick:60,37") || fail "landed dblclick report: render exited non-zero"
-assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "double-click on a report-only Landed row views the report"
-assert_not_opened "double-click on a report-only Landed row calls no opener"
+assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "double-click on a report-only Recently Landed row views the report"
+assert_not_opened "double-click on a report-only Recently Landed row calls no opener"
 assert_contains "$frame_t" "viewed /fixture/homes/delegate-a/data/etl-report/report.md (viewer-cmd)" "double-click: the footer names the viewed report"
 # The other panes keep their enter (falsify: route every pane through landedTarget, or widen
-# viewProblem / focusProblem beyond Landed): a Findings row views, an In flight worker asks herdr.
-frame_t=$(render_targets "tab,tab,tab,enter" --no-herdr) || fail "landed fixture findings enter: render exited non-zero"
-assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "enter on a Findings row still views the report"
-frame_t=$(render_targets "enter" --no-herdr) || fail "landed fixture inflight enter: render exited non-zero"
-assert_contains "$frame_t" "herdr is off (--no-herdr); cannot focus" "enter on an In flight worker still means herdr focus, refused under --no-herdr"
-assert_not_opened "enter on an In flight worker calls no opener"
-assert_not_viewed "enter on an In flight worker runs no viewer"
+# viewProblem / focusProblem beyond Recently Landed): an Underway worker asks herdr.
+frame_t=$(render_targets "tab,enter" --no-herdr) || fail "landed fixture inflight enter: render exited non-zero"
+assert_contains "$frame_t" "herdr is off (--no-herdr); cannot focus" "enter on an Underway worker still means herdr focus, refused under --no-herdr"
+assert_not_opened "enter on an Underway worker calls no opener"
+assert_not_viewed "enter on an Underway worker runs no viewer"
 # The pane checks in viewProblem and focusProblem still refuse the panes they always refused
 # (falsify: drop the pane check from either helper).
 problems=$(node --input-type=module -e "
@@ -983,12 +1010,12 @@ problems=$(node --input-type=module -e "
   console.log(landedTarget({ url: null, reportPath: null, paneId: 'w1:p1', focusable: false }, true));
   console.log(landedTarget({ url: null, reportPath: null, paneId: null }, true));
 ")
-assert_row "$problems" '^enter focuses a worker: pick a row in In flight$' "focusProblem still refuses Ready for review"
-assert_row "$problems" '^enter views a report: pick a row in Findings$' "viewProblem still refuses Ready for review"
-if [ "$(printf '%s\n' "$problems" | sed -n 3p)" = "null" ]; then pass; else fail "focusProblem allows a Landed row with a pane: got '$(printf '%s\n' "$problems" | sed -n 3p)'"; fi
-if [ "$(printf '%s\n' "$problems" | sed -n 4p)" = "null" ]; then pass; else fail "viewProblem allows a Landed row with a report: got '$(printf '%s\n' "$problems" | sed -n 4p)'"; fi
-if [ "$(printf '%s\n' "$problems" | sed -n 5p)" = "enter focuses a worker: pick a row in In flight" ]; then pass; else fail "focusProblem refuses a Landed row without a pane"; fi
-if [ "$(printf '%s\n' "$problems" | sed -n 6p)" = "enter views a report: pick a row in Findings" ]; then pass; else fail "viewProblem refuses a Landed row without a report"; fi
+assert_row "$problems" '^enter focuses a worker: pick a row in Underway$' "focusProblem still refuses Ready for review"
+assert_row "$problems" '^enter views a report: pick a Recently Landed row with one$' "viewProblem still refuses Ready for review"
+if [ "$(printf '%s\n' "$problems" | sed -n 3p)" = "null" ]; then pass; else fail "focusProblem allows a Recently Landed row with a pane: got '$(printf '%s\n' "$problems" | sed -n 3p)'"; fi
+if [ "$(printf '%s\n' "$problems" | sed -n 4p)" = "null" ]; then pass; else fail "viewProblem allows a Recently Landed row with a report: got '$(printf '%s\n' "$problems" | sed -n 4p)'"; fi
+if [ "$(printf '%s\n' "$problems" | sed -n 5p)" = "enter focuses a worker: pick a row in Underway" ]; then pass; else fail "focusProblem refuses a Recently Landed row without a pane"; fi
+if [ "$(printf '%s\n' "$problems" | sed -n 6p)" = "enter views a report: pick a Recently Landed row with one" ]; then pass; else fail "viewProblem refuses a Recently Landed row without a report"; fi
 if [ "$(printf '%s\n' "$problems" | sed -n '7,13p' | tr '\n' ' ')" = "open view focus null null null null " ]; then pass; else fail "landedTarget rung order (PR, local report, live focusable pane with herdr on, a remote report skipped over to the pane, else null): got '$(printf '%s\n' "$problems" | sed -n '7,13p' | tr '\n' ' ')'"; fi
 
 # --------------------------------------------------------- hold cards, d and D
@@ -1001,10 +1028,10 @@ if [ "$(printf '%s\n' "$problems" | sed -n '7,13p' | tr '\n' ' ')" = "open view 
 # hold command. The fake hold command logs FM_HOME, its cwd, its argv and the decision file's contents
 # to HOLD_LOG and answers as the real one does, or refuses with one stderr line under FAKE_HOLD_FAIL.
 # A one-shot render really runs the home's bin/fm-captain-hold.sh, which is why the homes are scratch.
-# Needs you rows: decide-task, main-hold, bare-hold, ship-review; with --all-homes-needs delegate-hold,
-# child-held and remote-hold sit between bare-hold and the review row. In flight: decide-task, the
-# delegate group, held-worker, the remote group, ship-review. Findings: scout-x. Landed: plain-landed,
-# landed-hold.
+# Captain's Call rows: decide-task, main-hold, bare-hold, then the delegate homes' holds delegate-hold,
+# child-held and remote-hold, then ship-review. Underway: decide-task, the delegate's one worker
+# child-held drawn directly, ship-review. Charted Next: held-worker, the dated hold. Recently Landed:
+# plain-landed, landed-hold (answered), the scout-x report.
 HOLD_HOME="$SCRATCH/holds-main"
 HOLD_DELEGATE="$SCRATCH/holds-delegate"
 HOLD_CARD="$SCRATCH/hold-card.md"
@@ -1104,26 +1131,33 @@ spell() { printf '%s' "$1" | sed 's/./&,/g; s/,$//'; } # a date as key tokens: 2
 # The rows and the footer (falsify: drop mainCard from the hold rows or taskDecisionRows, heldForCaptain
 # from mainTaskRow or landedRows, ledgerCard from decisionRow, or the card branch of boardHints).
 frame_h=$(render "$HOLD_FIX") || fail "holds: render exited non-zero"
-assert_contains "$frame_h" "Needs you (4)" "holds: a decision, two live holds and a review row"
+assert_contains "$frame_h" "Captain's Call (7)" "holds: a decision, two main live holds, three delegate holds and a review row"
 assert_row "$frame_h" '^│ decide +db-choice +decide-task +Postgres or SQLite for the cache\? +acme/api +main +- │$' "holds: the keyed decision row"
-assert_row "$frame_h" '^│ hold +- +main-hold +Pick the vendor for the address API · Two quotes arrived; pick the vendor for the address API +acme/api +main +3d │$' "holds: the main hold row"
+assert_row "$frame_h" '^│ hold +- +main-hold +Pick the vendor for the address API · Two quotes arrived; pick the vendor for the a… +acme/api +main +3d │$' "holds: the main hold row"
 assert_row "$frame_h" '^│ hold +- +bare-hold +Keep or drop the legacy importer · Decide whether the legacy importer stays +acme/legacy +main +2d │$' "holds: the bare hold row"
+assert_row "$frame_h" '^│ hold +- +delegate-hold +Approve the warehouse index · Ledger copy of the reason, cut at 160 characters +acme/etl +delegate +1d │$' "holds: the delegate's hold lists by default, labelled with its home"
+assert_row "$frame_h" '^│ hold +- +remote-hold +Rotate the mobile signing key\? · Remote ledger reason +acme/mobile +remote-sm \(remote\) +4d │$' "holds: the remote home's hold lists by default with the remote label"
 assert_row "$frame_h" '^│ review +#7 +ship-review ' "holds: the review row"
-assert_row "$frame_h" '^│ paused +idle +held-worker +paused: awaiting the captain.s go-ahead +acme/api +main +- │$' "holds: the paused worker whose record is a dated hold lists in In flight as usual"
-assert_row "$frame_h" '^│ answered +09-14 +landed-hold +Rename the widget table +acme/widgets +main +2d │$' "holds: the finished hold lists in Landed as usual"
-assert_row "$(render_hold "tab")" '^ j/k move  tab pane  enter card  f focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
-assert_row "$(render_hold "tab,j")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
-# held-worker is the fourth In flight row: the remote home's captain hold ranks its group as hold, so it sorts
-# ahead of the paused worker (falsify: leave homeDecisions out of groupState).
-assert_row "$(render_hold "j,j,j")" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "holds footer: the held worker in In flight has the card, the focus and both actions"
-assert_row "$(render_hold "tab,j,j,j")" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
-assert_row "$(render_hold "tab,tab,tab,tab,j")" '^ j/k move  tab pane  enter card  x hide ' "holds footer: the finished hold in Landed has its card, no pane and nothing to act on"
+# The paused worker whose record is a dated hold is not a worker row: nothing runs, and the hold is one
+# Charted Next row with its until date (falsify: drop the held skip from mainTaskRow, or the dated
+# branch from chartedWhy).
+assert_no_row "$frame_h" '^│ paused +[^│]*held-worker ' "holds: the paused worker under a dated hold has no Underway row"
+assert_row "$frame_h" '^│ dated +until 10-01 +held-worker +Move the cache to the new vendor · Waiting for the vendor contract before the cache lands +acme/api +main +09-09 │$' "holds: the dated hold is Charted Next's row, WHY its until date, FILED its since date"
+assert_row "$frame_h" '^│ paused +idle +!child-held +Child held · waiting on the captain +acme/etl +delegate +- │$' "holds: the delegate's one worker, held for the captain, draws directly with the ! marker"
+assert_row "$frame_h" '^│ answered +09-14 +landed-hold +Rename the widget table +acme/widgets +main +2d │$' "holds: the finished hold lists in Recently Landed as usual"
+assert_row "$(render_hold "k")" '^ j/k move  tab pane  enter card  f focus  x hide ' "holds footer: the decision row has a card and a pane, no hold to act on"
+assert_row "$(render_hold "j")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the main hold row has a card, d and D, and no pane"
+# held-worker is Charted Next's first row, three tabs away (Underway, My PRs, then Teammates' PRs is empty).
+assert_row "$(render_hold "tab,tab,tab")" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds footer: the dated hold in Charted Next has the card and both actions, no pane (a hold row is built from the backlog record)"
+assert_row "$(render_hold "tab,j")" '^ j/k move  tab pane  enter card  f focus  d discard  D defer  x hide ' "holds footer: the held worker in Underway has the card, the focus and both actions"
+assert_row "$(render_hold "j,j,j,j,j,j")" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "holds footer: the review row keeps the standard hints (falsify: give reviewRow a card)"
+assert_row "$(render_hold "tab,tab,tab,tab,j")" '^ j/k move  tab pane  enter card  x hide ' "holds footer: the finished hold in Recently Landed has its card, no pane and nothing to act on"
 assert_widths "$frame_h" 160 "holds frame lines are 160 columns"
 
 # The card of the main hold: every section, read from the scratch home, shown through the fake viewer
 # from a temp file that is gone once the viewer exits (falsify: drop a section from buildHoldCard, read
 # the report whole in readHoldMaterials, tail the status log by another count, or skip removeTempDir).
-frame_h=$(render_hold "tab,j,enter") || fail "holds card main: render exited non-zero"
+frame_h=$(render_hold "j,enter") || fail "holds card main: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of main-hold (viewer-cmd)" "card main: the footer names the card and the viewer"
 assert_row "$(cat "$VIEWER_LOG")" '/firstmate-tui-[^/]+/main-hold\.md$' "card main: the viewer got a temp file named after the task under a firstmate-tui temp directory"
 if [ -e "$(cat "$VIEWER_LOG")" ]; then fail "card main: the temp file $(cat "$VIEWER_LOG") is still there after the viewer exited"; else pass; fi
@@ -1164,7 +1198,7 @@ assert_not_opened "card main: the card opens no PR"
 assert_no_hold "card main: the card runs no hold command"
 # The hold with nothing on disk: one line per empty section (falsify: crash on a missing data/<id>/, or
 # leave a section out).
-frame_h=$(render_hold "tab,j,j,enter") || fail "holds card bare: render exited non-zero"
+frame_h=$(render_hold "j,j,enter") || fail "holds card bare: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of bare-hold (viewer-cmd)" "card bare: the footer names the card"
 assert_row "$(card)" '^# Keep or drop the legacy importer$' "card bare: the title"
 assert_contains "$(card)" "| set | - |" "card bare: no hold-set stamp reads -"
@@ -1175,29 +1209,30 @@ assert_row "$(card)" '^no report at data/bare-hold/report\.md$' "card bare: the 
 assert_row "$(card)" '^no brief at data/bare-hold/brief\.md$' "card bare: the empty brief line"
 assert_row "$(card)" '^no data/bare-hold/ directory$' "card bare: the missing directory line"
 assert_row "$(card)" '^no status log at state/bare-hold\.status$' "card bare: the empty status line"
-# The other card rows: the decision row's card is its task's record without a hold, the paused worker's
-# card in In flight, the finished hold's card in Landed with its done state, and a Landed row without a
-# hold keeps enter = open its PR (falsify: route Landed's enter through the card for every row).
-frame_h=$(render_hold "tab,enter") || fail "holds card decision: render exited non-zero"
+# The other card rows: the decision row's card is its task's record without a hold, the dated hold's
+# card in Charted Next, the finished hold's card in Recently Landed with its done state, and a Recently
+# Landed row without a hold keeps enter = open its PR (falsify: route Recently Landed's enter through the
+# card for every row, or drop mainCard from chartedRow's fields).
+frame_h=$(render_hold "k,enter") || fail "holds card decision: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of decide-task (viewer-cmd)" "card decision: enter on the keyed decision row shows its task's card"
 assert_contains "$(card)" "| hold kind | - |" "card decision: a task without a hold reads - for the hold kind"
 assert_row "$(card)" '^no hold reason recorded$' "card decision: the empty reason line"
 assert_row "$(card)" '^Cache the widget lookups; the vendor question gates the design\.$' "card decision: the body comes from the backlog record"
-frame_h=$(render_hold "j,j,j,enter") || fail "holds card worker: render exited non-zero"
-assert_contains "$frame_h" "viewed the hold card of held-worker (viewer-cmd)" "card worker: enter on the In flight row whose record is a dated hold shows the card, not a focus"
-assert_contains "$(card)" "| bucket | dated |" "card worker: the dated bucket"
-assert_contains "$(card)" "| until | 2026-10-01 |" "card worker: the until date"
+frame_h=$(render_hold "tab,tab,tab,enter") || fail "holds card charted: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of held-worker (viewer-cmd)" "card charted: enter on the Charted Next row whose record is a dated hold shows the card"
+assert_contains "$(card)" "| bucket | dated |" "card charted: the dated bucket"
+assert_contains "$(card)" "| until | 2026-10-01 |" "card charted: the until date"
 frame_h=$(render_hold "tab,tab,tab,tab,j,enter") || fail "holds card landed: render exited non-zero"
-assert_contains "$frame_h" "viewed the hold card of landed-hold (viewer-cmd)" "card landed: enter on the finished hold in Landed shows its card"
+assert_contains "$frame_h" "viewed the hold card of landed-hold (viewer-cmd)" "card landed: enter on the finished hold in Recently Landed shows its card"
 assert_contains "$(card)" "| state | done |" "card landed: the done state"
 assert_row "$(card)" '^Answered: keep the old name$' "card landed: the recorded reason"
 frame_h=$(render_hold "tab,tab,tab,tab,enter") || fail "holds landed PR: render exited non-zero"
-assert_opened "https://github.com/acme/etl/pull/12" "a Landed row without a hold still opens its PR on enter"
-assert_not_viewed "a Landed row without a hold runs no viewer"
+assert_opened "https://github.com/acme/etl/pull/12" "a Recently Landed row without a hold still opens its PR on enter"
+assert_not_viewed "a Recently Landed row without a hold runs no viewer"
 # The delegate home's card: the full record read through that home's own fm-fleet-snapshot.sh (the log
 # names the home), the home on the card, the report head from that home's files (falsify: build a
 # delegate card from the ledger alone, or run the main home's snapshot instead).
-frame_h=$(render_hold "tab,j,j,j,enter" --all-homes-needs) || fail "holds card delegate: render exited non-zero"
+frame_h=$(render_hold "j,j,j,enter") || fail "holds card delegate: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of delegate-hold (viewer-cmd)" "card delegate: the footer names the card, not partial"
 assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "card delegate: the delegate home's snapshot script ran once, with FM_HOME set to that home, and no hold command"
 assert_row "$(card)" '^# Approve the warehouse index$' "card delegate: the title"
@@ -1209,47 +1244,48 @@ assert_not_contains "$(card)" "more line" "card delegate: a report shorter than 
 assert_not_contains "$(card)" "Partial record" "card delegate: a record the home answered is not partial"
 # The same card when the delegate's snapshot fails: the ledger's fields under a partial notice that
 # names the failure, the files still read (falsify: refuse the card, or drop the partial line).
-frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "tab,j,j,j,enter" --all-homes-needs) || fail "holds card delegate fail: render exited non-zero"
+frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "j,j,j,enter") || fail "holds card delegate fail: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of delegate-hold (partial record) (viewer-cmd)" "card delegate fail: the footer says partial"
 assert_row "$(card)" "^> Partial record: delegate's fm-fleet-snapshot.sh gave no record for delegate-hold \(exit 1: fm-fleet-snapshot: jq not found\); the title, the reason \(cut at 160 characters\) and the hold fields come from its ledger\.$" "card delegate fail: the first line says why the record is partial"
 assert_row "$(card)" '^Ledger copy of the reason, cut at 160 characters$' "card delegate fail: the ledger's reason stands in"
 assert_contains "$(card)" "data/delegate-hold/report.md (3 lines; the first 3 follow)" "card delegate fail: the home's files are still read"
 # A remote home's hold: the card from the ledger, marked partial, with no file read (falsify: try to
 # read a remote home's files).
-frame_h=$(render_hold "tab,j,j,j,j,j,enter" --all-homes-needs) || fail "holds card remote: render exited non-zero"
+frame_h=$(render_hold "j,j,j,j,j,enter") || fail "holds card remote: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of remote-hold (partial record) (viewer-cmd)" "card remote: the footer says partial"
 assert_row "$(card)" '^> Partial record: remote-sm is a remote home whose files are not readable here; the title, the reason \(cut at 160 characters\) and the hold fields come from its ledger\.$' "card remote: the first line names the remote home"
 assert_row "$(card)" '^Remote ledger reason$' "card remote: the ledger's reason"
 assert_row "$(card)" '^data/remote-hold/report\.md: not readable from here$' "card remote: no file is read"
 assert_no_hold "card remote: no snapshot and no command runs for a remote home"
-# A held child under an expanded delegate group carries the same card (falsify: drop ledgerCard from
+# A held worker drawn directly in Underway carries the same card (falsify: drop ledgerCard from
 # ledgerChildRows).
-frame_h=$(render_hold "j,j,enter" --expand all) || fail "holds card child: render exited non-zero"
-assert_contains "$frame_h" "viewed the hold card of child-held (viewer-cmd)" "card child: enter on the held child of an expanded group shows its card"
+frame_h=$(render_hold "tab,j,enter") || fail "holds card child: render exited non-zero"
+assert_contains "$frame_h" "viewed the hold card of child-held (viewer-cmd)" "card child: enter on the held worker's Underway row shows its card"
 assert_row "$(card)" '^# Cut over the nightly ETL$' "card child: the title from the delegate's record"
 assert_row "$(card)" '^The full child-held reason from the delegate home$' "card child: the full reason"
-# Review and Findings rows keep their enter (falsify: give reviewRow a card, or route Findings through it).
-frame_h=$(render_hold "tab,j,j,j,enter") || fail "holds review enter: render exited non-zero"
+# Review rows and report rows keep their enter (falsify: give reviewRow a card, or route a report row
+# through it).
+frame_h=$(render_hold "j,j,j,j,j,j,enter") || fail "holds review enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on the review row still opens its PR"
 assert_not_viewed "enter on the review row runs no viewer"
-frame_h=$(render_hold "tab,tab,tab,enter") || fail "holds findings enter: render exited non-zero"
-assert_viewed "$HOLD_HOME/data/scout-x/report.md" "enter on a Findings row still views its report"
+frame_h=$(render_hold "tab,tab,tab,tab,j,j,enter") || fail "holds report enter: render exited non-zero"
+assert_viewed "$HOLD_HOME/data/scout-x/report.md" "enter on the report row of Recently Landed views its report"
 assert_no_hold "neither enter runs a hold command"
 # f (falsify: drop the f case from keyAction).
-frame_h=$(render_hold "tab,f") || fail "holds f: render exited non-zero"
+frame_h=$(render_hold "k,f") || fail "holds f: render exited non-zero"
 assert_contains "$frame_h" "herdr is off (--no-herdr); cannot focus" "f on the decision row asks for its pane, refused under --no-herdr"
 frame_h=$(fake_herdr_env "$BOARD" --render-once --fixture "$HOLD_FIX" --keys "f") || fail "holds f herdr: render exited non-zero"
 assert_contains "$frame_h" "would focus w1A:p1 (decide-task); --render-once never runs herdr agent focus" "f on the decision row focuses its worker's pane through the fixture overlay"
 if [ -e "$HERDR_LOG" ]; then fail "holds f: a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
-frame_h=$(render_hold "tab,j,f") || fail "holds f hold row: render exited non-zero"
+frame_h=$(render_hold "j,f") || fail "holds f hold row: render exited non-zero"
 assert_contains "$frame_h" "main-hold: no herdr pane to focus" "f on a hold row without a pane says so"
 
 # d: the prompt, the confirmation, the cancel paths and the refusals (falsify: drop the prompt branch
 # from handleKey, let x act while the prompt is up, run the command before y, or drop holdActionProblem).
-frame_h=$(render_hold "tab,j,d") || fail "holds d: render exited non-zero"
+frame_h=$(render_hold "j,d") || fail "holds d: render exited non-zero"
 assert_row "$frame_h" '^ discard main-hold\? y to discard, esc to cancel +$' "d on a hold row puts the prompt in the footer"
 assert_no_hold "d alone runs nothing"
-frame_h=$(render_hold "tab,j,d,y") || fail "holds d,y: render exited non-zero"
+frame_h=$(render_hold "j,d,y") || fail "holds d,y: render exited non-zero"
 assert_hold_log "FM_HOME=$HOLD_HOME
 cwd=$HOLD_HOME_REAL
 argv=answer main-hold --decision-file $(grep -o -- '--decision-file .*' "$HOLD_LOG" 2>/dev/null | cut -d' ' -f2)
@@ -1258,76 +1294,79 @@ assert_row "$(cat "$HOLD_LOG")" '^argv=answer main-hold --decision-file /.*/firs
 if [ -e "$(grep -o -- '--decision-file .*' "$HOLD_LOG" | cut -d' ' -f2)" ]; then fail "d,y: the decision file is still there after the command exited"; else pass; fi
 assert_contains "$frame_h" "discarded main-hold · answered: main-hold" "d,y: the footer names the discard and the command's first output line"
 assert_not_contains "$frame_h" "y to discard" "d,y: the prompt is gone from the footer"
-# The row leaves the same frame the command succeeded in, before any refresh: it is out of Needs you,
+# The row leaves the same frame the command succeeded in, before any refresh: it is out of Captain's Call,
 # the pane count is one less, it is not counted hidden, and the cursor sits on the row that took its
 # place (falsify: drop applyDismissed from buildModel, drop dismissRow from holdDiscard, or add the hide
 # key to view.hidden instead, which counts it hidden and lets H bring it back).
-assert_contains "$frame_h" "Needs you (3)" "d,y: the pane count drops by one in the same frame"
-assert_no_row "$frame_h" '^│ hold +- +main-hold ' "d,y: the discarded hold row is gone from Needs you at once"
+assert_contains "$frame_h" "Captain's Call (6)" "d,y: the pane count drops by one in the same frame"
+assert_no_row "$frame_h" '^│ hold +- +main-hold ' "d,y: the discarded hold row is gone from Captain's Call at once"
 assert_not_contains "$frame_h" "hidden" "d,y: the dismissed row is not counted as hidden"
 assert_row "$frame_h" '^│ hold +- +bare-hold ' "d,y: the other hold stays"
-tags_h=$(render_hold "tab,j,d,y" --tags) || fail "holds d,y --tags: render exited non-zero"
+tags_h=$(render_hold "j,d,y" --tags) || fail "holds d,y --tags: render exited non-zero"
 assert_row "$tags_h" "${SEL}hold +${SEL_END}${SEL} +${SEL_END}${SEL}- +${SEL_END}${SEL} +${SEL_END}${SEL}bare-hold +${SEL_END}" "d,y: the selection lands on bare-hold, the row that took the discarded one's place"
 assert_no_row "$tags_h" "${SEL}[^{]*main-hold" "d,y: the discarded row is not the selection"
-frame_h=$(render_hold "tab,j,d,y,H") || fail "holds d,y,H: render exited non-zero"
+frame_h=$(render_hold "j,d,y,H") || fail "holds d,y,H: render exited non-zero"
 assert_contains "$frame_h" "showing hidden rows (greyed); H hides them again" "d,y,H: H toggles as usual"
-assert_contains "$frame_h" "Needs you (3)" "d,y,H: the dismissed row is not among the hidden rows H shows (falsify: dismiss through view.hidden)"
+assert_contains "$frame_h" "Captain's Call (6)" "d,y,H: the dismissed row is not among the hidden rows H shows (falsify: dismiss through view.hidden)"
 assert_not_contains "$frame_h" "(hidden) Pick the vendor" "d,y,H: the dismissed row is not drawn greyed"
 assert_no_row "$frame_h" '^│ hold +- +main-hold ' "d,y,H: the dismissed row stays out under H"
-# The same task listed in In flight as well: a variant whose held-worker is a live, actionable hold, so
-# Needs you lists it (second row, ahead of main-hold in backlog order) and its In flight row carries the
-# same card. Discarding it from Needs you drops both rows in the same frame (falsify: match the dismissal
-# on the Needs you pane alone, or on the hide key, which differs per pane).
+# The same task listed in Underway as well: a variant whose held-worker is a live, actionable hold on a
+# working task, so Captain's Call lists it (second row, ahead of main-hold in backlog order) and its
+# Underway row, marked !, carries the same card. Discarding it from Captain's Call drops both rows in
+# the same frame (falsify: match the dismissal on the Captain's Call pane alone, or on the hide key,
+# which differs per pane).
 node -e '
   const fs = require("fs");
   const [src, dst] = process.argv.slice(1);
   const fx = JSON.parse(fs.readFileSync(src, "utf8"));
   const rec = fx.snapshot.backlog.records.find((r) => r.id === "held-worker");
   Object.assign(rec, { hold_bucket: "live", hold_until: null, captain_actionable: true });
+  const task = fx.snapshot.tasks.find((t) => t.id === "held-worker");
+  task.current_state = { ...task.current_state, state: "working", detail: "harness busy (claude-hook)" };
   fs.writeFileSync(dst, JSON.stringify(fx));
 ' "$HOLD_FIX" "$SCRATCH/holds-inflight.json"
-frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-inflight.json" --no-herdr --keys "tab,j") || fail "holds inflight: render exited non-zero"
-assert_contains "$frame_h" "Needs you (5)" "holds inflight: the live held worker joins Needs you"
-assert_contains "$frame_h" "In flight (5)" "holds inflight: In flight lists it as before"
-assert_row "$frame_h" '^│ hold +- +held-worker +Move the cache to the new vendor · Waiting for the vendor contract before the cache lands ' "holds inflight: the held worker's Needs you row"
-assert_row "$frame_h" '^│ paused +idle +held-worker +paused: awaiting the captain.s go-ahead ' "holds inflight: the held worker's In flight row"
-assert_row "$frame_h" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds inflight: tab,j selects the held worker's Needs you row, a hold row built from the backlog record and so without the worker's pane"
+frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-inflight.json" --no-herdr --keys "j") || fail "holds inflight: render exited non-zero"
+assert_contains "$frame_h" "Captain's Call (8)" "holds inflight: the live held worker joins Captain's Call"
+assert_contains "$frame_h" "Underway (4)" "holds inflight: Underway lists the working held task"
+assert_row "$frame_h" '^│ hold +- +held-worker +Move the cache to the new vendor · Waiting for the vendor contract before the cache' "holds inflight: the held worker's Captain's Call row"
+assert_row "$frame_h" '^│ working +idle +!held-worker +Move the cache to the new vendor · harness busy \(claude-hook\) ' "holds inflight: the held worker's Underway row, marked ! (falsify: drop the flag or the marker from mainTaskRow)"
+assert_row "$frame_h" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "holds inflight: j selects the held worker's Captain's Call row, a hold row built from the backlog record and so without the worker's pane"
 rm -f "${HOLD_LOG:?}"
-frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-inflight.json" --no-herdr --keys "tab,j,d,y") || fail "holds inflight d,y: render exited non-zero"
+frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-inflight.json" --no-herdr --keys "j,d,y") || fail "holds inflight d,y: render exited non-zero"
 assert_file_contains "$HOLD_LOG" "argv=answer held-worker --decision-file" "holds inflight d,y: the command ran for the held worker"
 assert_contains "$frame_h" "discarded held-worker · answered: held-worker" "holds inflight d,y: the footer names the discard"
-assert_contains "$frame_h" "Needs you (4)" "holds inflight d,y: Needs you drops the hold row"
-assert_contains "$frame_h" "In flight (4)" "holds inflight d,y: In flight drops the same task's row in the same frame"
+assert_contains "$frame_h" "Captain's Call (7)" "holds inflight d,y: Captain's Call drops the hold row"
+assert_contains "$frame_h" "Underway (3)" "holds inflight d,y: Underway drops the same task's row in the same frame"
 assert_no_row "$frame_h" '^│ [^│]*held-worker' "holds inflight d,y: no pane lists the task any more (the footer notice alone names it)"
 assert_row "$frame_h" '^│ hold +- +main-hold ' "holds inflight d,y: the other holds stay"
-frame_h=$(render_hold "tab,j,d,escape") || fail "holds d,escape: render exited non-zero"
+frame_h=$(render_hold "j,d,escape") || fail "holds d,escape: render exited non-zero"
 assert_no_hold "d,escape runs nothing"
 assert_contains "$frame_h" "cancelled; main-hold is unchanged" "d,escape: the footer says cancelled"
-frame_h=$(render_hold "tab,j,d,x,escape") || fail "holds d,x,escape: render exited non-zero"
+frame_h=$(render_hold "j,d,x,escape") || fail "holds d,x,escape: render exited non-zero"
 assert_no_hold "d,x,escape runs nothing"
-assert_contains "$frame_h" "Needs you (4)" "d,x,escape: x is ignored while the prompt is up, so the row is not hidden"
+assert_contains "$frame_h" "Captain's Call (7)" "d,x,escape: x is ignored while the prompt is up, so the row is not hidden"
 assert_not_contains "$frame_h" "hidden main-hold" "d,x,escape: no hide notice"
-frame_h=$(render_hold "tab,j,d,q,j,k") || fail "holds d,q: render exited non-zero"
+frame_h=$(render_hold "j,d,q,j,k") || fail "holds d,q: render exited non-zero"
 assert_row "$frame_h" '^ discard main-hold\? y to discard, esc to cancel +$' "d then other keys: the prompt stays up and q does not quit"
 assert_no_hold "d then other keys runs nothing"
-frame_h=$(FAKE_HOLD_FAIL=1 render_hold "tab,j,d,y") || fail "holds d fail: render exited non-zero"
+frame_h=$(FAKE_HOLD_FAIL=1 render_hold "j,d,y") || fail "holds d fail: render exited non-zero"
 assert_contains "$frame_h" "fm-captain-hold: task main-hold is not held for the captain; hold it first or name the right task" "a refusing command's stderr line is the footer, verbatim"
 assert_not_contains "$frame_h" "discarded" "a refused discard is not reported as done"
 assert_file_contains "$HOLD_LOG" "argv=answer main-hold --decision-file" "the refused command did run once"
-assert_contains "$frame_h" "Needs you (4)" "a refused discard leaves the pane count as it was (falsify: dismiss before the exit status is known)"
+assert_contains "$frame_h" "Captain's Call (7)" "a refused discard leaves the pane count as it was (falsify: dismiss before the exit status is known)"
 assert_row "$frame_h" '^│ hold +- +main-hold ' "a refused discard leaves the row on the board"
-tags_h=$(FAKE_HOLD_FAIL=1 FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$HOLD_FIX" --no-herdr --keys "tab,j,d,y" --tags) || fail "holds d fail --tags: render exited non-zero"
+tags_h=$(FAKE_HOLD_FAIL=1 FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$HOLD_FIX" --no-herdr --keys "j,d,y" --tags) || fail "holds d fail --tags: render exited non-zero"
 assert_row "$tags_h" '\{red-fg\}[^{]*fm-captain-hold: task main-hold is not held for the captain' "the refusal is red (falsify: pass bad=false on a failed run)"
-frame_h=$(render_hold "tab,j,j,j,d") || fail "holds d review: render exited non-zero"
+frame_h=$(render_hold "j,j,j,j,j,j,d") || fail "holds d review: render exited non-zero"
 assert_contains "$frame_h" "ship-review: no captain hold to discard" "d on a review row is refused with a notice"
 assert_no_hold "d on a review row runs nothing"
-frame_h=$(render_hold "tab,d") || fail "holds d decision: render exited non-zero"
+frame_h=$(render_hold "k,d") || fail "holds d decision: render exited non-zero"
 assert_contains "$frame_h" "decide-task: no captain hold to discard" "d on a decision row whose task has no hold is refused"
-frame_h=$(render_hold "tab,j,j,j,j,j,d" --all-homes-needs) || fail "holds d remote: render exited non-zero"
+frame_h=$(render_hold "j,j,j,j,j,d") || fail "holds d remote: render exited non-zero"
 assert_contains "$frame_h" "remote-hold: hold lives on another host (remote-sm (remote)); cannot discard from here" "d on a remote home's hold is refused with the host reason"
 assert_no_hold "d on a remote hold runs nothing"
 frame_h=$(render_hold "tab,tab,tab,tab,j,d") || fail "holds d landed: render exited non-zero"
-assert_contains "$frame_h" "landed-hold: no captain hold to discard" "d on a finished hold in Landed is refused: the task is done"
+assert_contains "$frame_h" "landed-hold: no captain hold to discard" "d on a finished hold in Recently Landed is refused: the task is done"
 # The login: with the identity unknown the OS user signs the decision and the footer says so (falsify:
 # fall back to `captain` or an empty login).
 node -e '
@@ -1338,60 +1377,66 @@ node -e '
   fs.writeFileSync(dst, JSON.stringify(fx));
 ' "$HOLD_FIX" "$SCRATCH/holds-noid.json"
 rm -f "${HOLD_LOG:?}"
-frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-noid.json" --no-herdr --keys "tab,j,d,y") || fail "holds d no identity: render exited non-zero"
+frame_h=$(FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" "$BOARD" --render-once --fixture "$SCRATCH/holds-noid.json" --no-herdr --keys "j,d,y") || fail "holds d no identity: render exited non-zero"
 assert_file_contains "$HOLD_LOG" "decision=Discarded by $(id -un) from firstmate-tui on $TODAY: no action; closed as not wanted." "with the identity unknown the decision names the OS user"
 assert_contains "$frame_h" "discarded main-hold as OS user $(id -un) (GitHub login unknown)" "with the identity unknown the footer says who signed"
 
 # D: the date prompt, the default, typed dates, the refusals and the delegate's full reason (falsify:
 # change DEFER_DEFAULT_DAYS, let checkDeferDate accept a bad or past date, pass the ledger's truncated
 # reason, or drop the delegate record read).
-frame_h=$(render_hold "tab,j,D") || fail "holds D: render exited non-zero"
+frame_h=$(render_hold "j,D") || fail "holds D: render exited non-zero"
 assert_row "$frame_h" "^ defer main-hold until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "D on a hold row puts the date prompt in the footer, prefilled with today plus 14 days"
 assert_no_hold "D alone runs nothing"
-frame_h=$(render_hold "tab,j,D,enter") || fail "holds D,enter: render exited non-zero"
+frame_h=$(render_hold "j,D,enter") || fail "holds D,enter: render exited non-zero"
 assert_hold_log "FM_HOME=$HOLD_HOME
 cwd=$HOLD_HOME_REAL
 argv=hold main-hold --reason Two quotes arrived; pick the vendor for the address API --until $PLUS14" "D,enter runs fm-captain-hold.sh hold once in the hold's home with the record's full reason and the default date"
 assert_contains "$frame_h" "deferred main-hold until $PLUS14 · main-hold" "D,enter: the footer names the deferral and the command's output"
 # A deferral leaves the frame the same way a discard does (falsify: drop dismissRow from holdDefer).
-assert_contains "$frame_h" "Needs you (3)" "D,enter: the pane count drops by one in the same frame"
-assert_no_row "$frame_h" '^│ hold +- +main-hold ' "D,enter: the deferred hold row is gone from Needs you at once"
+assert_contains "$frame_h" "Captain's Call (6)" "D,enter: the pane count drops by one in the same frame"
+assert_no_row "$frame_h" '^│ hold +- +main-hold ' "D,enter: the deferred hold row is gone from Captain's Call at once"
 assert_not_contains "$frame_h" "hidden" "D,enter: the dismissed row is not counted as hidden"
-tags_h=$(render_hold "tab,j,D,enter" --tags) || fail "holds D,enter --tags: render exited non-zero"
+assert_no_row "$frame_h" '^│ dated +[^│]*main-hold ' "D,enter: the deferred hold is not yet a Charted Next row either; the refresh the deferral starts brings it there once the snapshot agrees (falsify: leave the dismissal off the Charted Next rows)"
+tags_h=$(render_hold "j,D,enter" --tags) || fail "holds D,enter --tags: render exited non-zero"
 assert_row "$tags_h" "${SEL}hold +${SEL_END}${SEL} +${SEL_END}${SEL}- +${SEL_END}${SEL} +${SEL_END}${SEL}bare-hold +${SEL_END}" "D,enter: the selection lands on the row that took the deferred one's place"
-frame_h=$(render_hold "tab,j,D,$CLEAR,$(spell 2027-01-15),enter") || fail "holds D typed: render exited non-zero"
+frame_h=$(render_hold "j,D,$CLEAR,$(spell 2027-01-15),enter") || fail "holds D typed: render exited non-zero"
 assert_hold_log "FM_HOME=$HOLD_HOME
 cwd=$HOLD_HOME_REAL
 argv=hold main-hold --reason Two quotes arrived; pick the vendor for the address API --until 2027-01-15" "backspaces clear the default and typed digits and dashes make the date the command gets"
 assert_contains "$frame_h" "deferred main-hold until 2027-01-15" "D typed: the footer names the typed date"
-frame_h=$(render_hold "tab,j,D,$CLEAR,$(spell 2026-13-40),enter") || fail "holds D bad date: render exited non-zero"
+frame_h=$(render_hold "j,D,$CLEAR,$(spell 2026-13-40),enter") || fail "holds D bad date: render exited non-zero"
 assert_no_hold "an impossible date runs nothing"
 assert_contains "$frame_h" "2026-13-40: not a real date" "an impossible date is refused by name"
 assert_row "$frame_h" '^ defer main-hold until \(YYYY-MM-DD\): 2026-13-40  enter defers  esc cancels ' "an impossible date keeps the prompt open with the value to fix"
-frame_h=$(render_hold "tab,j,D,$CLEAR,$(spell "$YESTERDAY"),enter") || fail "holds D yesterday: render exited non-zero"
+frame_h=$(render_hold "j,D,$CLEAR,$(spell "$YESTERDAY"),enter") || fail "holds D yesterday: render exited non-zero"
 assert_no_hold "yesterday runs nothing"
 assert_contains "$frame_h" "$YESTERDAY: not after today ($TODAY)" "a date not after today is refused"
-frame_h=$(render_hold "tab,j,D,$CLEAR,2,0,2,enter") || fail "holds D short: render exited non-zero"
+frame_h=$(render_hold "j,D,$CLEAR,2,0,2,enter") || fail "holds D short: render exited non-zero"
 assert_no_hold "a partial date runs nothing"
 assert_contains "$frame_h" "202: not a YYYY-MM-DD date" "a partial date is refused by shape"
-frame_h=$(render_hold "tab,j,D,escape") || fail "holds D,escape: render exited non-zero"
+frame_h=$(render_hold "j,D,escape") || fail "holds D,escape: render exited non-zero"
 assert_no_hold "D,escape runs nothing"
 assert_contains "$frame_h" "cancelled; main-hold is unchanged" "D,escape: the footer says cancelled"
-frame_h=$(FAKE_HOLD_FAIL=1 render_hold "tab,j,D,enter") || fail "holds D fail: render exited non-zero"
+frame_h=$(FAKE_HOLD_FAIL=1 render_hold "j,D,enter") || fail "holds D fail: render exited non-zero"
 assert_contains "$frame_h" "fm-captain-hold: task main-hold is not held for the captain" "a refused defer shows the command's stderr verbatim"
 assert_not_contains "$frame_h" "deferred" "a refused defer is not reported as done"
-assert_contains "$frame_h" "Needs you (4)" "a refused defer leaves the pane count as it was"
+assert_contains "$frame_h" "Captain's Call (7)" "a refused defer leaves the pane count as it was"
 assert_row "$frame_h" '^│ hold +- +main-hold ' "a refused defer leaves the row on the board"
-frame_h=$(render_hold "tab,j,j,j,D") || fail "holds D review: render exited non-zero"
+frame_h=$(render_hold "j,j,j,j,j,j,D") || fail "holds D review: render exited non-zero"
 assert_contains "$frame_h" "ship-review: no captain hold to defer" "D on a review row is refused with a notice"
 assert_no_hold "D on a review row runs nothing"
-frame_h=$(render_hold "tab,j,j,j,D,enter" --all-homes-needs) || fail "holds D delegate: render exited non-zero"
+# A dated hold in Charted Next takes D too: the same prompt, the same command with the record's reason
+# (falsify: drop mainCard from chartedRow's fields).
+frame_h=$(render_hold "tab,tab,tab,D") || fail "holds D charted: render exited non-zero"
+assert_row "$frame_h" "^ defer held-worker until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "D on a Charted Next hold row puts the same date prompt in the footer"
+assert_no_hold "D on a Charted Next row alone runs nothing"
+frame_h=$(render_hold "j,j,j,D,enter") || fail "holds D delegate: render exited non-zero"
 assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE
 FM_HOME=$HOLD_DELEGATE
 cwd=$HOLD_DELEGATE_REAL
 argv=hold delegate-hold --reason The full delegate reason, longer than the ledger keeps: approve the warehouse index before the nightly loader is scheduled --until $PLUS14" "D on a delegate hold reads the full reason from that home's snapshot first, then runs the command there with it"
 assert_contains "$frame_h" "deferred delegate-hold until $PLUS14" "D delegate: the footer names the deferral"
-frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "tab,j,j,j,D" --all-homes-needs) || fail "holds D delegate fail: render exited non-zero"
+frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "j,j,j,D") || fail "holds D delegate fail: render exited non-zero"
 assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "D on a delegate hold whose snapshot fails runs no hold command"
 assert_contains "$frame_h" "delegate-hold: the full hold reason is not readable (exit 1: fm-fleet-snapshot: jq not found); defer it from delegate itself" "D delegate fail: the defer is refused rather than passing the ledger's cut reason"
 assert_not_contains "$frame_h" "defer delegate-hold until" "D delegate fail: no prompt opens"
@@ -1403,34 +1448,34 @@ assert_not_contains "$frame_h" "defer delegate-hold until" "D delegate fail: no 
 # after a success). The decision line names whatever login this host resolves, so it is left out of the
 # comparison.
 hold_log_sans_decision() { grep -v '^decision=' "$HOLD_LOG" 2>/dev/null || echo '<absent>'; }
-frame_h=$(render_hold_live "" "tab,j,d,y") || fail "holds live d,y: render exited non-zero"
+frame_h=$(render_hold_live "" "j,d,y") || fail "holds live d,y: render exited non-zero"
 if [ "$(hold_log_sans_decision)" = "snapshot FM_HOME=$HOLD_LIVE
 FM_HOME=$HOLD_LIVE
 cwd=$HOLD_LIVE_REAL
 argv=answer main-hold --decision-file $(grep -o -- '--decision-file .*' "$HOLD_LOG" 2>/dev/null | cut -d' ' -f2)
 snapshot FM_HOME=$HOLD_LIVE" ]; then pass; else fail "holds live d,y: the answer call is not followed by the refresh's snapshot; the log is '$(hold_log_sans_decision | tr '\n' '|')'"; fi
 assert_contains "$frame_h" "discarded main-hold" "holds live d,y: the footer keeps the discard notice through the refresh"
-assert_contains "$frame_h" "Needs you (3)" "holds live d,y: the pane count stays one less after a refresh whose snapshot still lists the hold"
+assert_contains "$frame_h" "Captain's Call (3)" "holds live d,y: the pane count stays one less after a refresh whose snapshot still lists the hold"
 assert_no_row "$frame_h" '^│ hold +- +main-hold ' "holds live d,y: a stale snapshot does not bring the discarded row back"
-assert_contains "$frame_h" "Landed (2)" "holds live d,y: Landed is as the snapshot has it"
+assert_contains "$frame_h" "Recently Landed (3)" "holds live d,y: Recently Landed is as the snapshot has it (two completions and the scout-x report)"
 # The same with a refresh whose snapshot has firstmate's answer (main-hold done, completion answered): the
-# entry is cleared, so the Landed row that task now has, which carries the same card, is drawn (falsify:
-# keep an entry for a task the snapshot no longer lists as live, and Landed stays at 2).
-frame_h=$(render_hold_live "$HOLD_LIVE/snapshot-answered.json" "tab,j,d,y") || fail "holds live d,y answered: render exited non-zero"
-assert_contains "$frame_h" "Needs you (3)" "holds live answered: the hold is out of Needs you"
+# entry is cleared, so the Recently Landed row that task now has, which carries the same card, is drawn (falsify:
+# keep an entry for a task the snapshot no longer lists as live, and Recently Landed stays at 3).
+frame_h=$(render_hold_live "$HOLD_LIVE/snapshot-answered.json" "j,d,y") || fail "holds live d,y answered: render exited non-zero"
+assert_contains "$frame_h" "Captain's Call (3)" "holds live answered: the hold is out of Captain's Call"
 assert_no_row "$frame_h" '^│ hold +- +main-hold ' "holds live answered: no hold row"
-assert_contains "$frame_h" "Landed (3)" "holds live answered: Landed gains the answered item"
-assert_row "$frame_h" '^│ answered +09-21 +main-hold +Pick the vendor for the address API ' "holds live answered: the dismissal is cleared, so the task's Landed row is drawn"
+assert_contains "$frame_h" "Recently Landed (4)" "holds live answered: Recently Landed gains the answered item"
+assert_row "$frame_h" '^│ answered +09-21 +main-hold +Pick the vendor for the address API ' "holds live answered: the dismissal is cleared, so the task's Recently Landed row is drawn"
 # A refusal in a live render refreshes nothing: one snapshot, the refused call, no second snapshot
 # (falsify: refresh on any exit status).
-frame_h=$(FAKE_HOLD_FAIL=1 render_hold_live "" "tab,j,d,y") || fail "holds live d fail: render exited non-zero"
+frame_h=$(FAKE_HOLD_FAIL=1 render_hold_live "" "j,d,y") || fail "holds live d fail: render exited non-zero"
 assert_count "$(cat "$HOLD_LOG")" "snapshot FM_HOME=" 1 "holds live d fail: a refused command starts no refresh"
 assert_row "$frame_h" '^│ hold +- +main-hold ' "holds live d fail: the row stays"
 # r after a dismissal takes the same path: a stale snapshot keeps the row out, an answered one clears the
 # entry (falsify: prune only in the hold's own refresh).
-frame_h=$(render_hold_live "$HOLD_LIVE/snapshot-answered.json" "tab,j,d,y,r") || fail "holds live d,y,r: render exited non-zero"
+frame_h=$(render_hold_live "$HOLD_LIVE/snapshot-answered.json" "j,d,y,r") || fail "holds live d,y,r: render exited non-zero"
 assert_count "$(cat "$HOLD_LOG")" "snapshot FM_HOME=" 3 "holds live d,y,r: the start, the discard's refresh and r each ran the snapshot"
-assert_contains "$frame_h" "Landed (3)" "holds live d,y,r: the answered item is in Landed after r"
+assert_contains "$frame_h" "Recently Landed (4)" "holds live d,y,r: the answered item is in Recently Landed after r"
 
 # The pure pieces, straight from lib/card.mjs (falsify: change any of them).
 pure_h=$(node --input-type=module -e "
@@ -1454,47 +1499,140 @@ assert_row "$pure_h" '^none none 2026-10-05 2026-10- quit$' "the defer prompt ig
 assert_row "$pure_h" '^none$' "the defer prompt takes no more than ten characters"
 assert_row "$pure_h" '^none discard$' "the discard prompt answers only a lower-case y"
 
+
+# --------------------------------------------------------- placement rules
+# The four fleet panes follow the bearings digest's placement rules, one check per row type of the
+# README's Using the board section. relayed-hold.json is the duplicate-hold shape the 0.6.x board drew
+# twice: the delegate home holds etl-cutover for the captain and the parent channel relayed the same
+# hold into the delegate's task record as captain-hold-etl-cutover-1; a second relay,
+# captain-hold-orphan-call-1, names a task the ledger does not carry (falsify: compare the relayed key
+# against the task id as before 0.7.0, drop relayedDecisionRows, or list decisions under ledgerEntry).
+frame_rh=$(render relayed-hold.json) || fail "relayed-hold: render exited non-zero"
+assert_contains "$frame_rh" "Captain's Call (2)" "relayed-hold: the delegate's hold and the orphan relay, one row each"
+assert_row "$frame_rh" '^│ hold +- +etl-cutover +Cut over the nightly ETL on Friday\? · Two windows fit +acme-corp/widgets +delegate-a +1d │$' "relayed-hold: the delegate's hold comes from its ledger, labelled with its home"
+assert_count "$frame_rh" "etl-cutover" 1 "relayed-hold: the hold the parent channel relayed is one row on the whole board"
+assert_not_contains "$frame_rh" "captain-hold-etl" "relayed-hold: the relayed key is not drawn while the ledger carries the task"
+assert_row "$frame_rh" '^│ decide +captain-hold-or[^ ]* +delegate-a +captain hold orphan-call: Rotate the ETL signing key\? +acme-corp/widgets +delegate-a +15m │$' "relayed-hold: a relay naming a task the ledger does not carry draws once, as the fallback, labelled with the delegate's home"
+assert_contains "$frame_rh" "Underway (2)" "relayed-hold: the main worker and the delegate's one worker"
+assert_row "$frame_rh" '^│ working +working +etl-loader +Write the ETL loader · writing the loader +acme-corp/widgets +delegate-a +3h │$' "relayed-hold: the delegate's one worker draws directly, its title first, HOME naming the home"
+assert_no_row "$frame_rh" '▸ delegate-a' "relayed-hold: no group row over one worker"
+assert_not_contains "$(pane_lines "$frame_rh" 2)" "hold" "relayed-hold: no hold row in Underway"
+assert_contains "$frame_rh" "Charted Next (0)" "relayed-hold: nothing queued, no warning"
+# With the ledger unreadable the relays are the only record of the home's calls, so both draw, and
+# the home is a Charted Next warning (falsify: drop the unreadable branch from relayedDecisionRows'
+# ledgerHoldsTask, or the unreadable warning from warningRows).
+frame_rh=$(render "$(variant relayed-hold.json relayed-unreadable '{"ledgers": [{"id": "delegate-a", "home": "/fixture/homes/delegate-a", "remote": false, "cached": false, "summary": null, "error": "no ledger"}]}')") || fail "relayed-hold unreadable: render exited non-zero"
+assert_contains "$frame_rh" "Captain's Call (2)" "relayed-hold unreadable: both relayed calls draw"
+assert_row "$frame_rh" '^│ decide +captain-hold-etl[^ ]* +delegate-a +captain hold etl-cutover: Cut over the nightly ETL on Friday\? ' "relayed-hold unreadable: the relayed hold draws from the task record when its ledger cannot be read"
+assert_contains "$frame_rh" "Underway (1)" "relayed-hold unreadable: no worker rows from a home without a ledger"
+assert_row "$frame_rh" '^│ warning +- +delegate-a +structured state unreadable: no ledger +- +delegate-a +- │$' "relayed-hold unreadable: the home is a Charted Next warning"
+assert_contains "$frame_rh" "Charted Next (0, 1 warning)" "relayed-hold unreadable: one warning, not counted"
+
+# charted.json (its _comment names every row): the Charted Next rules, one row type each, warnings
+# first and left out of the count, items newest filed first with undated items last, a captain hold in
+# exactly one pane (falsify: drop a bucket from chartedState or chartedWhy, let chartedItem take a live
+# or a worked held item, sort by record order, count the warnings, or warn on a live or done endpoint).
+frame_ch=$(render charted.json) || fail "charted: render exited non-zero"
+charted_ch=$(pane_lines "$frame_ch" 5)
+assert_contains "$frame_ch" "Charted Next (9, 6 warnings)" "charted: nine items and six warnings, the warnings left out of the count"
+assert_row "$frame_ch" '^│ STATE +WHY +ID +WHAT +REPO +HOME +FILED │$' "charted: the pane's columns"
+assert_row "$frame_ch" '^│ warning +- +main inventory +main in-flight backlog item has no child metadata: orphan-item +- +main +- │$' "charted: the invalid main inventory is a warning"
+assert_row "$frame_ch" '^│ warning +- +child-gone +endpoint default:w2B:p2 is gone \(exists: false\) +- +delegate-a +- │$' "charted: an unknown endpoint whose pane is gone is a warning"
+assert_row "$frame_ch" '^│ warning +- +child-lost +child current state unavailable \(endpoint default:w2C:p2, run-step\) +- +delegate-a +- │$' "charted: an unknown endpoint under a home with no home-level warning is a warning of its own"
+assert_row "$frame_ch" '^│ warning +- +delegate-b +in-flight backlog item has terminal child state: old-child=done +- +delegate-b +- │$' "charted: an invalid ledger is one home-level warning; its done endpoint draws nothing"
+assert_row "$frame_ch" '^│ warning +- +delegate-c +structured state unreadable: no ledger +- +delegate-c +- │$' "charted: a home with no ledger is a warning"
+assert_row "$frame_ch" '^│ warning +- +delegate-d +child current state unavailable: ghost-child +- +delegate-d +- │$' "charted: a home the canonical snapshot reads unknown is a warning carrying its reason"
+assert_no_row "$charted_ch" '^│ warning +- +ghost-child ' "charted: the unknown child of a home with a home-level warning draws no row of its own"
+assert_no_row "$frame_ch" '^│ [a-z]+ +[^│]*  old-child +[A-Za-z]' "charted: a done endpoint is neither a warning nor a worker row"
+assert_row "$frame_ch" '^│ queued +- +del-queued +Index the warehouse table +acme-corp/widgets +delegate-a +09-16 │$' "charted: a delegate's queued item, FILED its since date"
+assert_row "$frame_ch" '^│ blocked +by queue-plain \+1 +queue-blocked +Ship the export report · needs the export button first +example-org/example-repo +main +09-15 │$' "charted: a queued item with two unresolved blockers reads blocked, WHY the first blocker plus the count"
+assert_row "$frame_ch" '^│ queued +- +queue-plain +Add the export button +example-org/example-repo +main +09-14 │$' "charted: a plain queued item"
+assert_row "$frame_ch" '^│ blocked +by hold-dated +hold-blocked +Announce the new pricing · After the pricing call +acme-corp/widgets +main +09-12 │$' "charted: a captain hold in the blocked bucket, WHY its blocker, WHAT its title and reason"
+assert_row "$frame_ch" '^│ queued +- +held-external +Vendor cutover · waiting on the vendor +example-org/example-repo +main +09-11 │$' "charted: an in-flight item held from outside whose worker is not working is a gate"
+assert_row "$frame_ch" '^│ dated +until 10-01 +hold-dated +Revisit the pricing page · Revisit after launch +acme-corp/widgets +main +09-10 │$' "charted: a dated hold, WHY its until date"
+assert_row "$frame_ch" '^│ aged +held 16d +del-aged +Retire the old importer · Waiting on the captain since August +acme-corp/widgets +delegate-a +08-31 │$' "charted: a delegate's aged hold from its queued entry, its age from the ledger's decision"
+assert_row "$frame_ch" '^│ aged +held 20d +hold-aged +Keep or drop the legacy importer · No answer yet +acme-corp/widgets +main +08-27 │$' "charted: an aged hold, WHY its age in days"
+assert_row "$frame_ch" '^│ queued +- +undated-queue +Tidy the release notes +example-org/example-repo +main +- │$' "charted: an item with no filed date reads - and sorts last"
+assert_before "$frame_ch" '^│ warning +- +delegate-d' '^│ queued +- +del-queued' "charted: warnings come before every item"
+assert_before "$frame_ch" '^│ queued +- +del-queued' '^│ blocked +by queue-plain' "charted: newest filed first (1)"
+assert_before "$frame_ch" '^│ blocked +by queue-plain' '^│ queued +- +queue-plain' "charted: newest filed first (2)"
+assert_before "$frame_ch" '^│ queued +- +queue-plain' '^│ blocked +by hold-dated' "charted: newest filed first (3)"
+assert_before "$frame_ch" '^│ dated +until 10-01' '^│ aged +held 16d' "charted: newest filed first (4)"
+assert_before "$frame_ch" '^│ aged +held 20d' '^│ queued +- +undated-queue' "charted: an undated item sorts after every dated one"
+assert_not_contains "$charted_ch" "hold-live" "charted: a live hold is never here"
+assert_row "$frame_ch" '^│ hold +- +hold-live +Pick the vendor for the address API · Two quotes in the report +acme-corp/widgets +main +3d │$' "charted: the live hold is Captain's Call's row"
+assert_count "$frame_ch" "hold-live" 1 "charted: a captain hold sits in exactly one pane"
+assert_not_contains "$charted_ch" "worked-held" "charted: a held item whose worker is working is not a gate"
+assert_row "$frame_ch" '^│ working +working +worked-held +Vendor cutover, part two · harness busy \(claude-hook\) +example-org/example-repo +main +1m │$' "charted: the worked held item is an Underway row, unmarked since the hold is not the captain's"
+assert_no_row "$frame_ch" '^│ paused +[^│]*held-external' "charted: an item held from outside with nothing working has no Underway row (falsify: skip only captain holds in mainTaskRow)"
+assert_row "$frame_ch" '^│ working +working +child-work +Write the ETL loader · writing the loader +acme-corp/widgets +delegate-a +3h │$' "charted: the delegate's one worker draws directly"
+assert_contains "$frame_ch" "Underway (2)" "charted: two workers"
+assert_not_contains "$charted_ch" "done-item" "charted: a done item is never a gate"
+assert_row "$frame_ch" '^│ merged +09-15 +done-item +Add the ETL index · https://github.com/example-org/example-repo/pull/12 +example-org/example-repo +main +1d │$' "charted: the done item is Recently Landed's row"
+assert_widths "$frame_ch" 160 "charted frame lines are 160 columns"
+assert_lines "$frame_ch" 60 "charted frame is 60 lines"
+# Charted Next rows act: a warning row has nothing to open and takes neither d nor D; a queued row has
+# its card; a held row has its card and both hold actions, and D opens the same date prompt as in
+# Captain's Call. The two PR panes are empty here, so two tabs reach the pane (falsify: drop the
+# charted case from keyAction, or mainCard from chartedRow's fields).
+frame_ch=$(render charted.json --keys "tab,tab") || fail "charted footer warning: render exited non-zero"
+assert_row "$frame_ch" '^ j/k move  tab pane  enter open/focus/view  l/h expand ' "charted: a warning row keeps the standard hints"
+frame_ch=$(render charted.json --keys "tab,tab,enter") || fail "charted enter warning: render exited non-zero"
+assert_contains "$frame_ch" "main inventory: a warning row; nothing to open" "charted: enter on a warning is a plain notice"
+frame_ch=$(render charted.json --keys "tab,tab,d") || fail "charted d warning: render exited non-zero"
+assert_contains "$frame_ch" "main inventory: no captain hold to discard" "charted: d on a warning is refused"
+frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j") || fail "charted footer queued: render exited non-zero"
+assert_row "$frame_ch" '^ j/k move  tab pane  enter card  x hide ' "charted: a queued row carries its card and nothing to act on"
+frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j,j,j,j") || fail "charted footer held: render exited non-zero"
+assert_row "$frame_ch" '^ j/k move  tab pane  enter card  d discard  D defer  x hide ' "charted: a held row carries its card and both hold actions"
+frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j,j,j,j,D") || fail "charted D held: render exited non-zero"
+assert_row "$frame_ch" "^ defer hold-blocked until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "charted: D on a held row opens the date prompt"
+frame_ch=$(render_view charted.json "tab,tab,j,j,j,j,j,j,j,j,j,enter") || fail "charted card: render exited non-zero"
+assert_contains "$frame_ch" "viewed the hold card of hold-blocked (viewer-cmd)" "charted: enter on a held row shows its card"
+
 # -------------------------------------------------------------------- hide
 vs="$SCRATCH/view-state.json"
 rm -f "$vs"
 # x hides the selected row and persists its key (falsify: drop the filter in applyHidden, or the date from the
-# Landed hideKey).
-frame_h=$(render populated.json --view-state "$vs" --keys "tab,tab,tab,tab,x") || fail "hide: render exited non-zero"
-assert_contains "$frame_h" "Landed (3, 1 hidden)" "x on the first Landed row: header counts it hidden"
+# Recently Landed hideKey).
+# Recently Landed is four tabs from Captain's Call (Underway, My PRs, then Charted Next; the empty
+# Teammates' PRs is skipped) and its second row is etl-index.
+frame_h=$(render populated.json --view-state "$vs" --keys "tab,tab,tab,tab,j,x") || fail "hide: render exited non-zero"
+assert_contains "$frame_h" "Recently Landed (4, 1 hidden)" "x on the second Recently Landed row: header counts it hidden"
 assert_no_row "$frame_h" '^│ merged +09-15 +etl-index ' "the hidden row is out of view"
 assert_contains "$frame_h" "hidden etl-index · H shows hidden rows, X unhides this pane" "x leaves a notice"
 assert_file_contains "$vs" '"landed:delegate-a:etl-index:2026-09-15"' "the key is pane:home:id:completion date, so a re-landed item reappears"
 assert_file_contains "$vs" '"schema": "fm-board-view-state.v1"' "the file names its schema"
 # Restart: the file is loaded again (falsify: drop loadViewState from driveOnce).
 frame_h=$(render populated.json --view-state "$vs") || fail "hide reload: render exited non-zero"
-assert_contains "$frame_h" "Landed (3, 1 hidden)" "after a restart the row stays hidden"
+assert_contains "$frame_h" "Recently Landed (4, 1 hidden)" "after a restart the row stays hidden"
 assert_no_row "$frame_h" '^│ merged +09-15 +etl-index ' "after a restart the row is still out of view"
 # H shows hidden rows greyed with a marker (falsify: drop showHidden from applyHidden, or the grey style).
 frame_h=$(render populated.json --view-state "$vs" --keys "H") || fail "hide H: render exited non-zero"
 tags_h=$(render populated.json --view-state "$vs" --keys "H" --tags) || fail "hide H --tags: render exited non-zero"
-assert_contains "$frame_h" "Landed (4, 1 hidden shown)" "H: header says the hidden row is shown"
+assert_contains "$frame_h" "Recently Landed (5, 1 hidden shown)" "H: header says the hidden row is shown"
 assert_row "$frame_h" '^│ merged +09-15 +etl-index +\(hidden\) Add the ETL index ' "H: the hidden row is listed with a (hidden) marker"
 assert_row "$tags_h" '\{grey-fg\}\(hidden\) Add the ETL index' "H: the hidden row is grey"
 assert_contains "$frame_h" "showing hidden rows (greyed); H hides them again" "H leaves a notice"
 # x on a shown hidden row unhides it (falsify: drop the unhide action in keyAction).
-frame_h=$(render populated.json --view-state "$vs" --keys "H,tab,tab,tab,tab,x") || fail "hide toggle: render exited non-zero"
+frame_h=$(render populated.json --view-state "$vs" --keys "H,tab,tab,tab,tab,j,x") || fail "hide toggle: render exited non-zero"
 assert_contains "$frame_h" "unhidden etl-index" "x on the shown hidden row unhides it"
-assert_contains "$frame_h" "Landed (4)" "after unhiding the header shows the plain count"
+assert_contains "$frame_h" "Recently Landed (5)" "after unhiding the header shows the plain count"
 assert_file_not_contains "$vs" "etl-index" "unhiding removes the key from the file"
 # X clears the pane (falsify: drop the prefix filter in unhide-pane).
-frame_h=$(render populated.json --view-state "$vs" --keys "tab,tab,tab,tab,x,j,x,X") || fail "hide X: render exited non-zero"
-assert_contains "$frame_h" "unhidden 2 rows in Landed" "X unhides every hidden row of the pane"
-assert_contains "$frame_h" "Landed (4)" "X: all four Landed rows are back"
+frame_h=$(render populated.json --view-state "$vs" --keys "tab,tab,tab,tab,j,x,j,x,X") || fail "hide X: render exited non-zero"
+assert_contains "$frame_h" "unhidden 2 rows in Recently Landed" "X unhides every hidden row of the pane"
+assert_contains "$frame_h" "Recently Landed (5)" "X: all five Recently Landed rows are back"
 assert_file_contains "$vs" '"hidden": []' "X empties the hidden list in the file"
 # A hidden group takes its children with it (falsify: drop the parent lookup in applyHidden).
-frame_h=$(render populated.json --rows 48 --keys "j,j,j,j,l,x") || fail "hide group: render exited non-zero"
-assert_contains "$frame_h" "In flight (6, 5 hidden)" "hiding the expanded delegate-a group hides its four children too"
+frame_h=$(render populated.json --rows 48 --keys "tab,j,j,l,x") || fail "hide group: render exited non-zero"
+assert_contains "$frame_h" "Underway (5, 3 hidden)" "hiding the expanded delegate-a group hides its two children too"
 assert_not_contains "$frame_h" "↳ child-one" "hidden group: children are out of view"
 # A fixture render without --view-state loads and saves nothing (falsify: drop the fixture guard in viewStateFor).
 fake_home_dir="$SCRATCH/home"
 mkdir -p "$fake_home_dir"
-frame_h=$(HOME="$fake_home_dir" XDG_CONFIG_HOME='' render populated.json --keys "tab,tab,tab,tab,x") || fail "hide no file: render exited non-zero"
-assert_contains "$frame_h" "Landed (3, 1 hidden)" "without --view-state hiding still works for the frame"
+frame_h=$(HOME="$fake_home_dir" XDG_CONFIG_HOME='' render populated.json --keys "tab,tab,tab,tab,j,x") || fail "hide no file: render exited non-zero"
+assert_contains "$frame_h" "Recently Landed (4, 1 hidden)" "without --view-state hiding still works for the frame"
 if [ -e "$fake_home_dir/.config/fm-board/view-state.json" ]; then fail "a fixture render without --view-state wrote the default view-state file"; else pass; fi
 # A view-state path inside FM_HOME is refused (falsify: drop insideHome from resolveViewStatePath).
 frame_h=$(XDG_CONFIG_HOME="$SCRATCH/xdg" render populated.json --view-state /fixture/firstmate/state/view-state.json) || fail "hide FM_HOME guard: render exited non-zero"
@@ -1505,15 +1643,15 @@ if [ -e /fixture/firstmate/state/view-state.json ]; then fail "the refused path 
 
 # ------------------------------------------------------------ pane toggles
 rm -f "$vs"
-# 6 hides Landed; its rows go to the other panes; the title lists it (falsify: drop the visible list from
+# 6 hides Recently Landed; its rows go to the other panes; the title lists it (falsify: drop the visible list from
 # paneHeights, or the hidden skip in renderPanes).
 frame_p=$(render populated.json --view-state "$vs" --keys "6") || fail "panes 6: render exited non-zero"
 assert_contains "$frame_p" "· panes hidden: 6" "title lists the hidden pane number"
-assert_not_contains "$frame_p" "Landed (" "the hidden pane draws nothing"
+assert_not_contains "$frame_p" "Recently Landed (" "the hidden pane draws nothing"
 assert_count "$frame_p" "┌─" 5 "five pane frames remain"
 assert_lines "$frame_p" 44 "one pane hidden: the frame is still 44 lines"
 assert_widths "$frame_p" 160 "one pane hidden: lines are 160 columns"
-assert_contains "$frame_p" "pane hidden: Landed · 6 or 0 shows it again" "6 leaves a notice"
+assert_contains "$frame_p" "pane hidden: Recently Landed · 6 or 0 shows it again" "6 leaves a notice"
 assert_file_contains "$vs" '"landed"' "the hidden pane is persisted"
 frame_p=$(render populated.json --view-state "$vs") || fail "panes reload: render exited non-zero"
 assert_count "$frame_p" "┌─" 5 "after a restart the pane stays hidden (falsify: drop hidden_panes from loadViewState)"
@@ -1527,62 +1665,63 @@ frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "panes 4 
 assert_contains "$frame_p" "┌─ [4] Teammates' PRs (0)" "4 again brings Teammates' PRs back"
 assert_contains "$frame_p" "pane shown: Teammates' PRs" "4 again leaves the shown notice"
 assert_file_not_contains "$vs" '"toreview"' "the shown pane leaves the persisted list"
-# 1 hides In flight, the first pane, and 2 Needs you, the second (falsify: put needs back first in PANES).
+# 1 hides Captain's Call, the first pane, and 2 Underway, the second (falsify: put inflight back first in PANES).
 frame_p=$(render populated.json --view-state "$vs" --keys "1") || fail "panes 1: render exited non-zero"
-assert_not_contains "$frame_p" "In flight (" "1 hides In flight"
-assert_contains "$frame_p" "pane hidden: In flight · 1 or 0 shows it again" "1 leaves a notice naming its key"
-assert_contains "$frame_p" "┌─ [2] Needs you (4)" "with In flight hidden Needs you is still drawn under key 2"
+assert_not_contains "$frame_p" "Captain's Call (" "1 hides Captain's Call"
+assert_contains "$frame_p" "pane hidden: Captain's Call · 1 or 0 shows it again" "1 leaves a notice naming its key"
+assert_contains "$frame_p" "┌─ [2] Underway (6)" "with Captain's Call hidden Underway is still drawn under key 2"
 frame_p=$(render populated.json --view-state "$vs" --keys "1,2") || fail "panes 1 back, 2: render exited non-zero"
-assert_contains "$frame_p" "┌─ [1] In flight (7)" "1 again brings In flight back at the top"
-assert_not_contains "$frame_p" "Needs you (" "2 hides Needs you"
-assert_contains "$frame_p" "pane hidden: Needs you · 2 or 0 shows it again" "2 leaves a notice naming its key"
-assert_file_contains "$vs" '"needs"' "the hidden Needs you pane is persisted under its id"
+assert_contains "$frame_p" "┌─ [1] Captain's Call (6)" "1 again brings Captain's Call back at the top"
+assert_not_contains "$frame_p" "Underway (" "2 hides Underway"
+assert_contains "$frame_p" "pane hidden: Underway · 2 or 0 shows it again" "2 leaves a notice naming its key"
+assert_file_contains "$vs" '"inflight"' "the hidden Underway pane is persisted under its id"
 frame_p=$(render populated.json --view-state "$vs" --keys "2") || fail "panes 2 again: render exited non-zero"
-assert_contains "$frame_p" "┌─ [2] Needs you (4)" "2 again brings Needs you back"
+assert_contains "$frame_p" "┌─ [2] Underway (6)" "2 again brings Underway back"
 frame_p=$(render populated.json --view-state "$vs" --keys "2,3,4,5") || fail "panes 2,3,4,5: render exited non-zero"
 assert_contains "$frame_p" "· panes hidden: 2,3,4,5,6" "five panes hidden: the title lists all five"
 assert_count "$frame_p" "┌─" 1 "five panes hidden: one frame"
-assert_contains "$frame_p" "In flight (7)" "five panes hidden: In flight remains"
+assert_contains "$frame_p" "Captain's Call (6)" "five panes hidden: Captain's Call remains"
 assert_lines "$frame_p" 44 "five panes hidden: still 44 lines"
 assert_widths "$frame_p" 160 "five panes hidden: lines are 160 columns"
-assert_row "$frame_p" '^│ decide +1 live +!▸ delegate-a ' "five panes hidden: In flight rows render in the freed space"
+assert_row "$frame_p" '^│ hold +- +decide-vendor ' "five panes hidden: Captain's Call rows render in the freed space"
 # The last pane goes too: with every pane hidden the grid gives way to the landing page, a centered key
 # list between the title line and the footer (falsify: bring back a shown <= 1 guard in toggle-pane, or
 # drop the landing branch from renderFrame).
 frame_p=$(render populated.json --view-state "$vs" --keys "1") || fail "panes last: render exited non-zero"
 assert_count "$frame_p" "┌─" 0 "all panes hidden: no pane frame is drawn"
-assert_not_contains "$frame_p" "Needs you (" "all panes hidden: no pane header"
-assert_not_contains "$frame_p" "In flight (" "all panes hidden: no pane header for the last one hidden"
+assert_not_contains "$frame_p" "Captain's Call (" "all panes hidden: no pane header"
+assert_not_contains "$frame_p" "Underway (" "all panes hidden: no pane header for the last one hidden"
 assert_row "$frame_p" '^ +all panes hidden +$' "landing page heading"
 assert_row "$frame_p" '^ firstmate-tui · /fixture/firstmate · 3 homes · all panes hidden ' "landing page: the title line leads with firstmate-tui (falsify: put fm-board back in titleLine)"
-assert_row "$frame_p" '^ +1  In flight +$' "landing page: 1 brings In flight back"
-assert_row "$frame_p" '^ +2  Needs you +$' "landing page: 2 brings Needs you back"
+assert_row "$frame_p" '^ +1  Captain.s Call +$' "landing page: 1 brings Captain's Call back"
+assert_row "$frame_p" '^ +2  Underway +$' "landing page: 2 brings Underway back"
 assert_row "$frame_p" '^ +3  My PRs +$' "landing page: 3 brings My PRs back"
 assert_row "$frame_p" "^ +4  Teammates' PRs +\$" "landing page: 4 brings Teammates' PRs back (falsify: drop the fourth pane from landingEntries)"
-assert_row "$frame_p" '^ +5  Findings +$' "landing page: 5 brings Findings back"
-assert_row "$frame_p" '^ +6  Landed +$' "landing page: 6 brings Landed back"
+assert_row "$frame_p" '^ +5  Charted Next +$' "landing page: 5 brings Charted Next back"
+assert_row "$frame_p" '^ +6  Recently Landed +$' "landing page: 6 brings Recently Landed back"
 assert_row "$frame_p" '^ +0  show all +$' "landing page: 0 shows all"
 assert_row "$frame_p" '^ +r  refresh +$' "landing page: r"
 assert_row "$frame_p" '^ +\.  settings +$' "landing page: . settings (falsify: drop the settings entry from landingEntries)"
 assert_row "$frame_p" '^ +\?  help +$' "landing page: ?"
 assert_row "$frame_p" '^ +q  quit +$' "landing page: q"
-assert_before "$frame_p" '^ +all panes hidden +$' '^ +1  In flight +$' "landing page: heading first"
-assert_before "$frame_p" '^ +1  In flight +$' '^ +2  Needs you +$' "landing page: Needs you after In flight"
+assert_before "$frame_p" '^ +all panes hidden +$' '^ +1  Captain.s Call +$' "landing page: heading first"
+assert_before "$frame_p" '^ +1  Captain.s Call +$' '^ +2  Underway +$' "landing page: Underway after Captain's Call"
 assert_before "$frame_p" '^ +3  My PRs +$' "^ +4  Teammates' PRs +\$" "landing page: Teammates' PRs after My PRs"
-assert_before "$frame_p" "^ +4  Teammates' PRs +\$" '^ +5  Findings +$' "landing page: Findings after Teammates' PRs"
-assert_before "$frame_p" '^ +6  Landed +$' '^ +0  show all +$' "landing page: 0 after the six panes"
+assert_before "$frame_p" "^ +4  Teammates' PRs +\$" '^ +5  Charted Next +$' "landing page: Charted Next after Teammates' PRs"
+assert_before "$frame_p" '^ +6  Recently Landed +$' '^ +0  show all +$' "landing page: 0 after the six panes"
 assert_before "$frame_p" '^ +0  show all +$' '^ +r  refresh +$' "landing page: r after 0"
 assert_before "$frame_p" '^ +r  refresh +$' '^ +\.  settings +$' "landing page: . after r, the footer's order"
 assert_before "$frame_p" '^ +\.  settings +$' '^ +\?  help +$' "landing page: ? after ."
 assert_contains "$frame_p" "3 homes · all panes hidden " "all panes hidden: the title says so instead of listing six numbers (falsify: drop allHidden from titleLine)"
 assert_not_contains "$frame_p" "panes hidden: 1,2,3,4,5,6" "all panes hidden: the title does not list the six numbers"
-assert_contains "$frame_p" "pane hidden: In flight · every pane hidden; 1-6 or 0 shows them" "hiding the last pane leaves a notice naming the way back"
+assert_contains "$frame_p" "pane hidden: Captain's Call · every pane hidden; 1-6 or 0 shows them" "hiding the last pane leaves a notice naming the way back"
 assert_row "$frame_p" '^ j/k .* q quit +pane hidden' "the footer stays on the landing page"
 assert_lines "$frame_p" 44 "landing page: the frame is still 44 lines"
 assert_widths "$frame_p" 160 "landing page: lines are 160 columns"
-for id in needs mine inflight findings landed toreview; do
+for id in needs mine inflight charted landed toreview; do
   assert_file_contains "$vs" "\"$id\"" "all six pane ids are persisted ($id)"
 done
+assert_file_not_contains "$vs" '"findings"' "the retired Findings id is never written (falsify: keep findings in PANES)"
 # A restart with an all-hidden file lands on the page again (falsify: drop hidden_panes from loadViewState,
 # or make the landing depend on view.notice).
 frame_p=$(render populated.json --view-state "$vs") || fail "panes landing reload: render exited non-zero"
@@ -1606,15 +1745,15 @@ assert_file_contains "$vs" '"hidden": []' "x on the landing page hides no row"
 frame_p=$(render populated.json --view-state "$vs" --keys "?") || fail "landing ?: render exited non-zero"
 assert_contains "$frame_p" "firstmate-tui keys" "? opens the help over the landing page"
 frame_p=$(render populated.json --view-state "$vs" --keys "1") || fail "landing 1: render exited non-zero"
-assert_count "$frame_p" "┌─" 1 "1 on the landing page brings In flight back alone"
-assert_contains "$frame_p" "┌─ [1] In flight (7)" "the returned pane carries its badge"
-assert_contains "$frame_p" "pane shown: In flight" "1 on the landing page leaves the usual notice"
+assert_count "$frame_p" "┌─" 1 "1 on the landing page brings Captain's Call back alone"
+assert_contains "$frame_p" "┌─ [1] Captain's Call (6)" "the returned pane carries its badge"
+assert_contains "$frame_p" "pane shown: Captain's Call" "1 on the landing page leaves the usual notice"
 assert_contains "$frame_p" "· panes hidden: 2,3,4,5,6" "one pane back: the title lists the five still hidden"
 assert_file_contains "$vs" '"hidden_panes": [' "the returned pane is persisted"
 frame_p=$(render populated.json --view-state "$vs" --keys "4") || fail "landing then 4: render exited non-zero"
-assert_count "$frame_p" "┌─" 2 "4 after the landing page brings Teammates' PRs back beside In flight"
+assert_count "$frame_p" "┌─" 2 "4 after the landing page brings Teammates' PRs back beside Captain's Call"
 assert_contains "$frame_p" "┌─ [4] Teammates' PRs (0)" "Teammates' PRs carries its badge when it returns"
-assert_before "$frame_p" "In flight \(7\)" "Teammates' PRs \(0\)" "the returned pane draws below In flight, in its screen position"
+assert_before "$frame_p" "Captain's Call \(6\)" "Teammates' PRs \(0\)" "the returned pane draws below Captain's Call, in its screen position"
 frame_p=$(render populated.json --view-state "$vs" --keys "0") || fail "panes 0: render exited non-zero"
 assert_count "$frame_p" "┌─" 6 "0 shows every pane again"
 assert_contains "$frame_p" "all panes shown" "0 leaves a notice"
@@ -1626,18 +1765,29 @@ frame_p=$(render populated.json --keys "1,2,3,4,5,6") || fail "panes 1-6: render
 assert_row "$frame_p" '^ +all panes hidden +$' "1,2,3,4,5,6 in one sitting lands on the page"
 assert_count "$frame_p" "┌─" 0 "1,2,3,4,5,6: nothing else is drawn"
 frame_p=$(render populated.json --keys "1,2,3,4,5") || fail "panes 1-5: render exited non-zero"
-assert_count "$frame_p" "┌─" 1 "1,2,3,4,5 alone leaves Landed on screen: six panes must go before the landing page (falsify: land with five hidden)"
-assert_contains "$frame_p" "┌─ [6] Landed (4)" "1,2,3,4,5: the one pane left is Landed"
+assert_count "$frame_p" "┌─" 1 "1,2,3,4,5 alone leaves Recently Landed on screen: six panes must go before the landing page (falsify: land with five hidden)"
+assert_contains "$frame_p" "┌─ [6] Recently Landed (5)" "1,2,3,4,5: the one pane left is Recently Landed"
 frame_p=$(render populated.json --keys "1,2,3,4,5,6,0") || fail "panes 1-6,0: render exited non-zero"
 assert_count "$frame_p" "┌─" 6 "0 after 1,2,3,4,5,6 restores all six"
 assert_not_contains "$frame_p" "all panes hidden" "0 after 1,2,3,4,5,6 leaves the landing page"
 # A hand-written all-hidden file is enough to land (falsify: require the ids in a particular order, or
 # only honor a file the board wrote itself).
 vs_all="$SCRATCH/view-state-all.json"
-printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":["toreview","landed","findings","inflight","mine","needs"]}\n' > "$vs_all"
+printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":["toreview","landed","charted","inflight","mine","needs"]}\n' > "$vs_all"
 frame_p=$(render populated.json --view-state "$vs_all") || fail "panes hand-written all-hidden: render exited non-zero"
 assert_row "$frame_p" '^ +all panes hidden +$' "a hand-written all-hidden view-state file renders the landing page"
 assert_count "$frame_p" "┌─" 0 "hand-written all-hidden file: no pane drawn"
+# A file from before 0.7.0 naming the retired Findings pane: its entries are dropped on read, so five
+# hidden ids plus findings leave Charted Next on screen, and a hidden findings: row key hides nothing
+# (falsify: drop DROPPED_PANES from loadViewState).
+vs_findings="$SCRATCH/view-state-findings.json"
+printf '{"schema":"fm-board-view-state.v1","hidden":["findings:main:scout-beta"],"hidden_panes":["toreview","landed","findings","inflight","mine","needs"],"scroll":{"findings":3}}\n' > "$vs_findings"
+frame_p=$(render populated.json --view-state "$vs_findings") || fail "panes old findings id: render exited non-zero"
+assert_count "$frame_p" "┌─" 1 "an old file's findings id is dropped: Charted Next stays on screen"
+assert_contains "$frame_p" "┌─ [5] Charted Next (1)" "the pane left is Charted Next"
+frame_p=$(render populated.json --view-state "$vs_findings" --keys "6") || fail "panes old findings row key: render exited non-zero"
+assert_contains "$frame_p" "Recently Landed (5)" "an old findings: row key hides no Recently Landed row (its report lists once there)"
+assert_file_not_contains "$vs_findings" 'findings' "the next save drops every findings entry"
 # A file written by a board before 0.4.0 names the second pane review: it is read as mine, in the
 # hidden panes, the hidden row keys and the dragged widths (falsify: drop RENAMED_PANES from
 # loadViewState or sanitizeColumns).
@@ -1661,11 +1811,11 @@ frame_p=$(render to-review.json --view-state "$vs_moved") || fail "panes moved i
 assert_not_contains "$frame_p" "Teammates' PRs (" "a file from before the reorder hides Teammates' PRs at its new position"
 assert_contains "$frame_p" "· panes hidden: 4" "the title lists the hidden pane under its new key"
 assert_count "$frame_p" "┌─" 5 "five panes are drawn"
-assert_before "$frame_p" "My PRs \(1\)" "Findings \([0-9]" "with Teammates' PRs hidden, Findings follows My PRs"
+assert_before "$frame_p" "My PRs \(1\)" "Charted Next \([0-9]" "with Teammates' PRs hidden, Charted Next follows My PRs"
 frame_p=$(render to-review.json --view-state "$vs_moved" --keys "4") || fail "panes moved id shown: render exited non-zero"
 assert_contains "$frame_p" "┌─ [4] Teammates' PRs (6, 1 hidden) ─" "4 shows the pane at its new position with the old file's hidden row still hidden"
 assert_before "$frame_p" "My PRs \(1\)" "Teammates' PRs \(6, 1 hidden\)" "the shown pane sits below My PRs"
-assert_before "$frame_p" "Teammates' PRs \(6, 1 hidden\)" "Findings \([0-9]" "and above Findings"
+assert_before "$frame_p" "Teammates' PRs \(6, 1 hidden\)" "Charted Next \([0-9]" "and above Charted Next"
 assert_not_contains "$frame_p" "api#16" "the row hidden under the old key stays hidden"
 assert_row "$frame_p" '^│ CHECKS +STATUS +ID {20}AUTHOR +TITLE ' "the old file's dragged ID width, 20, applies to the pane at its new position"
 assert_file_contains "$vs_moved" '"toreview:main:api#16"' "the next save keeps the row key under the same pane id"
@@ -1675,36 +1825,38 @@ assert_file_contains "$vs_moved" '"hidden_panes": []' "the shown pane leaves hid
 frame_p=$(render to-review.json --view-state "$vs_moved" --keys "4") || fail "panes moved id hidden again: render exited non-zero"
 if grep -Eq '^    "toreview"$' "$vs_moved"; then pass; else fail "hiding it again writes the pane id to hidden_panes"; fi
 assert_file_not_contains "$vs_moved" '"4"' "and never its key number"
-# The same for In flight, which moved from fourth under key 4 to first under key 1 in 0.6.1: a file from
-# before hides it at the top, 1 shows it with its hidden row still hidden and its dragged ID width applied,
-# and the next save writes the id inflight, never a key number; a file hiding needs hides Needs you at its
-# new position under key 2 (falsify: key hidden_panes, hidden or columns by pane index).
+# The same for the pane ids that kept their place through the 0.7.0 retitle: a file written while In
+# flight was the first pane under key 1 still names the id inflight, which is now Underway under key 2,
+# so the file hides Underway at its new position, 2 shows it with its hidden row still hidden and its
+# dragged ID width applied, and the next save writes the id inflight, never a key number; a file hiding
+# needs hides Captain's Call, now the first pane under key 1 (falsify: key hidden_panes, hidden or
+# columns by pane index, or rename the ids with the titles).
 vs_first="$SCRATCH/view-state-first.json"
 printf '{"schema":"fm-board-view-state.v1","hidden":["inflight:main:ship-alpha"],"hidden_panes":["inflight"],"columns":{"inflight":{"id":20}},"updated":"2026-09-19T00:00:00.000Z"}\n' > "$vs_first"
 frame_p=$(render populated.json --view-state "$vs_first") || fail "panes inflight moved hidden: render exited non-zero"
-assert_not_contains "$frame_p" "In flight (" "a file from before the reorder hides In flight at its new position"
-assert_contains "$frame_p" "· panes hidden: 1" "the title lists In flight under its new key"
-assert_row "$(printf '%s\n' "$frame_p" | sed -n 2p)" '^┌─ \[2\] Needs you \(4\) ─' "with In flight hidden Needs you is the first pane drawn, still under key 2"
-frame_p=$(render populated.json --view-state "$vs_first" --keys "1") || fail "panes inflight moved shown: render exited non-zero"
-assert_contains "$frame_p" "┌─ [1] In flight (6, 1 hidden) ─" "1 shows In flight at the top with the old file's hidden row still hidden"
-assert_row "$(printf '%s\n' "$frame_p" | sed -n 2p)" '^┌─ \[1\] In flight ' "the shown pane is the first drawn"
+assert_not_contains "$frame_p" "Underway (" "a file from before the retitle hides Underway at its new position"
+assert_contains "$frame_p" "· panes hidden: 2" "the title lists Underway under its new key"
+assert_row "$(printf '%s\n' "$frame_p" | sed -n 2p)" '^┌─ \[1\] Captain.s Call \(6\) ─' "with Underway hidden Captain's Call is the first pane drawn, under key 1"
+frame_p=$(render populated.json --view-state "$vs_first" --keys "2") || fail "panes inflight moved shown: render exited non-zero"
+assert_contains "$frame_p" "┌─ [2] Underway (5, 1 hidden) ─" "2 shows Underway under its new key with the old file's hidden row still hidden"
+assert_before "$frame_p" "Captain's Call \(6\)" "Underway \(5, 1 hidden\)" "the shown pane draws below Captain's Call"
 assert_no_row "$frame_p" '^│ working +working +ship-alpha ' "the row hidden under the old key stays hidden"
-assert_row "$frame_p" '^│ STATE +HERDR +ID {20}WHAT ' "the old file's dragged ID width, 20, applies to In flight at its new position"
+assert_row "$frame_p" '^│ STATE +HERDR +ID {20}WHAT ' "the old file's dragged ID width, 20, applies to Underway at its new position"
 assert_file_contains "$vs_first" '"inflight:main:ship-alpha"' "the next save keeps the row key under the same pane id"
 assert_file_contains "$vs_first" '"inflight": {' "the next save keeps the column width under the same pane id"
 assert_file_contains "$vs_first" '"hidden_panes": []' "the shown pane leaves hidden_panes"
-frame_p=$(render populated.json --view-state "$vs_first" --keys "1") || fail "panes inflight moved hidden again: render exited non-zero"
-if grep -Eq '^    "inflight"$' "$vs_first"; then pass; else fail "hiding In flight again writes the pane id to hidden_panes"; fi
-assert_file_not_contains "$vs_first" '"1"' "and never its key number"
+frame_p=$(render populated.json --view-state "$vs_first" --keys "2") || fail "panes inflight moved hidden again: render exited non-zero"
+if grep -Eq '^    "inflight"$' "$vs_first"; then pass; else fail "hiding Underway again writes the pane id to hidden_panes"; fi
+assert_file_not_contains "$vs_first" '"2"' "and never its key number"
 vs_needs="$SCRATCH/view-state-needs.json"
 printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":["needs"]}\n' > "$vs_needs"
 frame_p=$(render populated.json --view-state "$vs_needs") || fail "panes needs moved hidden: render exited non-zero"
-assert_not_contains "$frame_p" "Needs you (" "a file hiding needs hides Needs you at its new position"
-assert_contains "$frame_p" "· panes hidden: 2" "the title lists Needs you under its new key, 2"
-assert_before "$frame_p" "In flight \(7\)" "My PRs \(3\)" "with Needs you hidden My PRs follows In flight directly"
-frame_p=$(render populated.json --view-state "$vs_needs" --keys "2") || fail "panes needs moved shown: render exited non-zero"
-assert_contains "$frame_p" "┌─ [2] Needs you (4) ─" "2 shows Needs you again under its new key"
-assert_before "$frame_p" "In flight \(7\)" "Needs you \(4\)" "and it sits below In flight"
+assert_not_contains "$frame_p" "Captain's Call (" "a file hiding needs hides Captain's Call at its new position"
+assert_contains "$frame_p" "· panes hidden: 1" "the title lists Captain's Call under its new key, 1"
+assert_row "$(printf '%s\n' "$frame_p" | sed -n 2p)" '^┌─ \[2\] Underway \(6\) ─' "with Captain's Call hidden Underway is the first pane drawn, still under key 2"
+frame_p=$(render populated.json --view-state "$vs_needs" --keys "1") || fail "panes needs moved shown: render exited non-zero"
+assert_contains "$frame_p" "┌─ [1] Captain's Call (6) ─" "1 shows Captain's Call again under its new key"
+assert_before "$frame_p" "Captain's Call \(6\)" "Underway \(6\)" "and it sits above Underway"
 # The landing page replaces the narrow list too (falsify: pick the layout mode before the all-hidden check).
 frame_p=$(render narrow.json --keys "1,2,3,4,5,6") || fail "panes narrow landing: render exited non-zero"
 assert_row "$frame_p" '^ +all panes hidden +$' "narrow: the landing page replaces the list"
@@ -1713,11 +1865,11 @@ assert_not_contains "$frame_p" " STATE " "narrow: no column header on the landin
 assert_widths "$frame_p" 70 "narrow landing page: lines are 70 columns"
 assert_lines "$frame_p" 24 "narrow landing page: 24 lines"
 # Hiding the selected pane moves the selection to the next shown pane (falsify: drop the shown() clamp in
-# moveSelection): tab to Needs you, 2 hides it, then enter opens the first My PRs PR.
+# moveSelection): tab to Underway, 2 hides it, then enter opens the first My PRs PR.
 frame_o=$(render_open populated.json "tab,2,enter") || fail "panes selection: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "after hiding the selected pane, enter acts on the next shown pane"
 frame_p=$(render narrow.json --keys "6") || fail "panes narrow: render exited non-zero"
-assert_not_contains "$frame_p" "[6] Landed" "list mode: the hidden pane's section is gone (falsify: drop the hidden skip in flattenRows)"
+assert_not_contains "$frame_p" "[6] Recently Landed" "list mode: the hidden pane's section is gone (falsify: drop the hidden skip in flattenRows)"
 assert_contains "$frame_p" "panes hidden: 6" "list mode: the title lists the hidden pane"
 assert_widths "$frame_p" 70 "list mode with a hidden pane: lines are 70 columns"
 
@@ -1735,16 +1887,16 @@ assert_no_row "$frame" '^ j/k move .* o open' "footer offers no o key"
 # move back, drop the f case from keyAction, or drop `any` from focusProblem). scout-beta, the default
 # selection, has a pane: under --no-herdr the focus is refused with the herdr-off words, with the
 # fixture's herdr overlay it is reported as it would run; a row without a pane is told so.
-frame_f=$(render populated.json --keys "tab,f") || fail "keys f: render exited non-zero"
-assert_contains "$frame_f" "herdr is off (--no-herdr); cannot focus" "f on a Needs you row with a pane asks for the focus, refused under --no-herdr"
+frame_f=$(render populated.json --keys "f") || fail "keys f: render exited non-zero"
+assert_contains "$frame_f" "herdr is off (--no-herdr); cannot focus" "f on a Captain's Call row with a pane asks for the focus, refused under --no-herdr"
 assert_not_contains "$frame_f" "firstmate pane" "f leaves no firstmate-pane notice"
-frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "tab,j,f") || fail "keys f herdr: render exited non-zero"
-assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "f on a Needs you decision row focuses its worker's pane, the pane rule of enter skipped"
+frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "j,f") || fail "keys f herdr: render exited non-zero"
+assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "f on a Captain's Call decision row focuses its worker's pane, the pane rule of enter skipped"
 if [ -e "$HERDR_LOG" ]; then fail "a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
-frame_f=$(render populated.json --keys "tab,j,j,f") || fail "keys f no pane: render exited non-zero"
+frame_f=$(render populated.json --keys "j,j,j,f") || fail "keys f no pane: render exited non-zero"
 assert_contains "$frame_f" "decide-vendor: no herdr pane to focus" "f on a hold row, which has no pane, says so"
-frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "tab,tab,tab,tab,tab,f") || fail "keys f landed herdr: render exited non-zero"
-assert_contains "$frame_f" "would focus" "f on a Landed row with a live pane focuses it too"
+frame_f=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/populated.json" --keys "tab,f") || fail "keys f underway herdr: render exited non-zero"
+assert_contains "$frame_f" "would focus w1A:p1 (ship-alpha); --render-once never runs herdr agent focus" "f on an Underway worker focuses its pane too"
 if grep -Fq -- "-firstmate" "$ROOT/bin/firstmate-tui/herdr-plugin.toml"; then fail "herdr-plugin.toml still declares a firstmate pane action"; else pass; fi
 
 # ------------------------------------------------------------------ PR ages
@@ -1765,9 +1917,9 @@ assert_row "$frame_age" '^│ passing +IN REVIEW +api#107 +https://github.com/ac
 assert_row "$frame_age" '^│ passing +IN REVIEW +api#108 +https://github.com/acme/api/pull/108 +- +- │$' "no creation time and no task: - with no marker (falsify: append ~ to a null age)"
 assert_row "$frame_age" '^│ unlisted +- +pr-unlisted +https://github.com/acme/api/pull/106 · checks: not fetched +- +45m~ │$' "a recorded PR missing from the live list falls back with ~"
 assert_count "$frame_age" "~ │" 4 "exactly the four fallback rows carry the marker (falsify: mark every review row)"
-# Only the display text carries the marker: the In flight row of the same task shows the plain
+# Only the display text carries the marker: the Underway row of the same task shows the plain
 # file-time age (falsify: put the marker into ageSeconds or fmtAge).
-assert_row "$frame_age" '^│ working +- +pr-nodate +fixing the flaky test +acme/api +main +2d │$' "In flight shows the same status-log age unmarked"
+assert_row "$frame_age" '^│ working +- +pr-nodate +Cache the geocoder · fixing the flaky test +acme/api +main +2d │$' "Underway shows the same status-log age unmarked"
 # --no-prs: every recorded row falls back (falsify: skip the marker when prs.enabled is false).
 frame_age_np=$(render pr-ages.json --no-prs) || fail "pr-ages --no-prs: render exited non-zero"
 assert_contains "$frame_age_np" "My PRs (6)" "--no-prs: the six recorded PRs"
@@ -1815,7 +1967,7 @@ assert_row "$frame_st" '^│ unlisted +- +st-unlisted +https://github.com/acme/a
 # The 12-hour window (falsify: change TERMINAL_WINDOW_SECONDS, or compare with <= in insideWindow).
 assert_row "$frame_st" '^│ passing +MERGED +api#207 +Fix the flaky geocoder test +release/2026.09 +2d │$' "a PR merged 11h59m before now is still listed"
 assert_not_contains "$frame_st" "Split the address migration" "a PR merged 12h01m before now is gone, and its done task with it"
-assert_no_row "$frame_st" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]* st-old ' "the done task of the PR outside the window has no review row (its In flight row stays)"
+assert_no_row "$frame_st" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]* st-old ' "the done task of the PR outside the window has no review row (its Underway row stays)"
 assert_not_contains "$frame_st" "Rename the widget table" "an open PR of a done task is not listed: a done task's PR shows only once terminal (falsify: drop the rec.done check in reviewRows)"
 assert_not_contains "$frame_st" "Abandoned spike" "a closed PR with no close time cannot be placed in the window and is dropped"
 assert_contains "$frame_st" "My PRs (9)" "the pane count is the rows shown after the window filter (falsify: count candidate_prs instead of rows)"
@@ -1834,9 +1986,9 @@ assert_before "$frame_st" '^│ passing +MERGED +st-merged' '^│ passing +MERGE
 assert_widths "$frame_st" 160 "pr-status frame lines are 160 columns"
 # enter still opens a row's PR, a finished one included, through the fake opener only (falsify: drop
 # url from the review makeRow calls).
-frame_o=$(render_open pr-status.json "tab,enter") || fail "pr-status open first: render exited non-zero"
+frame_o=$(render_open pr-status.json "tab,tab,enter") || fail "pr-status open first: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/201" "enter on the DRAFT row opens its PR"
-frame_o=$(render_open pr-status.json "tab,j,j,j,j,j,j,j,enter") || fail "pr-status open merged: render exited non-zero"
+frame_o=$(render_open pr-status.json "tab,tab,j,j,j,j,j,j,j,enter") || fail "pr-status open merged: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/206" "enter on a MERGED row still opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/api/pull/206 (st-merged)" "the notice names the task of the merged PR"
 # --no-prs: the recorded PRs of unfinished tasks only, STATUS unknown, as before (falsify: list a done
@@ -1858,7 +2010,7 @@ assert_row "$frame_st_90" '^│ failing +IN REVIEW +api#203 +Retry on 429 +1h �
 assert_widths "$frame_st_90" 90 "90-column pr-status frame lines are 90 columns"
 frame_st_70=$(render pr-status.json --cols 70 --rows 30) || fail "pr-status 70: render exited non-zero"
 assert_row "$frame_st_70" '^ STATE +ID +WHAT +HOME *$' "70 columns: the list shares one header across panes"
-assert_row "$frame_st_70" '^ pending +st-draft +Rework the geocoder cache with a two-t… +main *$' "70 columns: a review row in the shared list (HOME is 4 wide for main and ends the line; the shared STATE column is as wide as the widest state word on the frame, IN REVIEW, so a fixture task reading awaiting merge would narrow WHAT again)"
+assert_row "$frame_st_70" '^ pending +st-draft +Rework the geocoder cache with a two-ti… +main *$' "70 columns: a review row in the shared list (HOME is 4 wide for main and ends the line; the shared STATE column is as wide as the widest state word on the frame, IN REVIEW, so a fixture task reading awaiting merge would narrow WHAT again)"
 assert_not_contains "$frame_st_70" "DRAFT" "70 columns: the list has no STATUS column"
 assert_widths "$frame_st_70" 70 "70-column pr-status frame lines are 70 columns"
 
@@ -1866,15 +2018,15 @@ assert_widths "$frame_st_70" 70 "70-column pr-status frame lines are 70 columns"
 # tests/fixtures/review-rows.json: parked tasks with a PR in the main home and in a secondmate
 # ledger (PR 21's merge state is BLOCKED with a review required, the merge box of a PR that only
 # waits for its review; the others are CLEAN), a task repairing its PR, one on its first pass, a
-# closed and a merged PR inside the 12-hour tail, and all four Needs you tags.
+# closed and a merged PR inside the 12-hour tail, and all four Captain's Call tags.
 frame_rv=$(render review-rows.json) || fail "review-rows: render exited non-zero"
 frame_rv_x=$(render review-rows.json --expand all) || fail "review-rows --expand all: render exited non-zero"
 frame_rv_np=$(render review-rows.json --no-prs) || fail "review-rows --no-prs: render exited non-zero"
-# Needs you: one review row per task parked for the captain whose PR GitHub reports open and
+# Captain's Call: one review row per task parked for the captain whose PR GitHub reports open and
 # mergeable, WHAT `<repo>#<num> · <title> · checks <state>`, AGE the time since the task parked
 # with no ~ (falsify: drop the done branch of parkedWithPr, the checks suffix in reviewRow, or
 # set ageFallback true for a ready PR).
-assert_contains "$frame_rv" "Needs you (6)" "review-rows: blocked, decide, hold and three review rows"
+assert_contains "$frame_rv" "Captain's Call (6)" "review-rows: blocked, decide, hold and three review rows"
 assert_row "$frame_rv" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter · checks passing +acme/api +main +10m │$' "a done task's open PR that GitHub marks BLOCKED with a review required is a review row reading ready, with checks passing and a plain age (falsify: treat BLOCKED as not ready in prReadiness)"
 assert_row "$frame_rv" '^│ review +#22 +ship-paused +acme/api#22 · Rate-limit headers on every list endpoint · checks pending +acme/api +main +25m │$' "a task firstmate paused on the captain counts as parked (falsify: drop paused from PARKED_STATES)"
 assert_row "$frame_rv" '^│ review +#61 +child-ready +acme/etl#61 · ETL: nightly loader · checks passing +acme/etl +delegate-a +40m │$' "a secondmate child parked with the PR its ledger's contributions.captain names is a review row labelled with its home, without --all-homes-needs (falsify: gate the ledger loop behind opts.allHomesNeeds, or read active_children alone)"
@@ -1884,7 +2036,7 @@ assert_no_row "$frame_rv" '^│ review +#24 ' "a PR closed 1h ago, inside the ta
 assert_no_row "$frame_rv" '^│ review +#25 ' "a PR merged 2h ago, inside the tail, yields no review row"
 assert_no_row "$frame_rv" '^│ review +#31 ' "a working task on its first pass has no review row (falsify: let parkedForCaptain accept working)"
 assert_not_contains "$frame_rv" "merge?" "the merge? row is gone: the review row replaces it (falsify: push the old merge? row in needsRows)"
-assert_count "$frame_rv" "#21 " 1 "ship-ready yields exactly one Needs you row: never a merge? and a review row for one task"
+assert_count "$frame_rv" "#21 " 1 "ship-ready yields exactly one Captain's Call row: never a merge? and a review row for one task"
 # The sort: blocked, decide, hold, review (falsify: reorder `order` in needsRows).
 assert_before "$frame_rv" '^│ blocked +- +scout-block' '^│ decide +cache-ttl' "review-rows: blocked sorts before decide"
 assert_before "$frame_rv" '^│ decide +cache-ttl' '^│ hold +- +hold-vendor' "review-rows: decide sorts before hold"
@@ -1909,21 +2061,21 @@ assert_before "$frame_rv" '^│ pending +READY +ship-paused' '^│ pending +IN R
 assert_before "$frame_rv" '^│ pending +IN REVIEW +ship-first' '^│ passing +REPAIRING +etl#62' "IN REVIEW sorts before REPAIRING"
 assert_before "$frame_rv" '^│ passing +REPAIRING +ship-dirty' '^│ none +CLOSED +ship-closed' "REPAIRING sorts before CLOSED"
 assert_before "$frame_rv" '^│ none +CLOSED +ship-closed' '^│ passing +MERGED +ship-merged' "CLOSED sorts before MERGED"
-# In flight: `repairing PR` for a task with a PR that is working again after a done line in its
+# Underway: `repairing PR` for a task with a PR that is working again after a done line in its
 # status log, `working` for one on its first pass; the same for a secondmate child through its
 # ledger's PR and its home's status log (falsify: drop prStateTag from mainTaskRow or
 # ledgerChildRows, or read the current state alone).
-assert_row "$frame_rv" '^│ repairing PR +working +ship-dirty +merging main into the branch +acme/api +main +5m │$' "In flight reads repairing PR for the task working again on its PR"
-assert_row "$frame_rv" '^│ working +working +ship-first +waiting for the Test workflow +acme/widgets +main +1h │$' "a first-pass worker with a PR still reads working"
-assert_row "$frame_rv" '^│ paused +idle +ship-paused +awaiting captain approve-and-label +acme/api +main +25m │$' "a paused task keeps its own state word"
-assert_row "$frame_rv" '^│ awaiting merge +done +ship-ready +PR https://github.com/acme/api/pull/21 checks green +acme/api +main +10m │$' "awaiting merge is kept for the done task with an unmerged PR"
-assert_row "$frame_rv_x" '^│ repairing PR +working +↳ child-repair +resolving the conflict with main +acme/etl +delegate-a +2m │$' "the expanded group lists the repairing child as repairing PR"
-assert_row "$frame_rv_x" '^│ repairing PR +1 live +▾ delegate-a ' "the group row takes the repairing child's state, ranked with working"
+assert_row "$frame_rv" '^│ repairing PR +working +ship-dirty +Bulk lookup endpoint · merging main into the branch +acme/api +main +5m │$' "Underway reads repairing PR for the task working again on its PR"
+assert_row "$frame_rv" '^│ working +working +ship-first +Widget cache warm-up · waiting for the Test workflow +acme/widgets +main +1h │$' "a first-pass worker with a PR still reads working"
+assert_row "$frame_rv" '^│ paused +idle +ship-paused +Rate-limit headers on every list endpoint · awaiting captain approve-and-label +acme/api +main +25m │$' "a paused task keeps its own state word"
+assert_row "$frame_rv" '^│ awaiting merge +done +ship-ready +Retry on 429 with jitter · PR https://github.com/acme/api/pull/21 checks green +acme/api +main +10m │$' "awaiting merge is kept for the done task with an unmerged PR"
+assert_row "$frame_rv" '^│ repairing PR +working +child-repair +resolving the conflict with main +acme/etl +delegate-a +2m │$' "a delegate's one repairing child draws directly as repairing PR, HOME naming the home (falsify: drop childRepairing from ledgerChildRows)"
+assert_no_row "$frame_rv_x" '▾ delegate-a' "a home with one worker has no group row to expand"
 assert_before "$frame_rv" '^│ repairing PR +working +ship-dirty' '^│ blocked +blocked +scout-block' "in flight: repairing PR sorts with working, before blocked (falsify: drop repairing PR from INFLIGHT_ORDER)"
 # Without PR data the rows fall back to the task state: every parked task with a PR lists,
 # finished or not, with the ~ age mark and no checks word; the repairing state still comes from
 # the status log (falsify: drop the fallback in reviewRow, or make isRepairing need the fetch).
-assert_contains "$frame_rv_np" "Needs you (8)" "--no-prs: five review rows on the task state alone"
+assert_contains "$frame_rv_np" "Captain's Call (8)" "--no-prs: five review rows on the task state alone"
 assert_row "$frame_rv_np" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter +acme/api +main +10m~ │$' "--no-prs: the review row lists with the fallback ~ and no checks word"
 assert_row "$frame_rv_np" '^│ review +#24 +ship-closed +acme/api#24 · Abandoned retry budget spike +acme/api +main +2h~ │$' "--no-prs: a closed PR the board cannot see as closed lists on the task state, marked ~"
 assert_row "$frame_rv_np" '^│ review +#61 +child-ready +acme/etl#61 +acme/etl +delegate-a +40m~ │$' "--no-prs: the child row has no title to show and reads the label alone"
@@ -1933,9 +2085,9 @@ frame_rv_nc=$(render "$(variant review-rows.json prs-no-carry '{"prs": {"candida
 assert_row "$frame_rv_nc" '^│ review +#21 +ship-ready +acme/api#21 · Retry on 429 with jitter +acme/api +main +10m~ │$' "a fetch that does not carry the PR falls back to the task state with ~ (falsify: return null from reviewRow when fetched.get misses)"
 # enter on a review row opens its PR through the injected opener, the child's included
 # (falsify: drop url from reviewRow).
-frame_o=$(render_open review-rows.json "tab,j,j,j,enter") || fail "review-rows open: render exited non-zero"
+frame_o=$(render_open review-rows.json "j,j,j,enter") || fail "review-rows open: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/21" "enter on the first review row opens its PR"
-frame_o=$(render_open review-rows.json "tab,j,j,j,j,j,enter") || fail "review-rows open child: render exited non-zero"
+frame_o=$(render_open review-rows.json "j,j,j,j,j,enter") || fail "review-rows open child: render exited non-zero"
 assert_opened "https://github.com/acme/etl/pull/61" "enter on the secondmate child's review row opens its PR"
 assert_widths "$frame_rv" 160 "review-rows frame lines are 160 columns"
 
@@ -1953,7 +2105,7 @@ assert_row "$frame_mp" '^│ passing +IN REVIEW +ship-alpha +Add the widget cach
 assert_row "$frame_mp" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +1m~ │$' "my-prs: a recorded PR the fetch did not return keeps the - row with the file-time age"
 assert_row "$frame_mp" '^│ none +CLOSED +api#10 +Old spike +main +8h │$' "my-prs: the identity's PR closed 2h ago is listed as CLOSED"
 assert_row "$frame_mp" '^│ passing +MERGED +api#9 +Bump the retry budget +main +6h │$' "my-prs: the identity's PR merged 30m ago is listed as MERGED"
-assert_count "$frame_mp" " api#8 " 1 "my-prs: a toreview row draws once on the board (its api#8 id; the Needs you review row of ship-gamma repeats the title, not the id)"
+assert_count "$frame_mp" " api#8 " 1 "my-prs: a toreview row draws once on the board (its api#8 id; the Captain's Call review row of ship-gamma repeats the title, not the id)"
 assert_before "$frame_mp" "Teammates' PRs \(1\)" '^│ failing +IN REVIEW +api#8 .*Retry on 429' "my-prs: that one row is under the Teammates' PRs header, not in My PRs"
 assert_before "$frame_mp" '^│ passing +IN REVIEW +dotfiles#5' '^│ passing +IN REVIEW +ship-alpha' "my-prs: inside IN REVIEW the 3h-old PR sorts before the 5h-old one"
 assert_before "$frame_mp" '^│ passing +IN REVIEW +ship-alpha' '^│ unlisted +- +ship-gamma' "my-prs: the unlisted recorded PR sorts after the open rows"
@@ -1978,7 +2130,7 @@ frame_tr=$(render to-review.json) || fail "to-review: render exited non-zero"
 assert_contains "$frame_tr" "┌─ [4] Teammates' PRs (7) ─" "to-review: seven rows under key 4"
 assert_contains "$frame_tr" "┌─ [3] My PRs (1) ─" "to-review: the one mine row stays in My PRs"
 assert_before "$frame_tr" "My PRs \(1\)" "Teammates' PRs \(7\)" "to-review: the two PR panes are adjacent, My PRs first"
-assert_before "$frame_tr" "In flight \(0\)" "My PRs \(1\)" "to-review: In flight, empty here, still leads the two PR panes"
+assert_before "$frame_tr" "Underway \(0\)" "My PRs \(1\)" "to-review: Underway, empty here, still leads the two PR panes"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +AUTHOR +TITLE +BASE +AGE │$' "to-review: the seven columns, AUTHOR between ID and TITLE"
 assert_row "$frame_tr" '^│ CHECKS +STATUS +ID +TITLE +BASE +AGE │$' "to-review: My PRs keeps its six columns and draws no AUTHOR"
 assert_count "$frame_tr" "AUTHOR" 1 "to-review: AUTHOR heads one pane only"
@@ -2021,7 +2173,7 @@ frame_tr=$(render to-review.json --keys "4") || fail "to-review 4: render exited
 assert_not_contains "$frame_tr" "Teammates' PRs (" "4 hides Teammates' PRs"
 assert_contains "$frame_tr" "· panes hidden: 4" "4: the title lists the fourth pane"
 frame_o=$(render_open to-review.json "tab,tab,enter") || fail "to-review enter: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/16" "two tabs from Needs you land on Teammates' PRs, the pane after My PRs, and enter opens its first row, the DRAFT PR"
+assert_opened "https://github.com/acme/api/pull/16" "two tabs from Captain's Call land on Teammates' PRs, the pane after My PRs, and enter opens its first row, the DRAFT PR"
 assert_contains "$frame_o" "opened https://github.com/acme/api/pull/16 (api#16)" "to-review: the footer names the opened PR"
 frame_o=$(render_open to-review.json "tab,tab,j,j,j,j,j,j,enter") || fail "to-review enter merged: render exited non-zero"
 assert_opened "https://github.com/acme/etl/pull/14" "enter on the MERGED Teammates' PRs row still opens its PR"
@@ -2031,8 +2183,8 @@ frame_tr=$(render to-review.json --view-state "$vs_tr" --keys "tab,tab,x") || fa
 assert_contains "$frame_tr" "Teammates' PRs (6, 1 hidden)" "x hides a Teammates' PRs row and the header counts it"
 assert_contains "$frame_tr" "hidden api#16" "x names the hidden Teammates' PRs row"
 assert_file_contains "$vs_tr" '"toreview:main:api#16"' "the hidden Teammates' PRs row is keyed under the toreview pane id"
-# Mouse: at 160x44 In flight (title 1, empty, and it takes the spare rows: lib/layout.mjs
-# SPARE_PRIORITY), Needs you (title 17) and My PRs (title 21) sit above it, so Teammates' PRs' title is
+# Mouse: at 160x44 Underway (title 1, empty, and it takes the spare rows: lib/layout.mjs
+# SPARE_PRIORITY), Captain's Call (title 17) and My PRs (title 21) sit above it, so Teammates' PRs' title is
 # line 25, its column header 26 and its rows 27-33; a double-click on its second row opens the PR as
 # enter does (falsify: drop the row zones for the fourth pane).
 frame_m=$(render_mouse to-review.json "dblclick:30,28") || fail "to-review dblclick: render exited non-zero"
@@ -2130,7 +2282,7 @@ frame_tr=$(render "$(variant to-review.json source-board-config '{"prs": {"sourc
 assert_row "$frame_tr" "^ PR source +board: the board's own GitHub fetch \\(config\\) +\$" "Settings: a board source the file set reads (config)"
 # The help names the sixth pane and its key (falsify: change the 1 - 6 lines in HELP_LINES).
 frame_tr=$(render to-review.json --keys "?") || fail "to-review help: render exited non-zero"
-assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] In flight" "help overlay documents 1-6"
+assert_contains "$frame_tr" "1 - 6        show or hide a pane; each pane title carries its key: [1] Captain's Call" "help overlay documents 1-6"
 assert_contains "$frame_tr" "[4] Teammates' PRs" "help overlay lists the Teammates' PRs badge"
 assert_row "$frame_tr" '^ j/k move  tab pane  enter open/focus/view  l/h expand  x hide  H hidden  1-6 panes ' "the footer reads 1-6 panes"
 
@@ -2472,7 +2624,7 @@ assert_row "$frame_r" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache
 assert_row "$frame_r" '^│ unlisted +- +ship-gamma +https://github.com/acme/api/pull/7 · checks: not fetched +- +- │$' "live: a recorded PR the lookup answered null stays unlisted"
 assert_row "$frame_r" '^│ passing +MERGED +api#9 +Bump the retry budget +main +[0-9]+d │$' "live: the identity's PR merged just now is listed as MERGED"
 assert_no_row "$frame_r" 'api#10|Old spike' "live: a PR closed in 2020 is outside the 12-hour window and dropped by the fetch"
-assert_no_row "$frame_r" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]*(Rename the widget table|widgets#30)' "live: ship-old's PR merged in 2020 is dropped by the window although the lookup returned it (its Landed and In flight rows stay)"
+assert_no_row "$frame_r" '^│ (passing|failing|pending|none|unlisted|PR) +[^│]*(Rename the widget table|widgets#30)' "live: ship-old's PR merged in 2020 is dropped by the window although the lookup returned it (its Recently Landed and Underway rows stay)"
 assert_before "$frame_r" '^│ pending +IN REVIEW +api#12' '^│ passing +MERGED +api#9' "live: MERGED sorts after the open PRs"
 assert_contains "$frame_r" "Teammates' PRs (5)" "live: Teammates' PRs counts its five rows"
 assert_row "$frame_r" '^│ passing +IN REVIEW +portal#120 +teammate +Portal: index the parcel table +main +[0-9]+d │$' "live: the portal PR with the ready-to-merge label is in Teammates' PRs (a configured repository searched with no fleet work in it), its author from the GraphQL node under AUTHOR"
@@ -2483,7 +2635,7 @@ assert_row "$frame_r" '^│ passing +APPROVED +widgets#45 +teammate +Widget: app
 assert_row "$frame_r" '^│ passing +MERGED +etl#14 +teammate +ETL: merged after review +main +[0-9]+d │$' "live: a reviewed PR merged just now is in Teammates' PRs as MERGED"
 assert_count "$frame_r" "Retry budget: ask the API team" 1 "live: the identity's own PR that asked its team is in My PRs only, never in Teammates' PRs"
 assert_before "$frame_r" "My PRs \(6\)" "Teammates' PRs \(5\)" "live: Teammates' PRs is drawn right below My PRs"
-assert_before "$frame_r" "In flight \(" "My PRs \(6\)" "live: In flight leads the two PR panes"
+assert_before "$frame_r" "Underway \(" "My PRs \(6\)" "live: Underway leads the two PR panes"
 frame_r=$(render_live --keys "r" --prs --rows 60) || fail "refresh --prs: render exited non-zero"
 assert_fetch_log "$expected_live" "--prs is a no-op: the same calls (falsify: make --prs disable or double the fetch)"
 # --no-prs: no gh call at all, not even for the identity; both panes read the off state (falsify:
@@ -2642,7 +2794,7 @@ frame_i=$(FM_BOARD_TEST_GH_LOGIN_FAIL=1 render_identity "$SCRATCH/ident-none") |
 if grep -q "api graphql" "$FETCH_LOG"; then fail "identity unknown: a search ran anyway: $(cat "$FETCH_LOG")"; else pass; fi
 assert_count "$frame_i" "identity unknown: see Settings (.)" 2 "identity unknown: one row in each PR pane (falsify: drop identityRow from mineRows or toReviewRows)"
 assert_row "$frame_i" '^│ - +- +- +identity unknown: see Settings \(\.\) +- +- │$' "identity unknown: the row reads across the six columns"
-assert_no_row "$frame_i" '^│ (unlisted|PR) +- +ship-gamma' "identity unknown: My PRs lists no recorded PR either, since nothing was fetched (its Needs you and In flight rows stay)"
+assert_no_row "$frame_i" '^│ (unlisted|PR) +- +ship-gamma' "identity unknown: My PRs lists no recorded PR either, since nothing was fetched (its Captain's Call and Underway rows stay)"
 frame_i=$(FM_BOARD_TEST_GH_LOGIN_FAIL=1 render_identity "$SCRATCH/ident-none" --install-root "$SCRATCH/nowhere" --keys "." --cols 260) || fail "identity none settings: render exited non-zero"
 assert_row "$frame_i" "^ Identity +identity unknown: set identity.github_login in $SCRATCH/ident-none/fm-board/config.json, or run gh auth login +\$" "Settings: the unknown identity names the config file and the gh login"
 assert_contains "$frame_i" "tried: config: identity.github_login not set; gh: exit 1: fake gh: not logged in to github.com; git: github.user not set" "Settings: the unknown identity lists what each rung answered"
@@ -3042,8 +3194,8 @@ assert_opened "https://github.com/acme/api/pull/8" ". closes the page with the s
 rm -f "$OPENER_LOG"
 frame_o=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render populated.json --install-root "$INSTALL" --keys "tab,tab,j,.,q,enter" --opener-cmd "$FAKE_OPENER") || fail "settings q: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/8" "q closes the page like the help overlay, and the board is not quit"
-frame_k=$(render populated.json --install-root "$INSTALL" --keys "j,j,j,j,l,.,escape") || fail "settings expanded: render exited non-zero"
-assert_row "$frame_k" '^│ decide +1 live +!▾ delegate-a ' "a group expanded before the page opened is still expanded after it closes"
+frame_k=$(render populated.json --install-root "$INSTALL" --keys "tab,j,j,l,.,escape") || fail "settings expanded: render exited non-zero"
+assert_row "$frame_k" '^│ working +1 live +!▾ delegate-a ' "a group expanded before the page opened is still expanded after it closes"
 # . works from the landing page too and esc returns there (falsify: drop . from LANDING_KEYS).
 frame_s=$(render populated.json --install-root "$INSTALL" --keys "1,2,3,4,5,6,.") || fail "settings landing: render exited non-zero"
 assert_row "$frame_s" '^ Settings +$' ". opens the page from the landing page"
@@ -3217,7 +3369,7 @@ assert_count "$frame_c" "⠋ loading GitHub checks…" 1 "fetching with nothing 
 assert_count "$frame_c" "⠋ loading GitHub review requests…" 1 "fetching with nothing fetched: Teammates' PRs spins on its own fetch"
 assert_count "$frame_c" "(updating)" 0 "fetching with nothing fetched: a spinning pane carries no marker"
 assert_count "$frame_c" "loading fleet snapshot" 0 "fetching alone: the fleet panes do not spin"
-assert_row "$frame_c" '^│ no workers in flight +│$' "fetching alone: In flight reads its empty text"
+assert_row "$frame_c" '^│ nothing is underway +│$' "fetching alone: Underway reads its empty text"
 assert_no_row "$frame_c" '^ firstmate-tui .*refreshing' "fetching alone: the title line does not read refreshing"
 frame_c=$(render "$(variant populated.json fetching-off '{"refresh": {"fetching": false, "next_in": 18}}')") || fail "fetching off: render exited non-zero"
 assert_count "$frame_c" "(updating)" 0 "fetching false: no marker"
@@ -3249,10 +3401,10 @@ assert_row "$frame_f" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache
 frame_f=$(render "$(variant populated.json snap-failed '{"snapshot_error": "exit 1", "refresh": {"failed_ago": 5, "next_in": 25, "failed": "snapshot: exit 1"}}')") || fail "snapshot failed: render exited non-zero"
 assert_row "$frame_f" '^ firstmate-tui · /fixture/firstmate · 3 homes +refresh failed 5s ago, retrying in 25s $' "snapshot failed: the title line names the failure"
 assert_count "$frame_f" "(stale)" 4 "snapshot failed: four panes are marked stale"
-assert_contains "$frame_f" "┌─ [2] Needs you (4) (stale) ─" "snapshot failed: Needs you is stale"
-assert_contains "$frame_f" "┌─ [1] In flight (7) (stale) ─" "snapshot failed: In flight is stale"
-assert_contains "$frame_f" "┌─ [5] Findings (3) (stale) ─" "snapshot failed: Findings is stale"
-assert_contains "$frame_f" "┌─ [6] Landed (4) (stale) ─" "snapshot failed: Landed is stale"
+assert_contains "$frame_f" "┌─ [1] Captain's Call (6) (stale) ─" "snapshot failed: Captain's Call is stale"
+assert_contains "$frame_f" "┌─ [2] Underway (6) (stale) ─" "snapshot failed: Underway is stale"
+assert_contains "$frame_f" "┌─ [5] Charted Next (1) (stale) ─" "snapshot failed: Charted Next is stale"
+assert_contains "$frame_f" "┌─ [6] Recently Landed (5) (stale) ─" "snapshot failed: Recently Landed is stale"
 assert_contains "$frame_f" "┌─ [3] My PRs (3) ─" "snapshot failed: My PRs, whose fetch succeeded, is not stale"
 assert_contains "$frame_f" "┌─ [4] Teammates' PRs (0) ─" "snapshot failed: Teammates' PRs is not stale either"
 # The failure text stays in the facts but the label keeps the spec's words: a failure with no age given
@@ -3310,19 +3462,19 @@ assert_line() {
 frame_ld=$(render cold-start.json) || fail "cold start: render exited non-zero"
 tags_ld=$(render cold-start.json --tags) || fail "cold start --tags: render exited non-zero"
 assert_row "$frame_ld" '^ firstmate-tui · /fixture/firstmate · 1 home +refreshing… · herdr disconnected \(--no-herdr\) $' "cold start: the title line reads refreshing… (the block that puts the panes into the loading state)"
-assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start: Needs you, In flight, Findings and Landed each spin and name the fleet snapshot"
+assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start: Captain's Call, Underway, Charted Next and Recently Landed each spin and name the fleet snapshot"
 assert_count "$frame_ld" "⠋ loading GitHub checks…" 1 "cold start: My PRs alone names the GitHub checks"
-assert_line "$frame_ld" 22 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Needs you's first body line is the spinner"
+assert_line "$frame_ld" 4 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Captain's Call's first body line, at the top of the frame, is the spinner"
 assert_line "$frame_ld" 26 '^│ ⠋ loading GitHub checks… +│$' "cold start: My PRs' first body line is the spinner"
-assert_line "$frame_ld" 4 '^│ ⠋ loading fleet snapshot… +│$' "cold start: In flight's first body line, at the top of the frame, is the spinner"
-assert_line "$frame_ld" 34 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Findings' first body line is the spinner"
-assert_line "$frame_ld" 38 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Landed's first body line is the spinner"
+assert_line "$frame_ld" 8 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Underway's first body line is the spinner"
+assert_line "$frame_ld" 34 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Charted Next's first body line is the spinner"
+assert_line "$frame_ld" 38 '^│ ⠋ loading fleet snapshot… +│$' "cold start: Recently Landed's first body line is the spinner"
 assert_count "$frame_ld" "⠋ loading GitHub review requests…" 1 "cold start: Teammates' PRs alone names the GitHub review requests (falsify: name one source for both PR panes)"
 assert_line "$frame_ld" 30 '^│ ⠋ loading GitHub review requests… +│$' "cold start: Teammates' PRs' first body line, right under My PRs, is its own spinner"
 for empty_text in "no captain decisions, holds or blocked workers" "no pull requests of yours" "no workers in flight" "no scout reports" "nothing landed yet" "no pull requests waiting for your review"; do
   assert_not_contains "$frame_ld" "$empty_text" "cold start: the spinner replaces the empty text (falsify: draw the empty text beside the loading line)"
 done
-assert_contains "$frame_ld" "┌─ [1] In flight (0) ─" "cold start: the headers count zero rows and carry no stale marker"
+assert_contains "$frame_ld" "┌─ [2] Underway (0) ─" "cold start: the headers count zero rows and carry no stale marker"
 assert_count "$frame_ld" "(stale)" 0 "cold start: nothing has failed, so nothing is stale"
 assert_widths "$frame_ld" 120 "cold start: every line is still 120 columns"
 assert_contains "$tags_ld" "{blue-fg}⠋ loading fleet snapshot…" "cold start --tags: the spinner line is dimmed like the empty text (falsify: give it the row style)"
@@ -3362,11 +3514,11 @@ assert_widths "$frame_ld" 70 "narrow cold start identity pending: every line is 
 frame_ld=$(render "$(variant populated.json snap-landed '{"prs": null, "refresh": {"refreshing": true}}')") || fail "snapshot landed: render exited non-zero"
 assert_count "$frame_ld" "loading" 2 "snapshot landed: the two PR panes spin and nothing else"
 assert_row "$frame_ld" '^│ ⠋ loading GitHub review requests… +│$' "snapshot landed: Teammates' PRs spins on its own fetch"
-assert_line "$frame_ld" 23 '^│ ⠋ loading GitHub checks… +│$' "snapshot landed: My PRs' first body line is the spinner"
+assert_line "$frame_ld" 24 '^│ ⠋ loading GitHub checks… +│$' "snapshot landed: My PRs' first body line is the spinner"
 assert_row "$frame_ld" '^│ PR +- +ship-alpha +https://github.com/acme/widgets/pull/41 · checks: fetching +- +5m~ │$' "snapshot landed: the recorded PR rows stay under the spinner"
 assert_contains "$frame_ld" "┌─ [3] My PRs (2) ─" "snapshot landed: the header counts the recorded rows"
-assert_contains "$frame_ld" "┌─ [2] Needs you (4) ─" "snapshot landed: Needs you has its rows and no spinner"
-assert_row "$frame_ld" '^│ working +working +ship-alpha +harness busy \(claude-hook\)' "snapshot landed: In flight's rows are drawn"
+assert_contains "$frame_ld" "┌─ [1] Captain's Call (6) ─" "snapshot landed: Captain's Call has its rows and no spinner"
+assert_row "$frame_ld" '^│ working +working +ship-alpha +Add the widget cache · harness busy \(claude-hook\)' "snapshot landed: Underway's rows are drawn"
 # --no-prs: My PRs is never loading; it shows the off state, and a cold start's empty
 # review pane reads the empty text while the other four spin (falsify: drop the prs.enabled test
 # from paneLoadingSource).
@@ -3404,11 +3556,11 @@ if printf '%s\n' "$out" | grep -Fq "refresh.loading_frame is not a whole number:
 # drop the loading entry from flattenRows).
 frame_ld=$(render "$(variant cold-start.json narrow '{"cols": 70, "rows": 24}')") || fail "cold start narrow: render exited non-zero"
 assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "narrow cold start: the four snapshot sections spin"
-assert_line "$frame_ld" 3 '^── \[1\] In flight \(0\) ─+$' "narrow cold start: the first section header is In flight"
+assert_line "$frame_ld" 3 '^── \[1\] Captain.s Call \(0\) ─+$' "narrow cold start: the first section header is Captain's Call"
 assert_line "$frame_ld" 4 '^ ⠋ loading fleet snapshot… +$' "narrow cold start: the spinner line follows the section header"
 assert_line "$frame_ld" 8 '^ ⠋ loading GitHub checks… +$' "narrow cold start: My PRs' line names the GitHub checks"
 assert_line "$frame_ld" 10 '^ ⠋ loading GitHub review requests… +$' "narrow cold start: Teammates' PRs' line names the review requests"
-assert_not_contains "$frame_ld" "no workers in flight" "narrow cold start: no empty text beside the spinner"
+assert_not_contains "$frame_ld" "nothing is underway" "narrow cold start: no empty text beside the spinner"
 assert_widths "$frame_ld" 70 "narrow cold start: every line is 70 columns"
 # A failed first fetch shows the failure text, not the spinner: a PR fetch that failed before any
 # fetch landed leaves the recorded rows reading checks: fetch failed under a stale header, and a
@@ -3422,22 +3574,22 @@ assert_row "$frame_ld" '^│ PR +- +ship-gamma +https://github.com/acme/api/pull
 frame_ld=$(render "$(variant cold-start.json snap-first-failed '{"snapshot_error": "exit 1"}')") || fail "snapshot first fetch failed: render exited non-zero"
 assert_count "$frame_ld" "loading fleet snapshot" 0 "snapshot first fetch failed: the snapshot panes do not spin"
 assert_count "$frame_ld" "(stale)" 4 "snapshot first fetch failed: the four snapshot panes are stale"
-assert_line "$frame_ld" 22 '^│ no captain decisions, holds or blocked workers +│$' "snapshot first fetch failed: Needs you reads its empty text"
+assert_line "$frame_ld" 4 '^│ nothing needs your action right now +│$' "snapshot first fetch failed: Captain's Call reads its empty text"
 assert_line "$frame_ld" 26 '^│ ⠋ loading GitHub checks… +│$' "snapshot first fetch failed: My PRs still spins on its own fetch"
-# Herdr: once the snapshot has landed, In flight names herdr while the link is still connecting,
+# Herdr: once the snapshot has landed, Underway names herdr while the link is still connecting,
 # above the rows it already has, and only while a refresh runs; on a cold start the snapshot
 # comes first (falsify: drop the herdr branch from paneLoadingSource, or move it above the
 # snapshot test).
 frame_ld=$(render "$(variant populated.json herdr-connecting '{"herdr": {"state": "connecting"}, "refresh": {"refreshing": true}}')") || fail "herdr connecting: render exited non-zero"
 assert_count "$frame_ld" "loading" 1 "herdr connecting: one spinner on the board"
-assert_row "$frame_ld" '^│ ⠋ loading herdr… +│$' "herdr connecting: In flight names herdr"
-assert_before "$frame_ld" "In flight \(7\)" "⠋ loading herdr…" "herdr connecting: the line is in In flight"
+assert_row "$frame_ld" '^│ ⠋ loading herdr… +│$' "herdr connecting: Underway names herdr"
+assert_before "$frame_ld" "Underway \(6\)" "⠋ loading herdr…" "herdr connecting: the line is in Underway"
 assert_before "$frame_ld" "⠋ loading herdr…" "working +working +ship-alpha" "herdr connecting: the rows follow the spinner line"
-assert_contains "$frame_ld" "┌─ [1] In flight (7) ─" "herdr connecting: the header still counts the rows"
+assert_contains "$frame_ld" "┌─ [2] Underway (6) ─" "herdr connecting: the header still counts the rows"
 frame_ld=$(render "$(variant populated.json herdr-connecting-idle '{"herdr": {"state": "connecting"}}')") || fail "herdr connecting idle: render exited non-zero"
 assert_count "$frame_ld" "loading" 0 "herdr connecting with no refresh running: no spinner"
 frame_ld=$(render "$(variant cold-start.json cold-connecting '{"herdr": {"state": "connecting", "agents": []}}')") || fail "cold start connecting: render exited non-zero"
-assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start connecting: In flight names the snapshot first"
+assert_count "$frame_ld" "⠋ loading fleet snapshot…" 4 "cold start connecting: Underway names the snapshot first"
 assert_not_contains "$frame_ld" "loading herdr" "cold start connecting: herdr is not named before the snapshot lands"
 
 # ------------------------------------------------------- state cache
@@ -3462,12 +3614,12 @@ fx_cc=$(variant cold-start.json cached '{"now": "2026-09-16T12:12:00Z"}')
 frame_c=$(render "$fx_cc" --cache "$CACHE") || fail "cache cold start: render exited non-zero"
 assert_row "$frame_c" '^ firstmate-tui · /fixture/firstmate · 3 homes +refreshing… · herdr disconnected \(--no-herdr\) $' "cached launch: the title line reads refreshing… over the cached data and counts the cached homes"
 assert_count "$frame_c" "(cached 12m ago)" 6 "cached launch: all six pane titles carry the age of the cached data"
-assert_contains "$frame_c" "┌─ [2] Needs you (4) (cached 12m ago) ─" "cached launch: Needs you counts its cached rows and carries the marker"
+assert_contains "$frame_c" "┌─ [1] Captain's Call (6) (cached 12m ago) ─" "cached launch: Captain's Call counts its cached rows and carries the marker"
 assert_contains "$frame_c" "┌─ [3] My PRs (3) (cached 12m ago) ─" "cached launch: My PRs draws the cached PR rows"
 assert_contains "$frame_c" "┌─ [4] Teammates' PRs (0) (cached 12m ago) ─" "cached launch: an empty cached pane carries the marker too"
 assert_count "$frame_c" "loading" 0 "cached launch: no spinner anywhere (falsify: key paneLoadingSource on refreshing alone)"
 assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha +Add the widget cache +main +3h │$' "cached launch: a cached PR row is on screen with its columns"
-assert_row "$frame_c" '^│ blocked +- +scout-beta +blocked: gh auth expired ' "cached launch: a cached Needs you row is on screen"
+assert_row "$frame_c" '^│ blocked +- +scout-beta +blocked: gh auth expired ' "cached launch: a cached Captain's Call row is on screen"
 assert_widths "$frame_c" 120 "cached launch: every line is still 120 columns"
 # A cached launch while the identity is still being resolved (prs.identity null): the PR panes keep
 # the cached rows, drawn around the login the cache was fetched for, and never spin on the identity
@@ -3476,9 +3628,9 @@ frame_c=$(render "$(variant cold-start.json cached-pending '{"prs": {"identity":
 assert_contains "$frame_c" "┌─ [3] My PRs (3) (cached 12m ago) ─" "cached launch, identity pending: My PRs draws the cached PR rows"
 assert_not_contains "$frame_c" "resolving" "cached launch, identity pending: no resolving line over cached rows"
 assert_not_contains "$frame_c" "identity unknown" "cached launch, identity pending: no identity row either"
-# The cached rows are live for the cursor: tab, j selects the second Needs you row (falsify: draw the
+# The cached rows are live for the cursor: j selects the second Captain's Call row (falsify: draw the
 # cached rows as the empty text).
-tags_c=$(render "$fx_cc" --cache "$CACHE" --tags --keys "tab,j") || fail "cache select: render exited non-zero"
+tags_c=$(render "$fx_cc" --cache "$CACHE" --tags --keys "j") || fail "cache select: render exited non-zero"
 assert_row "$tags_c" "${SEL}decide +${SEL_END}" "cached launch: j selects the second cached row"
 # The marker's age has the AGE column's shape (fmtAge): seconds under a minute, minutes under an
 # hour, hours from there (falsify: format the age by hand in paneCached).
@@ -3494,7 +3646,7 @@ frame_c=$(render "$fx_st" --cache "$CACHE") || fail "cache stale: render exited 
 assert_count "$frame_c" "⠋ loading fleet snapshot…" 4 "stale cache: the four snapshot panes spin as on a cold start"
 assert_count "$frame_c" "⠋ loading GitHub checks…" 1 "stale cache: My PRs spins on its own fetch"
 assert_count "$frame_c" "cached" 0 "stale cache: no cached marker and no notice"
-assert_line "$frame_c" 22 '^│ ⠋ loading fleet snapshot… +│$' "stale cache: Needs you's first body line is the spinner"
+assert_line "$frame_c" 4 '^│ ⠋ loading fleet snapshot… +│$' "stale cache: Captain's Call's first body line is the spinner"
 frame_c=$(render "$fx_st" --cache "$CACHE" --cache-max-age 3602) || fail "cache max-age: render exited non-zero"
 assert_count "$frame_c" "(cached 1h ago)" 6 "--cache-max-age 3602 keeps the same cache"
 # --no-cache: a fresh cache is not read (falsify: drop the opts.cache check in driveOnce).
@@ -3528,12 +3680,12 @@ frame_c=$(render "$(variant populated.json snap-live '{"prs": null, "refresh": {
 assert_count "$frame_c" "(cached 5m ago)" 2 "snapshot landed: two panes still carry the marker"
 assert_contains "$frame_c" "┌─ [3] My PRs (3) (cached 5m ago) ─" "snapshot landed: My PRs is cached and draws the cached rows"
 assert_contains "$frame_c" "┌─ [4] Teammates' PRs (0) (cached 5m ago) ─" "snapshot landed: Teammates' PRs is cached"
-assert_contains "$frame_c" "┌─ [2] Needs you (4) ─" "snapshot landed: Needs you draws live data and carries no marker"
+assert_contains "$frame_c" "┌─ [1] Captain's Call (6) ─" "snapshot landed: Captain's Call draws live data and carries no marker"
 assert_count "$frame_c" "loading" 0 "snapshot landed: the PR panes draw the cache instead of spinning"
 frame_c=$(render "$(variant cold-start.json prs-live '{"prs": {"candidate_prs": []}, "now": "2026-09-16T12:05:00Z"}')" --cache "$CACHE") || fail "cache prs live: render exited non-zero"
 assert_count "$frame_c" "(cached 5m ago)" 4 "PR fetch landed: the four snapshot panes still carry the marker"
 assert_contains "$frame_c" "┌─ [3] My PRs (2) ─" "PR fetch landed: My PRs draws the live (empty) fetch over the cached snapshot's recorded PRs, no marker"
-assert_contains "$frame_c" "┌─ [1] In flight (7) (cached 5m ago) ─" "PR fetch landed: In flight is still cached"
+assert_contains "$frame_c" "┌─ [2] Underway (6) (cached 5m ago) ─" "PR fetch landed: Underway is still cached"
 # The GitHub cycle in flight over a cached launch, the snapshot landed: the PR panes keep the cached
 # rows under both markers, cached first, then updating, and never spin; the fleet panes, live
 # already, carry neither (falsify: put updating before cached in paneHeader, or treat cached rows
@@ -3543,7 +3695,7 @@ assert_contains "$frame_c" "┌─ [3] My PRs (3) (cached 5m ago) (updating) ─
 assert_contains "$frame_c" "┌─ [4] Teammates' PRs (0) (cached 5m ago) (updating) ─" "cached and fetching: Teammates' PRs too"
 assert_count "$frame_c" "(updating)" 2 "cached and fetching: the two PR panes alone"
 assert_count "$frame_c" "loading" 0 "cached and fetching: the cached rows never give way to a spinner"
-assert_contains "$frame_c" "┌─ [2] Needs you (4) ─" "cached and fetching: Needs you is live and carries no marker"
+assert_contains "$frame_c" "┌─ [1] Captain's Call (6) ─" "cached and fetching: Captain's Call is live and carries no marker"
 # The launch refresh failed over a cached board: the rows stay, each pane is stale and cached at
 # once, and the title line names the failure (falsify: drop the cached snapshot when
 # snapshot_error is set, or the fixture's errors, in restoreFromCache).
@@ -3553,7 +3705,7 @@ assert_row "$frame_c" '^ firstmate-tui .* +refresh failed 3s ago, retrying in 27
 assert_row "$frame_c" '^│ passing +IN REVIEW +ship-alpha ' "failed launch refresh: the cached PR row stays"
 # enter on a cached PR row: the footer names the age of the data the row was read from and the PR
 # opens through the opener as usual, with no prompt and no delay; the same row over live PR data
-# carries no age, and a Needs you review row read from the cached snapshot carries it (falsify:
+# carries no age, and a Captain's Call review row read from the cached snapshot carries it (falsify:
 # drop the cached suffix from ctx.open, wait for a confirmation, or read one flag for every pane).
 rm -f "${OPENER_LOG:?}"
 frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "tab,tab,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open: render exited non-zero"
@@ -3565,9 +3717,9 @@ assert_opened "https://github.com/acme/widgets/pull/41" "enter on the live PR ro
 assert_contains "$frame_c" "opened https://github.com/acme/widgets/pull/41 (ship-alpha) " "a live PR row opens with the plain notice"
 assert_not_contains "$frame_c" "data cached" "a live PR row names no cached age although the snapshot panes are still cached"
 rm -f "${OPENER_LOG:?}"
-frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "tab,j,j,j,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open review: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/7" "enter on a cached Needs you review row opens its PR"
-assert_contains "$frame_c" "opened https://github.com/acme/api/pull/7 (ship-gamma) · data cached 12m ago" "a Needs you row from the cached snapshot names the age too"
+frame_c=$(FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" render "$fx_cc" --cache "$CACHE" --keys "j,j,j,j,j,enter" --opener-cmd "$FAKE_OPENER") || fail "cache open review: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/7" "enter on a cached Captain's Call review row opens its PR"
+assert_contains "$frame_c" "opened https://github.com/acme/api/pull/7 (ship-gamma) · data cached 12m ago" "a Captain's Call row from the cached snapshot names the age too"
 # Without --cache a render reads and writes no cache: a fresh one beside the --view-state file is
 # not drawn and is not rewritten (falsify: resolve the default location in cacheFor without the
 # flag).
@@ -3596,7 +3748,7 @@ if "$BOARD" --help | grep -q -- '--cache-max-age <s>'; then pass; else fail "--h
 
 # ------------------------------------------------------------ view restore
 # The selection comes back from the view-state file: the focused pane, the row by its hide key
-# (its index when the key is gone, clamped to the pane), the expanded In flight groups and the
+# (its index when the key is gone, clamped to the pane), the expanded Underway groups and the
 # scroll offsets. A one-shot render restores them and never records them (its keys are scripted
 # from a known start), so the files here are written by hand in the shape lib/viewstate.mjs
 # saves; the app's own save is checked in the headless section below (falsify: drop focus,
@@ -3622,10 +3774,10 @@ assert_row "$tags_v" "${SEL}unlisted${SEL_END}.*${SEL}ship-alpha" "an index past
 # (falsify: drop the PANE_IDS check from sanitizeFocus, or the clamp after focusFromSaved).
 write_vs '"focus":{"pane":"landed","row":null,"index":0},"expanded":[],"scroll":{}'
 tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore pane: render exited non-zero"
-assert_row "$tags_v" "${SEL}merged +${SEL_END}.*${SEL}etl-index" "a saved pane with no row selects its first row"
+assert_row "$tags_v" "${SEL}report +${SEL_END}.*${SEL}scout-beta" "a saved pane with no row selects its first row"
 write_vs '"focus":{"pane":"nope","row":"x","index":0},"expanded":[],"scroll":{}'
 tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore unknown pane: render exited non-zero"
-assert_row "$tags_v" "${SEL}working +${SEL_END}.*${SEL}ship-alpha" "an unknown pane id leaves the selection on the first pane, In flight"
+assert_row "$tags_v" "${SEL}blocked *${SEL_END}.*${SEL}scout-beta" "an unknown pane id leaves the selection on the first pane, Captain's Call"
 write_vs '"focus":{"pane":"mine","row":"mine:main:api#8","index":1},"expanded":[],"scroll":{}'
 frame_v=$(render populated.json --view-state "$vs_f" --keys "3") || fail "view restore hidden pane: render exited non-zero"
 assert_contains "$frame_v" "pane hidden: My PRs" "hiding the restored pane moves the selection on without an error"
@@ -3634,16 +3786,17 @@ write_vs '"focus":{"pane":"review","row":"review:main:api#8","index":0},"expande
 tags_v=$(render populated.json --view-state "$vs_f" --tags) || fail "view restore old id: render exited non-zero"
 assert_row "$tags_v" "${SEL}failing ${SEL_END}.*${SEL}api#8" "an old file's review pane and row key restore onto My PRs"
 # Expanded groups and scroll: the delegate-a group comes back open with the cursor on it, and the
-# In flight pane, three rows tall in this frame, starts three rows down as saved (falsify: drop
-# expanded from the view init in driveOnce, or scrollFromSaved).
-write_vs '"focus":{"pane":"inflight","row":"inflight:delegate-a:home","index":4},"expanded":["home:/fixture/homes/delegate-a"],"scroll":{"inflight":3}'
+# Underway pane, two rows tall in the 30-row frame, starts one row down as saved, so the group row,
+# the third, is its last shown row (falsify: drop expanded from the view init in driveOnce, or
+# scrollFromSaved).
+write_vs '"focus":{"pane":"inflight","row":"inflight:delegate-a:home","index":2},"expanded":["home:/fixture/homes/delegate-a"],"scroll":{"inflight":1}'
 frame_v=$(render populated.json --view-state "$vs_f") || fail "view restore expanded: render exited non-zero"
-assert_contains "$frame_v" "!▾ delegate-a" "the saved In flight group is expanded"
+assert_contains "$frame_v" "!▾ delegate-a" "the saved Underway group is expanded"
 assert_row "$frame_v" '^│ working +working +↳ child-one ' "the expanded group lists its children"
 frame_v=$(render populated.json --view-state "$vs_f" --rows 30) || fail "view restore scroll: render exited non-zero"
-assert_row "$frame_v" '3 above, \+[0-9]+ more ──┘$' "the saved scroll offset starts the two-row In flight pane three rows down, the cursor on its last shown row"
+assert_row "$frame_v" '1 above, \+[0-9]+ more ──┘$' "the saved scroll offset starts the two-row Underway pane one row down, the cursor on its last shown row"
 tags_v=$(render populated.json --view-state "$vs_f" --rows 30 --tags) || fail "view restore expanded --tags: render exited non-zero"
-assert_row "$tags_v" "${SEL}decide +${SEL_END}.*${SEL}!▾ delegate-a" "the cursor is on the group row"
+assert_row "$tags_v" "${SEL}working +${SEL_END}.*${SEL}!▾ delegate-a" "the cursor is on the group row"
 # The restore waits for the rows: on a cold start the saved pane is loading and the default
 # selection stands; over a fresh cache the same file puts the cursor on the cached row (falsify:
 # apply focusFromSaved to a loading pane).
@@ -3667,7 +3820,7 @@ assert_file_contains "$vs_f" '"hidden": [' "the hide itself is saved"
 # reaches the board (a launcher killed by the suite leaves node running). The cache is written
 # twice per launch: by the local cycle, the snapshot and the ledgers with the PR block as it was
 # (empty here, the identity not asked yet), and by the GitHub cycle with the rows and the login gh
-# named; SIGTERM quits the board, which saves the selection (In flight, its first row) and writes
+# named; SIGTERM quits the board, which saves the selection (Underway, its first row) and writes
 # the cache again with the fetch's fetched_at and a later saved_at. A second run over the same files
 # with gh failing every graphql call (FAKE_GH_GRAPHQL_FAIL) writes the cache once, at the local
 # landing, the previous run's PR rows still in it, and never again: not at the failed fetch and not
@@ -3705,8 +3858,8 @@ tick_saved=$(printf '%s\n' "$tick_cache" | grep -o '"saved_at": "[^"]*"')
 quit_saved=$(grep -o '"saved_at": "[^"]*"' "$cache_h")
 if [ -n "$tick_fetched" ] && [ "$tick_fetched" = "$quit_fetched" ]; then pass; else fail "headless quit: fetched_at stays the fetch landing's ($tick_fetched, then $quit_fetched)"; fi
 if [ -n "$quit_saved" ] && [ "$tick_saved" != "$quit_saved" ]; then pass; else fail "headless quit: the cache is written again on quit, saved_at moving on ($tick_saved, then $quit_saved)"; fi
-assert_file_contains "$vs_h" '"pane": "inflight"' "headless quit: the focused pane, In flight where the board starts, is saved"
-assert_file_contains "$vs_h" '"row": "inflight:main:ship-alpha"' "headless quit: the selected row is saved by its hide key"
+assert_file_contains "$vs_h" '"pane": "needs"' "headless quit: the focused pane, Captain's Call where the board starts, is saved"
+assert_file_contains "$vs_h" '"row": "needs:main:scout-beta"' "headless quit: the selected row is saved by its hide key"
 if [ -s "$HL/out.log" ]; then fail "headless cache run wrote to the terminal: $(head -c 300 "$HL/out.log")"; else pass; fi
 cp "$cache_h" "$HL/before-ghfail.json"
 rm -f "${FETCH_LOG:?}"
@@ -3738,98 +3891,98 @@ kill -TERM "$hl_pid" 2>/dev/null
 wait "$hl_pid" 2>/dev/null
 if grep -q '^snapshot-fail$' "$FETCH_LOG" 2>/dev/null; then pass; else fail "headless failing home: the failing snapshot ran ($(cat "$FETCH_LOG" 2>/dev/null))"; fi
 if cmp -s "$HL/before-fail.json" "$cache_h"; then pass; else fail "headless failing home: a failed snapshot (and the quit after it) left the cache untouched"; fi
-assert_file_contains "$vs_h" '"row": "inflight:main:ship-alpha"' "headless failing home: the saved selection survives a run that never had data"
+assert_file_contains "$vs_h" '"row": "needs:main:scout-beta"' "headless failing home: the saved selection survives a run that never had data"
 if [ -s "$HL/out-fail.log" ]; then fail "headless failing run wrote to the terminal: $(head -c 300 "$HL/out-fail.log")"; else pass; fi
 
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x44 the lines are: 0 title,
-# 1 In flight title, 2 its column header, 3-9 its rows (ship-alpha, tmux-task, remote-sm group,
-# scout-beta, delegate-a group, ship-gamma, ship-old), 13 Needs you title, 14 its column header, 15-18
-# its rows (scout-beta, ship-alpha, decide-vendor, ship-gamma), 20 My PRs title, 22-24 its rows
-# (ship-alpha #41, api#8, ship-gamma #7), 26 Teammates' PRs title, 27 its column header, 28 its empty
-# text, 30 Findings title, 32-34 its rows (scout-beta, mobile-fix, old-scout), 36 Landed title, 38-41
-# its rows (etl-index, ship-old, mobile-fix, old-scout), 43 footer. The board starts focused on In
-# flight's first row.
+# 1 Captain's Call title, 2 its column header, 3-8 its rows (scout-beta, ship-alpha, delegate-a's
+# etl-window, decide-vendor, etl-cutover, ship-gamma), 10 Underway title, 11 its column header, 12-17
+# its rows (ship-alpha, tmux-task, delegate-a group, remote-child, scout-beta, ship-gamma), 21 My PRs
+# title, 23-25 its rows (ship-alpha #41, api#8, ship-gamma #7), 27 Teammates' PRs title, 28 its column
+# header, 29 its empty text, 31 Charted Next title, 33 its row (later-hold), 35 Recently Landed title,
+# 37-41 its rows (scout-beta, etl-index, ship-old, mobile-fix, old-scout), 43 footer. The board starts
+# focused on Captain's Call's first row.
 #
 # A left click selects: the pane gets the amber focus border and the row the inverse cursor bar, the
 # same as tab/j/k would leave them, and the pane that lost the focus is back to plain blue (falsify:
 # drop the 'select' case from applyAction, or the row zones from renderPanes).
-tags_m=$(render populated.json --mouse "click:30,33" --tags) || fail "mouse click: render exited non-zero"
-assert_row "$tags_m" "${SEL}report *${SEL_END}.*mobile-fix" "click on the second Findings row selects it"
-assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[5\].*Findings \(3\)' "click on a Findings row focuses the Findings pane"
-assert_no_row "$tags_m" '\{214-fg\}┌─ .*\[1\]' "click: In flight lost the focus border"
-assert_row "$tags_m" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[1\]\{/grey-fg\}\{blue-fg\} In flight' "click: In flight's border is plain blue again"
+tags_m=$(render populated.json --mouse "click:30,40" --tags) || fail "mouse click: render exited non-zero"
+assert_row "$tags_m" "${SEL}reported *${SEL_END}.*mobile-fix" "click on the fourth Recently Landed row selects it"
+assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[6\].*Recently Landed \(5\)' "click on a Recently Landed row focuses the Recently Landed pane"
+assert_no_row "$tags_m" '\{214-fg\}┌─ .*\[1\]' "click: Captain's Call lost the focus border"
+assert_row "$tags_m" '\{blue-fg\}┌─ \{/blue-fg\}\{grey-fg\}\[1\]\{/grey-fg\}\{blue-fg\} Captain.s Call' "click: Captain's Call's border is plain blue again"
 assert_not_contains "$tags_m" "{cyan-fg}" "click: no cyan anywhere in the frame"
-assert_no_row "$tags_m" "${SEL}working" "click: the old selection is no longer on the bar"
+assert_no_row "$tags_m" "${SEL}blocked" "click: the old selection is no longer on the bar"
 # The selection a click leaves is what the keys then act on (falsify: set view.row without view.pane in 'select').
-frame_m=$(render populated.json --mouse "click:30,33" --keys "x") || fail "mouse click then x: render exited non-zero"
-assert_contains "$frame_m" "Findings (2, 1 hidden)" "x after a click hides the clicked row"
+frame_m=$(render populated.json --mouse "click:30,40" --keys "x") || fail "mouse click then x: render exited non-zero"
+assert_contains "$frame_m" "Recently Landed (4, 1 hidden)" "x after a click hides the clicked row"
 assert_contains "$frame_m" "hidden mobile-fix" "x after a click names the clicked row"
 # A click on a pane title focuses the pane, cursor on its first row (falsify: drop the title zone, or return
 # 'none' for a non-row hit in mouseAction).
-tags_m=$(render populated.json --mouse "click:5,30" --tags) || fail "mouse title click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[5\].*Findings \(3\)' "click on the Findings title focuses Findings"
-assert_row "$tags_m" "${SEL}scout +${SEL_END}.*scout-beta" "click on the Findings title puts the cursor on its first row"
-frame_m=$(render populated.json --mouse "click:5,30" --keys "enter") || fail "mouse title click then enter: render exited non-zero"
+tags_m=$(render populated.json --mouse "click:5,35" --tags) || fail "mouse title click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[6\].*Recently Landed \(5\)' "click on the Recently Landed title focuses Recently Landed"
+assert_row "$tags_m" "${SEL}report +${SEL_END}.*scout-beta" "click on the Recently Landed title puts the cursor on its first row"
+frame_m=$(render populated.json --mouse "click:5,35" --keys "enter") || fail "mouse title click then enter: render exited non-zero"
 assert_contains "$frame_m" "would view /fixture/firstmate/data/scout-beta/report.md" "enter after a title click acts on that pane's first row"
 # A click on a pane's empty space (its column header) focuses the pane too (falsify: drop the pane zone).
-tags_m=$(render populated.json --mouse "click:30,14" --tags) || fail "mouse empty click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[2\].*Needs you \(4\)' "click on Needs you's column header focuses Needs you"
+tags_m=$(render populated.json --mouse "click:30,11" --tags) || fail "mouse empty click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[2\].*Underway \(6\)' "click on Underway's column header focuses Underway"
 # A click on the title line or the footer changes nothing (falsify: give those lines a zone).
 frame_m=$(render populated.json --mouse "click:30,0 click:30,43") || fail "mouse chrome click: render exited non-zero"
 if [ "$frame_m" = "$frame" ]; then pass; else fail "a click on the title line or footer changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # The narrow list has zones too (falsify: drop the zones from renderList).
 tags_m=$(render narrow.json --mouse "click:10,14" --tags) || fail "mouse narrow click: render exited non-zero"
-assert_row "$tags_m" "${SEL}merged +${SEL_END}.*ship-old" "list mode: a click on the Landed row selects it"
-assert_row "$tags_m" '\{bold\}\{214-fg\}── .*\[6\].*Landed \(1\)' "list mode: the Landed section header takes the focus style"
-tags_m=$(render narrow.json --mouse "click:10,5" --tags) || fail "mouse narrow title click: render exited non-zero"
-assert_row "$tags_m" '\{bold\}\{214-fg\}── .*\[2\].*Needs you \(1\)' "list mode: a click on a section header focuses that section"
+assert_row "$tags_m" "${SEL}merged +${SEL_END}.*ship-old" "list mode: a click on the Recently Landed row selects it"
+assert_row "$tags_m" '\{bold\}\{214-fg\}── .*\[6\].*Recently Landed \(1\)' "list mode: the Recently Landed section header takes the focus style"
+tags_m=$(render narrow.json --mouse "click:10,2" --tags) || fail "mouse narrow title click: render exited non-zero"
+assert_row "$tags_m" '\{bold\}\{214-fg\}── .*\[1\].*Captain.s Call \(1\)' "list mode: a click on a section header focuses that section"
 
 # A double-click is enter on that row: two left clicks on one row within 400 ms, recognized in
 # lib/controller.mjs, not by the terminal library (falsify: drop the lastClick check from mouseAction, or
 # stamp the two dblclick events with different times in driveOnce).
-frame_m=$(render_mouse populated.json "dblclick:30,22") || fail "mouse dblclick review: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,23") || fail "mouse dblclick review: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "double-click on the first My PRs row opens its PR, as enter does"
 assert_contains "$frame_m" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "double-click: the footer names the opened PR"
-frame_m=$(render_mouse populated.json "click:30,23 click:30,23") || fail "mouse two clicks: render exited non-zero"
+frame_m=$(render_mouse populated.json "click:30,24 click:30,24") || fail "mouse two clicks: render exited non-zero"
 assert_not_opened "two single clicks a second apart on one row open nothing"
-frame_m=$(render_mouse populated.json "click:30,22 click:30,23 click:30,23 click:30,22") || fail "mouse clicks on different rows: render exited non-zero"
+frame_m=$(render_mouse populated.json "click:30,23 click:30,24 click:30,24 click:30,23") || fail "mouse clicks on different rows: render exited non-zero"
 assert_not_opened "clicks alternating between rows never make a double-click"
-frame_m=$(render_mouse populated.json "dblclick:30,7") || fail "mouse dblclick group: render exited non-zero"
-assert_row "$frame_m" '^│ decide +1 live +!▾ delegate-a ' "double-click on the delegate-a group row expands it"
-assert_contains "$frame_m" "In flight (11)" "double-click on a group: only that group's rows are added"
+frame_m=$(render_mouse populated.json "dblclick:30,14") || fail "mouse dblclick group: render exited non-zero"
+assert_row "$frame_m" '^│ working +1 live +!▾ delegate-a ' "double-click on the delegate-a group row expands it"
+assert_contains "$frame_m" "Underway (8)" "double-click on a group: only that group's rows are added"
 assert_not_opened "double-click on a group row opens no PR"
-frame_m=$(render_mouse populated.json "dblclick:30,7 dblclick:30,7") || fail "mouse dblclick group twice: render exited non-zero"
-assert_row "$frame_m" '^│ decide +1 live +!▸ delegate-a ' "a second double-click on the group row collapses it again"
-frame_m=$(render_mouse populated.json "dblclick:60,32") || fail "mouse dblclick findings: render exited non-zero"
-assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "double-click on a Findings row views its report through --viewer-cmd"
-frame_m=$(render_mouse populated.json "dblclick:30,3") || fail "mouse dblclick worker: render exited non-zero"
-assert_contains "$frame_m" "herdr is off (--no-herdr); cannot focus" "double-click on an In flight worker means herdr focus, refused here as enter is"
+frame_m=$(render_mouse populated.json "dblclick:30,14 dblclick:30,14") || fail "mouse dblclick group twice: render exited non-zero"
+assert_row "$frame_m" '^│ working +1 live +!▸ delegate-a ' "a second double-click on the group row collapses it again"
+frame_m=$(render_mouse populated.json "dblclick:60,37") || fail "mouse dblclick report: render exited non-zero"
+assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "double-click on a Recently Landed report row views its report through --viewer-cmd"
+frame_m=$(render_mouse populated.json "dblclick:30,12") || fail "mouse dblclick worker: render exited non-zero"
+assert_contains "$frame_m" "herdr is off (--no-herdr); cannot focus" "double-click on an Underway worker means herdr focus, refused here as enter is"
 assert_not_opened "double-click on a worker opens no PR"
 assert_not_viewed "double-click on a worker views no report"
 frame_m=$(render_mouse populated.json "dblclick:60,41") || fail "mouse dblclick landed no url: render exited non-zero"
-assert_not_opened "double-click on a Landed row without a PR opens nothing"
-assert_viewed "/fixture/firstmate/data/old-scout/report.md" "double-click on a Landed row without a PR views its report, as enter does (falsify: give the double-click its own action instead of keyAction enter)"
+assert_not_opened "double-click on a Recently Landed row without a PR opens nothing"
+assert_viewed "/fixture/firstmate/data/old-scout/report.md" "double-click on a Recently Landed row without a PR views its report, as enter does (falsify: give the double-click its own action instead of keyAction enter)"
 
 # One gesture, one open. The second press of a double-click acts, and every further press on that row
 # inside the same 400 ms window only selects, so a triple-click, or a release or drag report a host
 # delivers shaped as a press, opens the PR once and the opener log has exactly one line; assert_opened
 # compares the whole log (falsify: drop the lastActivate check from mouseAction, or stop applyAction
 # recording lastActivate on activate).
-frame_m=$(render_mouse populated.json "dblclick:30,22") || fail "mouse dblclick once: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,23") || fail "mouse dblclick once: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "a double-click opens the PR exactly once: one opener line"
-frame_m=$(render_mouse populated.json "tripleclick:30,22") || fail "mouse tripleclick: render exited non-zero"
+frame_m=$(render_mouse populated.json "tripleclick:30,23") || fail "mouse tripleclick: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "a third press inside the window opens nothing more: one opener line"
 assert_contains "$frame_m" "opened https://github.com/acme/widgets/pull/41 (ship-alpha)" "triple-click: the footer names the one open"
 # The guard covers one window only: a click a second later is a fresh single click, a double-click a
 # second later opens again (falsify: make the guard ignore the time, or never clear it).
-frame_m=$(render_mouse populated.json "dblclick:30,22 click:30,22") || fail "mouse dblclick then click: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,23 click:30,23") || fail "mouse dblclick then click: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/41" "a click a second after a double-click only selects: still one opener line"
-frame_m=$(render_mouse populated.json "dblclick:30,22 dblclick:30,22") || fail "mouse dblclick twice: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,23 dblclick:30,23") || fail "mouse dblclick twice: render exited non-zero"
 assert_opened "$(printf 'https://github.com/acme/widgets/pull/41\nhttps://github.com/acme/widgets/pull/41')" "a second double-click a second later opens again"
-# enter is never guarded: one press opens once (checked above with tab,enter) and it still opens right
+# enter is never guarded: one press opens once (checked above with tab,tab,enter) and it still opens right
 # after a double-click on the row (falsify: apply the lastActivate guard in keyAction).
-frame_m=$(render_mouse populated.json "dblclick:30,22" --keys enter) || fail "mouse dblclick then enter: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:30,23" --keys enter) || fail "mouse dblclick then enter: render exited non-zero"
 assert_opened "$(printf 'https://github.com/acme/widgets/pull/41\nhttps://github.com/acme/widgets/pull/41')" "enter after a double-click opens the row again: two opener lines, one each"
 
 # What the terminal library hands the adapter for the mouse, checked without a terminal
@@ -3895,38 +4048,39 @@ assert_row "$buttons" '^right none$' "a right-button press on a row is a no-op i
 assert_row "$buttons" '^middle none$' "a middle-button press on a row is a no-op in the controller"
 assert_row "$buttons" '^left select$' "the same left-button press selects the row"
 
-# The wheel moves the selection three rows in the focused pane (Needs you after a tab, the pointer
-# over Landed), whichever pane the pointer is over, and clamps at the ends (falsify: change
-# WHEEL_ROWS, or hit-test the wheel's pointer).
-frame_m=$(render_mouse populated.json "tab wheel:down:30,39" --keys "enter") || fail "mouse wheel: render exited non-zero"
-assert_opened "https://github.com/acme/api/pull/7" "wheel down over Landed moves the focused Needs you selection three rows to the review row, which enter opens"
-tags_m=$(render populated.json --mouse "tab wheel:down:30,39" --tags) || fail "mouse wheel --tags: render exited non-zero"
-assert_row "$tags_m" "${SEL}review " "wheel down: the fourth Needs you row is selected"
+# The wheel moves the selection three rows in the focused pane (Captain's Call, where the board
+# starts, the pointer over Recently Landed), whichever pane the pointer is over, and clamps at the
+# ends: six rows, so two wheel downs land on the sixth, the review row (falsify: change WHEEL_ROWS, or
+# hit-test the wheel's pointer).
+frame_m=$(render_mouse populated.json "wheel:down:30,39 wheel:down:30,39" --keys "enter") || fail "mouse wheel: render exited non-zero"
+assert_opened "https://github.com/acme/api/pull/7" "two wheel downs over Recently Landed move the focused Captain's Call selection to its last row, the review row, which enter opens"
+tags_m=$(render populated.json --mouse "wheel:down:30,39" --tags) || fail "mouse wheel --tags: render exited non-zero"
+assert_row "$tags_m" "${SEL}hold +${SEL_END}.*${SEL}decide-vendor" "wheel down: the fourth Captain's Call row is selected"
 assert_no_row "$tags_m" '\{214-fg\}┌─ .*\[6\]' "wheel: the pane under the pointer is not focused"
-tags_m=$(render populated.json --mouse "tab wheel:up:30,39 wheel:down:30,39 wheel:down:30,39" --tags) || fail "mouse wheel clamp: render exited non-zero"
-assert_row "$tags_m" "${SEL}review " "wheel up at the top stays, two wheel downs clamp at the last row"
-tags_m=$(render populated.json --mouse "tab wheel:down:30,39 wheel:up:30,39" --tags) || fail "mouse wheel back: render exited non-zero"
-assert_row "$tags_m" "${SEL}blocked${SEL_END}" "wheel down then up is back on the first row"
+tags_m=$(render populated.json --mouse "wheel:up:30,39 wheel:down:30,39 wheel:down:30,39 wheel:down:30,39" --tags) || fail "mouse wheel clamp: render exited non-zero"
+assert_row "$tags_m" "${SEL}review " "wheel up at the top stays, three wheel downs clamp at the last row"
+tags_m=$(render populated.json --mouse "wheel:down:30,39 wheel:up:30,39" --tags) || fail "mouse wheel back: render exited non-zero"
+assert_row "$tags_m" "${SEL}blocked *${SEL_END}" "wheel down then up is back on the first row"
 # A wheel move breaks a double-click: click, wheel, click on the same row is two singles (falsify: keep
 # lastClick across a wheel action).
-frame_m=$(render_mouse populated.json "click:30,23 wheel:down:30,23 wheel:up:30,23 click:30,23") || fail "mouse click wheel click: render exited non-zero"
+frame_m=$(render_mouse populated.json "click:30,24 wheel:down:30,24 wheel:up:30,24 click:30,24") || fail "mouse click wheel click: render exited non-zero"
 assert_not_opened "click, wheel and click on one row are two single clicks"
 
 # --no-mouse: every gesture is ignored and the frame is the plain one (falsify: drop the opts.mouse guard
 # in driveOnce, or make --no-mouse set anything but opts.mouse).
-frame_m=$(render populated.json --no-mouse --mouse "click:30,33 dblclick:30,23 wheel:down:30,39") || fail "--no-mouse: render exited non-zero"
+frame_m=$(render populated.json --no-mouse --mouse "click:30,40 dblclick:30,23 wheel:down:30,39") || fail "--no-mouse: render exited non-zero"
 if [ "$frame_m" = "$frame" ]; then pass; else fail "--no-mouse changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 frame_m=$(render_mouse populated.json "dblclick:30,23" --no-mouse) || fail "--no-mouse dblclick: render exited non-zero"
 assert_not_opened "--no-mouse: a double-click opens nothing"
-frame_m=$(render populated.json --no-mouse --mouse "click:30,33 x") || fail "--no-mouse keys in list: render exited non-zero"
-assert_contains "$frame_m" "In flight (6, 1 hidden)" "--no-mouse: the key tokens of the list still apply (x hid the row the keyboard selection was on)"
-assert_contains "$frame_m" "hidden ship-alpha" "--no-mouse: the click was ignored, so x acted on the first In flight row, not the clicked Findings row"
+frame_m=$(render populated.json --no-mouse --mouse "click:30,40 x") || fail "--no-mouse keys in list: render exited non-zero"
+assert_contains "$frame_m" "Captain's Call (5, 1 hidden)" "--no-mouse: the key tokens of the list still apply (x hid the row the keyboard selection was on)"
+assert_contains "$frame_m" "hidden scout-beta" "--no-mouse: the click was ignored, so x acted on the first Captain's Call row, not the clicked Recently Landed row"
 # The landing page has no mouse targets (falsify: give renderLanding zones).
 frame_l=$(render populated.json --keys "1,2,3,4,5,6")
 frame_m=$(render populated.json --keys "1,2,3,4,5,6" --mouse "click:30,20 dblclick:30,24 wheel:down:30,20") || fail "mouse on landing: render exited non-zero"
 if [ "$frame_m" = "$frame_l" ]; then pass; else fail "mouse events changed the landing page: $(diff <(printf '%s\n' "$frame_l") <(printf '%s\n' "$frame_m") | head -n 5)"; fi
 # A click while the help is up closes it (falsify: ignore mouse events under view.help).
-frame_m=$(render populated.json --keys "?" --mouse "click:30,33") || fail "mouse click on help: render exited non-zero"
+frame_m=$(render populated.json --keys "?" --mouse "click:30,40") || fail "mouse click on help: render exited non-zero"
 assert_not_contains "$frame_m" "firstmate-tui keys" "a click closes the help overlay"
 
 # The help lists the gestures and binds nothing to the right button (falsify: drop the mouse block from
@@ -3952,7 +4106,7 @@ else
   pass
 fi
 if printf '%s\n' "$out" | grep -Fq -- "--mouse needs a value"; then pass; else fail "--mouse without a value is named in the error: $out"; fi
-frame_m=$(render populated.json --mouse "click:30,33,x") || fail "mouse comma list: render exited non-zero"
+frame_m=$(render populated.json --mouse "click:30,40,x") || fail "mouse comma list: render exited non-zero"
 assert_contains "$frame_m" "hidden mobile-fix" "a comma-separated list keeps the comma inside X,Y and reads the rest as keys"
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--no-mouse"; then pass; else fail "wrapper --help lists --no-mouse"; fi
 if "$BOARD" --help 2>/dev/null | grep -Fq -- "--mouse <list>"; then pass; else fail "wrapper --help lists --mouse"; fi
@@ -3972,70 +4126,70 @@ assert_row "$frame_cw" '^│ STATE  KEY       ID {24}WHAT ' "column widths: STAT
 assert_widths "$frame_cw" 160 "column widths: lines are 160 columns"
 assert_lines "$frame_cw" 40 "column widths: 40 lines"
 
-# Dragging a boundary. populated.json at 160x44: Needs you's column header is line 14 (In flight's
-# twelve lines stand above it) and its columns start at x=2 STATE (7 wide), 11 KEY (9), 22 ID (13),
-# 37 WHAT (96), 135 REPO (12), 149 HOME (4), 155 AGE (3), two blank cells between neighbours, so the
-# ID/WHAT gutter is cells 35-36 and a left press on cells 34 to 37 takes that boundary. My PRs' header
-# is line 21 with CHECKS (8), STATUS (9), ID (10) and its ID/TITLE gutter at 33-34. In the header
-# line a column W cells wide reads as its
-# label followed by W blank cells (its padding plus the gutter) before the next label.
-# A drag from 35 to 45 widens ID by ten cells and WHAT gives up exactly those ten: the columns right of
+# Dragging a boundary. populated.json at 160x44: Captain's Call's column header is line 2 and its
+# columns start at x=2 STATE (7 wide), 11 KEY (10, as wide as etl-window), 23 ID (13), 38 WHAT (89),
+# 129 REPO (12), 143 HOME (10), 155 AGE (3), two blank cells between neighbours, so the ID/WHAT gutter
+# is cells 36-37 and a left press on cells 35 to 38 takes that boundary. My PRs' header is line 22
+# with CHECKS (8), STATUS (9), ID (10) and its ID/TITLE gutter at 33-34. In the header line a column
+# W cells wide reads as its label followed by W blank cells (its padding plus the gutter) before the
+# next label.
+# A drag from 36 to 46 widens ID by ten cells and WHAT gives up exactly those ten: the columns right of
 # WHAT keep their place and the line is still 160 cells (falsify: drop drag-move from applyAction, or
 # size the flexible column before the overrides are applied).
-assert_row "$frame" '^│ STATE    KEY        ID {13}WHAT {94}REPO' "before any drag ID is 13 wide, as wide as decide-vendor, and WHAT 96"
-frame_d=$(render populated.json --mouse "drag:35,14->45") || fail "drag ID/WHAT: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT {84}REPO +HOME  AGE │$' "drag: ID is 23 wide, WHAT 86, and REPO, HOME and AGE are where they were"
-assert_row "$frame_d" '^│ decide   db-choice  ship-alpha {15}Postgres or SQLite for the cache\? +acme/widgets  main   5m │$' "drag: the rows follow the header's widths"
+assert_row "$frame" '^│ STATE    KEY         ID {13}WHAT {87}REPO' "before any drag ID is 13 wide, as wide as decide-vendor, and WHAT 89"
+frame_d=$(render populated.json --mouse "drag:36,2->46") || fail "drag ID/WHAT: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {23}WHAT {77}REPO +HOME +AGE │$' "drag: ID is 23 wide, WHAT 79, and REPO, HOME and AGE are where they were"
+assert_row "$frame_d" '^│ decide   db-choice   ship-alpha {15}Postgres or SQLite for the cache\? +acme/widgets  main +5m │$' "drag: the rows follow the header's widths"
 assert_widths "$frame_d" 160 "drag: lines are still 160 columns"
 assert_contains "$frame_d" "ID 23 wide · double-click the boundary resets it, = resets every column" "drag: the footer names the new width and both resets"
 # The boundary is taken from one cell either side of its gutter and nowhere else (falsify: change
 # BOUNDARY_REACH); only the header line has boundaries, a drag started on a row is a click on that row
 # (falsify: put header geometry on row zones).
-frame_d=$(render populated.json --mouse "drag:34,14->44") || fail "drag from ID's last cell: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT ' "a press on the last cell of ID, one cell before the gutter, drags the same boundary"
-frame_d=$(render populated.json --mouse "drag:37,14->47") || fail "drag from WHAT's first cell: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT ' "a press on the first cell of WHAT, one cell after the gutter, drags the same boundary"
-frame_d=$(render populated.json --mouse "drag:33,14->43") || fail "drag from two cells before the gutter: render exited non-zero"
-frame_c=$(render populated.json --mouse "click:33,14") || fail "click two cells before the gutter: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:35,2->45") || fail "drag from ID's last cell: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {23}WHAT ' "a press on the last cell of ID, one cell before the gutter, drags the same boundary"
+frame_d=$(render populated.json --mouse "drag:38,2->48") || fail "drag from WHAT's first cell: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {23}WHAT ' "a press on the first cell of WHAT, one cell after the gutter, drags the same boundary"
+frame_d=$(render populated.json --mouse "drag:34,2->44") || fail "drag from two cells before the gutter: render exited non-zero"
+frame_c=$(render populated.json --mouse "click:34,2") || fail "click two cells before the gutter: render exited non-zero"
 if [ "$frame_d" = "$frame_c" ]; then pass; else fail "a press two cells before the gutter is a plain header click (the frame a click there leaves) and resizes nothing: $(diff <(printf '%s\n' "$frame_c") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
-assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "and ID keeps its automatic width"
-frame_d=$(render populated.json --mouse "drag:35,15->45") || fail "drag on a row: render exited non-zero"
-frame_c=$(render populated.json --mouse "click:35,15") || fail "click on a row: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {13}WHAT ' "and ID keeps its automatic width"
+frame_d=$(render populated.json --mouse "drag:36,3->46") || fail "drag on a row: render exited non-zero"
+frame_c=$(render populated.json --mouse "click:36,3") || fail "click on a row: render exited non-zero"
 if [ "$frame_d" = "$frame_c" ]; then pass; else fail "a drag started on a row line selects the row and resizes nothing: $(diff <(printf '%s\n' "$frame_c") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
 # Clamps: a column never goes under its label width plus one, and never takes more than the flexible
 # column can spare (falsify: drop min or max from boundaryAt, or the clamp from drag-move).
-frame_d=$(render populated.json --mouse "drag:35,14->20") || fail "drag left past the minimum: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {3}WHAT ' "dragged 15 cells left, ID stops at 3, its label width plus one"
-assert_row "$frame_d" '^│ blocked  -          sc…  blocked: gh auth expired' "the rows truncate to the three-cell ID"
+frame_d=$(render populated.json --mouse "drag:36,2->21") || fail "drag left past the minimum: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {3}WHAT ' "dragged 15 cells left, ID stops at 3, its label width plus one"
+assert_row "$frame_d" '^│ blocked  -           sc…  blocked: gh auth expired' "the rows truncate to the three-cell ID"
 assert_contains "$frame_d" "ID 3 wide" "the footer names the clamped width"
-frame_d=$(render populated.json --mouse "drag:35,14->158") || fail "drag right past the maximum: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {104}WHAT   REPO' "dragged to the frame's edge, ID stops at 104 and WHAT keeps its five-cell minimum"
+frame_d=$(render populated.json --mouse "drag:36,2->158") || fail "drag right past the maximum: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {97}WHAT   REPO' "dragged to the frame's edge, ID stops at 97 and WHAT keeps its five-cell minimum"
 assert_row "$frame_d" '^│ hold     - +decide-vendor +Pick…  acme/api +main +3d │$' "the flexible column at its minimum shows four characters and the ellipsis"
 assert_widths "$frame_d" 160 "clamped drag: lines are still 160 columns"
 # The boundary beside the flexible column moves the fixed column on its other side, so the boundary
 # still follows the pointer: WHAT/REPO dragged right narrows REPO (falsify: return null in boundaries()
 # for a boundary whose left column is flexible, or drop sign).
-frame_d=$(render populated.json --mouse "drag:133,14->143") || fail "drag WHAT/REPO: render exited non-zero"
-assert_row "$frame_d" '^│ blocked  - +scout-beta +blocked: gh auth expired +acme…  main   2h │$' "dragging the WHAT/REPO boundary ten cells right narrows REPO to its five-cell minimum"
+frame_d=$(render populated.json --mouse "drag:127,2->137") || fail "drag WHAT/REPO: render exited non-zero"
+assert_row "$frame_d" '^│ blocked  - +scout-beta +blocked: gh auth expired +acme…  main +2h │$' "dragging the WHAT/REPO boundary ten cells right narrows REPO to its five-cell minimum"
 assert_contains "$frame_d" "REPO 5 wide" "the footer names REPO, the column that moved"
 # Mid-drag, before the release, the boundary's first gutter cell draws a bar on the header and on
 # every row of that pane, bold yellow with --tags, and nowhere else (falsify: drop the drag branch
 # from gutterSegments, or the drag style from STYLE_TAGS).
-frame_d=$(render populated.json --mouse "click:35,14 move:40,14") || fail "mid-drag: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {16}│ WHAT ' "mid-drag: the bar stands in the header's gutter at the pointer, ID 18 wide"
-assert_row "$frame_d" '^│ blocked  -          scout-beta {8}│ blocked: gh auth expired' "mid-drag: the rows draw the bar in the same cell"
-tags_d=$(render populated.json --mouse "click:35,14 move:40,14" --tags) || fail "mid-drag --tags: render exited non-zero"
-assert_count "$tags_d" '{bold}{yellow-fg}│{/yellow-fg}{/bold}' 5 "mid-drag --tags: the bar is bold yellow on the header and the four rows of Needs you only"
-frame_d=$(render populated.json --mouse "click:35,14 move:40,14 release:40,14") || fail "drag then release: render exited non-zero"
+frame_d=$(render populated.json --mouse "click:36,2 move:41,2") || fail "mid-drag: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {16}│ WHAT ' "mid-drag: the bar stands in the header's gutter at the pointer, ID 18 wide"
+assert_row "$frame_d" '^│ blocked  -           scout-beta {8}│ blocked: gh auth expired' "mid-drag: the rows draw the bar in the same cell"
+tags_d=$(render populated.json --mouse "click:36,2 move:41,2" --tags) || fail "mid-drag --tags: render exited non-zero"
+assert_count "$tags_d" '{bold}{yellow-fg}│{/yellow-fg}{/bold}' 7 "mid-drag --tags: the bar is bold yellow on the header and the six rows of Captain's Call only"
+frame_d=$(render populated.json --mouse "click:36,2 move:41,2 release:41,2") || fail "drag then release: render exited non-zero"
 assert_not_contains "$frame_d" "│ WHAT" "after the release the bar is gone"
-assert_row "$frame_d" '^│ STATE    KEY        ID {18}WHAT ' "after the release ID keeps its 18 cells"
-frame_d=$(render populated.json --mouse "click:35,14 move:40,14" --keys "j") || fail "key mid-drag: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {18}WHAT ' "after the release ID keeps its 18 cells"
+frame_d=$(render populated.json --mouse "click:36,2 move:41,2" --keys "j") || fail "key mid-drag: render exited non-zero"
 assert_not_contains "$frame_d" "│ WHAT" "a key pressed mid-drag ends the drag"
-assert_row "$frame_d" '^│ STATE    KEY        ID {18}WHAT ' "a key pressed mid-drag keeps the width reached"
+assert_row "$frame_d" '^│ STATE    KEY         ID {18}WHAT ' "a key pressed mid-drag keeps the width reached"
 # A drag that comes back to where it started leaves no custom width behind (falsify: persist on every
 # drag-end).
-frame_d=$(render populated.json --mouse "click:35,2 move:45,14 move:35,14 release:35,14") || fail "drag back: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "dragged out and back, ID is automatic again"
+frame_d=$(render populated.json --mouse "click:36,2 move:46,2 move:36,2 release:36,2") || fail "drag back: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {13}WHAT ' "dragged out and back, ID is automatic again"
 assert_not_contains "$frame_d" "wide" "dragged out and back, no width is announced"
 
 # Persistence: the width goes to the view-state file on the release and a restart reads it back; the
@@ -4043,38 +4197,38 @@ assert_not_contains "$frame_d" "wide" "dragged out and back, no width is announc
 # loadViewState, or from persist in index.mjs).
 vs_cols="$SCRATCH/view-state-columns.json"
 rm -f "${vs_cols:?}"
-frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,14->45") || fail "drag with view state: render exited non-zero"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:36,2->46") || fail "drag with view state: render exited non-zero"
 assert_file_contains "$vs_cols" '"needs": {' "the view-state file records the pane"
 assert_file_contains "$vs_cols" '"id": 23' "the view-state file records the column and its width"
 assert_file_contains "$vs_cols" '"hidden_panes": []' "the other view state is written beside it"
 frame_d=$(render populated.json --view-state "$vs_cols") || fail "drag reload: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {23}WHAT ' "a restart reads the width back from the file"
+assert_row "$frame_d" '^│ STATE    KEY         ID {23}WHAT ' "a restart reads the width back from the file"
 frame_d=$(render column-widths.json --view-state "$vs_cols") || fail "drag reload other data: render exited non-zero"
 assert_row "$frame_d" '^│ STATE  KEY       ID {23}WHAT ' "the saved width pins ID at 23 where the data alone would size it 24"
 # A double-click on the boundary resets that column and drops it from the file (falsify: drop
 # reset-column from mouseAction, or the persist from its case).
-frame_d=$(render populated.json --view-state "$vs_cols" --mouse "dblclick:45,14") || fail "dblclick boundary: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "a double-click on the moved boundary puts ID back to its automatic width"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "dblclick:46,2") || fail "dblclick boundary: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {13}WHAT ' "a double-click on the moved boundary puts ID back to its automatic width"
 assert_contains "$frame_d" "ID back to its automatic width" "the footer says so"
 assert_file_not_contains "$vs_cols" '"id"' "the reset column is gone from the file"
-frame_d=$(render populated.json --mouse "dblclick:35,14") || fail "dblclick automatic boundary: render exited non-zero"
+frame_d=$(render populated.json --mouse "dblclick:36,2") || fail "dblclick automatic boundary: render exited non-zero"
 assert_contains "$frame_d" "ID already has its automatic width" "a double-click on an automatic column says there is nothing to reset"
-assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "and changes nothing"
+assert_row "$frame_d" '^│ STATE    KEY         ID {13}WHAT ' "and changes nothing"
 # = resets every pane, from the board and from the Settings page, and says how many widths it
 # dropped; the review pane's own column set resizes and resets the same way (falsify: drop the = case
 # from keyAction, the reset-columns entry from settingsEntries, or the review pane's header geometry).
-frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,14->45 drag:33,21->43") || fail "two drags: render exited non-zero"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:36,2->46 drag:33,22->43") || fail "two drags: render exited non-zero"
 assert_row "$frame_d" '^│ CHECKS    STATUS     ID {20}TITLE ' "My PRs' ID/TITLE boundary drags its ID to 20"
 assert_file_contains "$vs_cols" '"mine": {' "the review pane's width is saved under its own id"
 frame_d=$(render populated.json --view-state "$vs_cols" --keys "=") || fail "reset all: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "= resets Needs you's ID"
+assert_row "$frame_d" '^│ STATE    KEY         ID {13}WHAT ' "= resets Captain's Call's ID"
 assert_row "$frame_d" '^│ CHECKS    STATUS     ID {10}TITLE ' "= resets My PRs' ID"
 assert_contains "$frame_d" "column widths reset: 2 custom widths dropped" "= counts the widths it dropped"
 assert_file_not_contains "$vs_cols" '"id"' "= empties the saved widths"
 frame_d=$(render populated.json --keys "=") || fail "reset none: render exited non-zero"
 assert_contains "$frame_d" "no custom column widths to reset" "= with nothing to reset says so"
-frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:35,14->45" --keys ".,pagedown,enter,escape") || fail "settings reset: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {13}WHAT ' "the Settings page's last entry, Reset column widths, resets the board's columns"
+frame_d=$(render populated.json --view-state "$vs_cols" --mouse "drag:36,2->46" --keys ".,pagedown,enter,escape") || fail "settings reset: render exited non-zero"
+assert_row "$frame_d" '^│ STATE    KEY         ID {13}WHAT ' "the Settings page's last entry, Reset column widths, resets the board's columns"
 assert_contains "$frame_d" "column widths reset: 1 custom width dropped" "the Settings entry reports through the same notice"
 frame_s=$(render populated.json --keys ".") || fail "settings entry: render exited non-zero"
 assert_row "$frame_s" '^   Reset column widths +every pane back to its automatic widths \(= on the board\) +$' "the Settings page lists the entry"
@@ -4082,7 +4236,7 @@ assert_row "$frame_s" '^   Reset column widths +every pane back to its automatic
 # integer, loses only that entry (falsify: drop sanitizeColumns from loadViewState).
 printf '{"schema":"fm-board-view-state.v1","hidden":[],"hidden_panes":[],"columns":{"needs":{"id":30,"bogus":9},"nope":{"id":5},"mine":{"id":"wide"}}}\n' > "$vs_cols"
 frame_d=$(render populated.json --view-state "$vs_cols" --keys "tab,tab,tab,tab,x") || fail "hand-written columns: render exited non-zero"
-assert_row "$frame_d" '^│ STATE    KEY        ID {30}WHAT ' "a saved width for a known pane and column applies"
+assert_row "$frame_d" '^│ STATE    KEY         ID {30}WHAT ' "a saved width for a known pane and column applies"
 assert_row "$frame_d" '^│ CHECKS    STATUS     ID {10}TITLE ' "a width that is not a number is ignored"
 assert_file_contains "$vs_cols" '"id": 30' "the known width survives the next save"
 assert_file_not_contains "$vs_cols" 'bogus' "an unknown column key is dropped on the next save"
@@ -4098,7 +4252,7 @@ frame_d=$(render narrow.json --mouse "drag:20,1->30 drag:9,1->15") || fail "narr
 if [ "$frame_d" = "$frame_narrow" ]; then pass; else fail "narrow: a drag on the shared header changed the frame: $(diff <(printf '%s\n' "$frame_narrow") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
 # --no-mouse leaves a drag unread like every other gesture (falsify: skip only click tokens under
 # --no-mouse in driveOnce).
-frame_d=$(render populated.json --no-mouse --mouse "drag:35,14->45 dblclick:35,14 move:40,14 release:40,14") || fail "--no-mouse drag: render exited non-zero"
+frame_d=$(render populated.json --no-mouse --mouse "drag:36,2->46 dblclick:36,2 move:41,2 release:41,2") || fail "--no-mouse drag: render exited non-zero"
 if [ "$frame_d" = "$frame" ]; then pass; else fail "--no-mouse: a drag changed the frame: $(diff <(printf '%s\n' "$frame") <(printf '%s\n' "$frame_d") | head -n 5)"; fi
 # The help names the key and the gesture (falsify: drop the = or drag lines from HELP_LINES).
 frame_d=$(render populated.json --keys "?") || fail "help columns: render exited non-zero"
@@ -4117,9 +4271,9 @@ else
   pass
 fi
 if printf '%s\n' "$out" | grep -Fq -- '--mouse: bad event "move:12"'; then pass; else fail "--mouse names the bad move token: $out"; fi
-frame_d=$(render populated.json --mouse "drag:35,14->45,x") || fail "drag comma list: render exited non-zero"
+frame_d=$(render populated.json --mouse "drag:36,2->46,x") || fail "drag comma list: render exited non-zero"
 assert_row "$frame_d" '^│ STATE +KEY +ID {23}WHAT ' "a comma-separated list keeps the drag token whole"
-assert_contains "$frame_d" "hidden ship-alpha" "and reads the rest as keys: x hid the In flight row the keyboard selection was on"
+assert_contains "$frame_d" "hidden scout-beta" "and reads the rest as keys: x hid the Captain's Call row the keyboard selection was on"
 
 # ----------------------------------------------------------- wrapper checks
 # The fake herdr on HERDR_BIN_PATH and PATH (fake_herdr_env, defined with the other fakes at the
@@ -4331,7 +4485,7 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   done
   [ -n "$pty_terms" ] || pty_terms=xterm-256color
   for t in $pty_terms; do
-    # One 0x0d on the first My PRs row (two tabs move there from In flight once the row is drawn):
+    # One 0x0d on the first My PRs row (two tabs move there from Underway once the row is drawn):
     # exactly one opener call, made by the board (the trace names one pid and the URL as the only
     # argument).
     run_pty "$t" "cr-$t" "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:\t" "sleep:0.6" "send:\r" "wait:opened$PTY_URL" "sleep:0.4" "send:q" exit
@@ -4383,8 +4537,9 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   run_pty xterm-256color lf "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:\t" "sleep:0.6" "send:\n" "sleep:1.2" "send:q" exit
   pty_ok lf "pty: LF alone leaves the board running until q"
   assert_not_opened "pty: LF alone (ctrl-j) opens nothing"
-  # The D prompt on a real terminal: tab, j, j selects decide-vendor, the stand-in's live captain hold; D
-  # opens the footer prompt; ten 0x7f bytes (the Backspace key, which the library names 'backspace'
+  # The D prompt on a real terminal: j, j, j selects decide-vendor, the stand-in's live captain hold and
+  # Captain's Call's fourth row (after the blocked scout, the main decision and the delegate's relayed
+  # decision); D opens the footer prompt; ten 0x7f bytes (the Backspace key, which the library names 'backspace'
   # and hands over as the DEL character) clear the default date, and typed digits and dashes fill it
   # through the library's keypress path, which --keys never exercises; the carriage return runs the
   # stand-in home's fake fm-captain-hold.sh exactly once with the typed date and the record's reason
@@ -4393,11 +4548,11 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   # default date). Only the prompt's `(YYYY-MM-DD):` is waited for on screen: its cells all differ
   # from the hint they replace, while the letters of a notice drawn over an earlier one of the same
   # length can reach the driver missing; the log, not the screen, proves the rest. After the carriage
-  # return the deferred row leaves Needs you at once: the review row below it, ship-gamma, moves up
-  # onto its line, and every cell of that row differs from the hold row it replaces, so the driver
-  # sees the id repainted (falsify: drop dismissRow from holdDefer in lib/app.mjs, and the rows stay
-  # where they were until the refresh lands, which the unchanged stand-in snapshot never moves them).
-  run_pty xterm-256color hold-prompt "wait:$PTY_URL" "send:\t" "sleep:0.3" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:D" "wait:(YYYY-MM-DD):" "send:\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f" "sleep:0.4" "send:2027-01-15" "sleep:0.6" "send:\r" "wait:ship-gamma" "sleep:1.0" "send:q" exit
+  # return the deferred row leaves Captain's Call at once: the delegate's hold below it, etl-cutover,
+  # moves up onto its line, and every cell of that row differs from the hold row it replaces, so the
+  # driver sees the id repainted (falsify: drop dismissRow from holdDefer in lib/app.mjs, and the rows
+  # stay where they were until the refresh lands, which the unchanged stand-in snapshot never moves them).
+  run_pty xterm-256color hold-prompt "wait:$PTY_URL" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:j" "sleep:0.3" "send:D" "wait:(YYYY-MM-DD):" "send:\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f" "sleep:0.4" "send:2027-01-15" "sleep:0.6" "send:\r" "wait:etl-cutover" "sleep:1.0" "send:q" exit
   pty_ok hold-prompt "pty: the D prompt opens on a real terminal, the deferred row leaves at once and the board exits on q"
   if [ -f "$HOLD_LOG" ]; then pass; else fail "pty: the D prompt's enter ran no hold command; the driver reported: $(tr '\n' ';' < "$SCRATCH/pty-hold-prompt.out")"; fi
   assert_hold_log "FM_HOME=$FAKE_HOME
@@ -4455,7 +4610,7 @@ argv=hold decide-vendor --reason Two quotes in the report --until 2027-01-15" "p
   assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "pty warm launch: the identity is still resolved once"
   # The two cycles on a real terminal, against a stand-in whose snapshot answers at once and gains a
   # task, latecomer, from its second run on, with the fake gh sleeping 4 s before each graphql answer
-  # (one fetch, the four searches and then the lookup, takes 8 s) and --refresh 5. Cold: In flight's
+  # (one fetch, the four searches and then the lookup, takes 8 s) and --refresh 5. Cold: Underway's
   # rows are drawn at once while the PR panes spin; at 5 s the second local cycle lands and
   # latecomer, a failed task that sorts last onto a blank line (every cell new, so the driver sees
   # the whole id), is drawn while the fetch has 3 s to run and no PR row is on screen yet; the rows
@@ -4499,7 +4654,7 @@ argv=hold decide-vendor --reason Two quotes in the report --until 2027-01-15" "p
   }
   rm -f "${LATE_HOME:?}/ran"
   run_pty_cycles cycles-cold "$SCRATCH/pty-cycles" "wait:ship-alpha" "absent:Bumptheretrybudget" "wait:latecomer" "absent:Bumptheretrybudget" "absent:(updating)" "wait:Bumptheretrybudget" "sleep:0.4" "send:q" exit
-  pty_ok cycles-cold "pty two cycles: In flight lands first, the second snapshot repaints it while the fetch runs, and the PR rows follow"
+  pty_ok cycles-cold "pty two cycles: Underway lands first, the second snapshot repaints it while the fetch runs, and the PR rows follow"
   assert_count "$(cat "$FETCH_LOG")" "gh api user --jq .login" 1 "pty two cycles: the identity is resolved once"
   if [ "$(grep -c '^snapshot$' "$FETCH_LOG")" -ge 2 ]; then pass; else fail "pty two cycles: the second snapshot ran while the fetch was out ($(cat "$FETCH_LOG"))"; fi
   FM_BOARD_TEST_GH_CAPPED=1 run_pty_cycles cycles-warm "$SCRATCH/pty-cycles" "wait:cached" "wait:(updating)" "absent:loadingGitHub" "wait:searchcappedatthe50" "sleep:0.4" "send:q" exit

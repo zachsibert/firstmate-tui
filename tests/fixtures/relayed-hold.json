@@ -1,0 +1,102 @@
+{
+  "_comment": "One row per captain-held task when a delegate's hold reaches the board twice. The delegate home delegate-a holds etl-cutover for the captain (its ledger's decisions_open, hold_bucket live) and fm-captain-hold.sh's parent channel relayed the same hold into the delegate's task record in the main home as needs-decision [key=captain-hold-etl-cutover-1] (tasks[delegate-a].hints.open_decisions), the shape that drew two rows before 0.7.0. A second relay, captain-hold-orphan-call-1, names a task the ledger does not carry, so it draws once as the fallback. The home has one live worker (etl-loader), so Underway draws that row directly with HOME delegate-a and no group row. now is 2026-09-16T12:00:00Z = epoch 1789560000.",
+  "now": "2026-09-16T12:00:00Z",
+  "cols": 160,
+  "rows": 44,
+  "fm_home": "/fixture/firstmate",
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "fm_home": "/fixture/firstmate",
+    "generated": "2026-09-16T11:59:48Z",
+    "tasks": [
+      {
+        "id": "ship-alpha",
+        "kind": "ship",
+        "project": "/fixture/firstmate/projects/widgets",
+        "mode": "direct-PR",
+        "backend": "herdr",
+        "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "not_checked", "status": "unknown" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "" },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-alpha.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme-corp/widgets" }
+      },
+      {
+        "id": "delegate-a",
+        "kind": "secondmate",
+        "project": "/fixture/homes/delegate-a",
+        "mode": "secondmate",
+        "backend": "herdr",
+        "current_state": { "state": "done", "source": "status", "detail": "relayed two captain holds", "observed_at": "2026-09-16T11:59:48Z", "freshness": "fresh" },
+        "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" },
+        "pr": { "url": null, "source": "absent" },
+        "hints": {
+          "pending_decision": true,
+          "blocked_event": false,
+          "open_decisions": [
+            { "key": "captain-hold-etl-cutover-1", "verb": "needs-decision", "summary": "captain hold etl-cutover: Cut over the nightly ETL on Friday?" },
+            { "key": "captain-hold-orphan-call-1", "verb": "needs-decision", "summary": "captain hold orphan-call: Rotate the ETL signing key?" }
+          ],
+          "scout_report_present": false,
+          "last_event_text": "needs-decision [key=captain-hold-orphan-call-1]: captain hold orphan-call: Rotate the ETL signing key?"
+        },
+        "paths": { "status_log": { "path": "/fixture/firstmate/state/delegate-a.status", "present": true, "kind": "event_history", "last_event": { "state": "needs-decision", "note": "", "raw": "" } } },
+        "remote": null,
+        "backlog": { "state": "in_flight", "title": "delegate-a", "repo": "acme-corp/widgets" }
+      }
+    ],
+    "backlog": {
+      "records": [
+        { "id": "ship-alpha", "state": "in_flight", "title": "Add the widget cache", "repo": "acme-corp/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-15", "pr_url": null, "report_path": null, "completion": { "verb": null, "date": null } }
+      ]
+    },
+    "scout_reports": [],
+    "main_inventory": { "valid": true, "reason": null, "orphan_in_flight": [], "unstructured_current_count": 0 },
+    "secondmate_current": { "records": [] },
+    "secondmate_landed": { "records": [] }
+  },
+  "ledgers": [
+    {
+      "id": "delegate-a",
+      "home": "/fixture/homes/delegate-a",
+      "remote": false,
+      "cached": false,
+      "summary": {
+        "schema": "fm-secondmate-home-summary.v1",
+        "generated_epoch": 1789559880,
+        "valid": true,
+        "state": "captain_decision",
+        "reason": null,
+        "active_children": [
+          { "id": "etl-loader", "kind": "ship", "state": "working", "repo": "acme-corp/widgets", "name": "Write the ETL loader", "source": "pane", "doing": "writing the loader" }
+        ],
+        "endpoints": [
+          { "id": "etl-loader", "state": "working", "source": "pane", "endpoint": { "target": "default:w2A:p2", "exists": true } }
+        ],
+        "holds": [],
+        "decisions_open": [
+          { "id": "etl-cutover", "key": "etl-cutover", "verb": "captain-hold", "summary": "Cut over the nightly ETL on Friday?", "reason": "Two windows fit", "hold_until": null, "hold_bucket": "live", "hold_age_days": 1, "source": "backlog" }
+        ],
+        "landed": [],
+        "queued": [
+          { "id": "etl-cutover", "title": "Cut over the nightly ETL on Friday?", "repo": "acme-corp/widgets", "kind": "task", "hold_kind": "captain", "hold_reason": "Two windows fit", "hold_bucket": "live", "hold_age_days": 1, "captain_actionable": true, "since": "2026-09-15" }
+        ]
+      }
+    }
+  ],
+  "herdr": {
+    "agents": [
+      { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-alpha" },
+      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "delegate-a" },
+      { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "etl-loader" }
+    ]
+  },
+  "prs": null,
+  "mtimes": {
+    "/fixture/firstmate/state/ship-alpha.status": 1789559700,
+    "/fixture/firstmate/state/delegate-a.status": 1789559100,
+    "/fixture/homes/delegate-a/state/etl-loader.status": 1789549200
+  }
+}

@@ -5,20 +5,24 @@
 import { width } from './text.mjs';
 
 // The six panes in screen order, which is also the order of the 1-6 keys
-// (lib/controller.mjs paneForKey reads PANES by position). In flight leads
-// (since 0.6.1, at the captain's ask) so the workers are the first thing on
-// the screen; the two PR panes sit together so the captain's own PRs and the
-// teammates' PRs read side by side. A saved view-state file keeps its meaning
-// across a reorder because hidden_panes, hidden row keys and column widths
-// are stored by pane id, never by key number (lib/viewstate.mjs), and the
-// height priorities below name panes by id too.
+// (lib/controller.mjs paneForKey reads PANES by position). Since 0.7.0 the
+// four fleet panes follow firstmate's bearings digest: Captain's Call (what
+// needs the captain's own action) leads, Underway (the live workers) is next,
+// the two PR panes sit together so the captain's own PRs and the teammates'
+// PRs read side by side, then Charted Next (queued and deferred work with its
+// reason) and Recently Landed (completions and reports). The pane ids are
+// older than the titles: `needs`, `inflight` and `landed` kept their ids
+// through the retitle so a saved view-state file keeps its meaning
+// (hidden_panes, hidden row keys and column widths are stored by pane id,
+// never by key number, lib/viewstate.mjs; `findings` entries are dropped on
+// read), and the height priorities below name panes by id too.
 export const PANES = [
-  { id: 'inflight', title: 'In flight', empty: 'no workers in flight' },
-  { id: 'needs', title: 'Needs you', empty: 'no captain decisions, holds or blocked workers' },
+  { id: 'needs', title: "Captain's Call", empty: 'nothing needs your action right now' },
+  { id: 'inflight', title: 'Underway', empty: 'nothing is underway' },
   { id: 'mine', title: 'My PRs', empty: 'no pull requests of yours' },
   { id: 'toreview', title: "Teammates' PRs", empty: 'no pull requests waiting for your review' },
-  { id: 'findings', title: 'Findings', empty: 'no scout reports' },
-  { id: 'landed', title: 'Landed', empty: 'nothing landed yet' },
+  { id: 'charted', title: 'Charted Next', empty: 'nothing is queued' },
+  { id: 'landed', title: 'Recently Landed', empty: 'no recent completions' },
 ];
 
 // The two PR panes that draw pull requests (CHECKS, STATUS, ID, TITLE, BASE,
@@ -36,9 +40,12 @@ export const MIN_COLS = 40;
 export const LIST_BREAKPOINT = 80; // below: one scrolling list with section headers
 export const WIDE_BREAKPOINT = 100; // below: drop REPO and AGE (the PR panes: drop BASE, keep AGE)
 
-// Column labels per pane for the two narrow leading columns.
-const TAG_LABEL = { needs: 'STATE', mine: 'CHECKS', toreview: 'CHECKS', inflight: 'STATE', findings: 'KIND', landed: 'VERB' };
-const EXTRA_LABEL = { needs: 'KEY', mine: 'STATUS', toreview: 'STATUS', inflight: 'HERDR', findings: 'VERB', landed: 'DATE' };
+// Column labels per pane for the two narrow leading columns, and for the
+// trailing one where it is not an age: Charted Next's last column is the
+// item's filed date (FILED), drawn in the AGE column's place and width.
+const TAG_LABEL = { needs: 'STATE', mine: 'CHECKS', toreview: 'CHECKS', inflight: 'STATE', charted: 'STATE', landed: 'VERB' };
+const EXTRA_LABEL = { needs: 'KEY', mine: 'STATUS', toreview: 'STATUS', inflight: 'HERDR', charted: 'WHY', landed: 'DATE' };
+const AGE_LABEL = { charted: 'FILED' };
 
 export function layoutMode(cols) {
   return cols < LIST_BREAKPOINT ? 'list' : 'panes';
@@ -94,10 +101,10 @@ function columnSpec(cols, paneId) {
     if (wide) spec.push({ key: 'base', label: 'BASE', cap: COLUMN_CAP });
     spec.push({ key: 'age', label: 'AGE', cap: 6, align: 'right' });
   } else {
-    spec.push({ key: 'text', label: paneId === 'findings' ? 'REPORT' : 'WHAT', flex: true });
+    spec.push({ key: 'text', label: 'WHAT', flex: true });
     if (wide) spec.push({ key: 'repo', label: 'REPO', cap: COLUMN_CAP });
     spec.push({ key: 'home', label: 'HOME', cap: COLUMN_CAP });
-    if (wide) spec.push({ key: 'age', label: 'AGE', cap: 6, align: 'right' });
+    if (wide) spec.push({ key: 'age', label: AGE_LABEL[paneId] || 'AGE', cap: 6, align: 'right' });
   }
   return spec;
 }
@@ -196,15 +203,15 @@ export function maxWidth(spec, columnId) {
 }
 
 // Content heights (rows inside the borders) for the six panes. Every shown
-// pane gets at least one content row; spare rows go where the demand is (Needs
-// you, In flight and the two PR panes first), then to In flight and Needs you,
-// which are the panes the captain watches most. Both orders name panes by id,
-// so they follow the panes wherever PANES puts them. `visible[i] === false`
-// switches pane i off (the 1-6 keys): it draws nothing and its rows go to the
-// panes still shown. The result always has one entry per pane, 0 for a hidden
-// one.
-const DEMAND_PRIORITY = ['needs', 'inflight', 'mine', 'toreview', 'findings', 'landed'].map(paneIndex);
-const SPARE_PRIORITY = ['inflight', 'needs', 'mine', 'toreview', 'findings', 'landed'].map(paneIndex);
+// pane gets at least one content row; spare rows go where the demand is
+// (Captain's Call, Underway and the two PR panes first, then Charted Next,
+// then Recently Landed), then to Underway and Captain's Call, which are the
+// panes the captain watches most. Both orders name panes by id, so they
+// follow the panes wherever PANES puts them. `visible[i] === false` switches
+// pane i off (the 1-6 keys): it draws nothing and its rows go to the panes
+// still shown. The result always has one entry per pane, 0 for a hidden one.
+const DEMAND_PRIORITY = ['needs', 'inflight', 'mine', 'toreview', 'charted', 'landed'].map(paneIndex);
+const SPARE_PRIORITY = ['inflight', 'needs', 'mine', 'toreview', 'charted', 'landed'].map(paneIndex);
 
 export function paneHeights(totalRows, demands, visible = []) {
   const rows = Math.max(totalRows, MIN_ROWS);

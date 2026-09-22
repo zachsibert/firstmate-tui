@@ -49,6 +49,10 @@ import { COLUMN_KEYS, PANES } from './layout.mjs';
 export const VIEW_STATE_SCHEMA = 'fm-board-view-state.v1';
 
 const RENAMED_PANES = { review: 'mine' };
+// Panes that no longer exist: an entry naming one is dropped on read. The
+// Findings pane went in 0.7.0 (its reports list in Recently Landed, whose
+// hide keys carry the completion date, so a Findings key cannot be mapped).
+const DROPPED_PANES = new Set(['findings']);
 
 function paneIdOf(id) {
   return RENAMED_PANES[id] || id;
@@ -57,6 +61,11 @@ function paneIdOf(id) {
 function renameHideKey(key) {
   const i = key.indexOf(':');
   return i > 0 ? `${paneIdOf(key.slice(0, i))}${key.slice(i)}` : key;
+}
+
+function droppedHideKey(key) {
+  const i = key.indexOf(':');
+  return i > 0 && DROPPED_PANES.has(key.slice(0, i));
 }
 
 export function defaultViewStatePath(env = process.env) {
@@ -149,8 +158,8 @@ export function loadViewState(path) {
   }
   if (!doc || typeof doc !== 'object') return { state, error: `${path}: not an object` };
   if (doc.schema && doc.schema !== VIEW_STATE_SCHEMA) return { state, error: `${path}: unexpected schema ${doc.schema}` };
-  for (const k of Array.isArray(doc.hidden) ? doc.hidden : []) if (typeof k === 'string' && k) state.hidden.add(renameHideKey(k));
-  for (const p of Array.isArray(doc.hidden_panes) ? doc.hidden_panes : []) if (typeof p === 'string' && p) state.hiddenPanes.add(paneIdOf(p));
+  for (const k of Array.isArray(doc.hidden) ? doc.hidden : []) if (typeof k === 'string' && k && !droppedHideKey(k)) state.hidden.add(renameHideKey(k));
+  for (const p of Array.isArray(doc.hidden_panes) ? doc.hidden_panes : []) if (typeof p === 'string' && p && !DROPPED_PANES.has(p)) state.hiddenPanes.add(paneIdOf(p));
   state.columns = sanitizeColumns(doc.columns);
   state.focus = sanitizeFocus(doc.focus);
   for (const k of Array.isArray(doc.expanded) ? doc.expanded : []) if (typeof k === 'string' && k) state.expanded.add(k);
