@@ -5,9 +5,9 @@
 
 import { columns, GUTTER, layoutMode, MIN_COLS, MIN_ROWS, PANES, paneDemand, paneHeights } from './layout.mjs';
 import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, settingsInfo, upgradeOffer } from './settings.mjs';
-import { promptText } from './card.mjs';
+import { acceptFooterText, promptText } from './card.mjs';
 import { searchIndex, searchResults } from './controller.mjs';
-import { fit, fitRaw, padRight, truncate, width } from './text.mjs';
+import { charWidth, fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
 const H = '─';
 const V = '│';
@@ -26,6 +26,7 @@ export const HELP_LINES = [
   "               Underway worker or Captain's Call worker: focus its herdr pane",
   '  f            search all panes: type loosely (any order, any case, letters apart), enter jumps, esc closes',
   "  F            focus the selected row's herdr pane, in any pane",
+  '  a            accept the selected hold: pick an option letter or type a line; fm-captain-hold.sh answer',
   '  d            discard the selected hold: asks y first, then runs fm-captain-hold.sh answer',
   '  D            defer the selected hold to a date (default today + 14 days): fm-captain-hold.sh hold',
   '  l / right    expand the selected Underway group',
@@ -48,11 +49,10 @@ export const HELP_LINES = [
   '  drag         a column boundary in a pane\'s header row resizes that column; the',
   '               width is kept across restarts. double-click the boundary to reset it',
   '',
-  'The board never answers a question for you, merges or dispatches. Its two writes, d and D,',
-  "run firstmate's own fm-captain-hold.sh in the hold's home after a confirmation; nothing else",
-  'in a firstmate home is touched. Hidden rows and panes are view state in the board\'s own file.',
-  'HERDR "pane lost" (red): the worker pane is gone from herdr. "unknown" (grey):',
-  'herdr is disconnected, so absence cannot be proved.',
+  'The board records only your own words and never merges or dispatches. Its three writes, a, d and D,',
+  "run firstmate's own fm-captain-hold.sh in the hold's home; nothing else in a firstmate home is touched.",
+  'Hidden rows and panes are view state in the board\'s own file. HERDR "pane lost" (red): the worker',
+  'pane is gone from herdr. "unknown" (grey): herdr is disconnected, so absence cannot be proved.',
 ];
 
 function seg(text, style = 'row') {
@@ -156,27 +156,33 @@ function titleLine(model, cols) {
   return fitSegments([seg(leftText, 'title'), seg(' '.repeat(gap), 'title'), ...right], cols, 'title');
 }
 
-const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  f search  l/h expand  x hide  H hidden  1-6 panes  r refresh  . settings  ? help  q quit';
-const FOOTER_KEYS_SHORT = ' j/k  tab  enter  f search  l/h  x hide  H  1-6 panes  r  . settings  ? help  q quit';
+// The full hint must fit 136 columns so a 160-column frame draws it (footerLine
+// wants 24 spare); `l/h expand` gave way to `a accept` (the group keys are
+// Underway's alone and the help names them). The short hint must fit 90
+// columns, and beside the landing page's `pane hidden` notice at 160, so it
+// names the pane keys as `1-6` alone, the way it names H and r.
+const FOOTER_KEYS = ' j/k move  tab pane  enter open/focus/view  f search  a accept  x hide  H hidden  1-6 panes  r refresh  . settings  ? help  q quit';
+const FOOTER_KEYS_SHORT = ' j/k  tab  enter  f search  a accept  x hide  H  1-6  r  . settings  ? help  q quit';
 const FOOTER_KEYS_MIN = ' ? help';
 const BOARD_FOOTER_HINTS = [FOOTER_KEYS, FOOTER_KEYS_SHORT, FOOTER_KEYS_MIN];
 
 // The footer's key hints for the board: the prompt alone while one is up
-// (lib/card.mjs promptText); on a row with a hold card the enter, F, d and D
-// words that apply to it (`enter card  F focus  d discard  D defer`) in place
-// of `enter open/focus/view`, F only with a pane and the two hold actions
-// only with a hold in a readable home, and without `l/h expand` or `f
-// search`, which the full hint has no room for at 160 columns beside the
-// hold actions (the help and the standard hints name the search); the
-// standard hints otherwise. The search prompt's footer is drawn by
-// renderSearch, which knows the match count.
+// (lib/card.mjs promptText); on a row with a hold card the enter, F, a, d
+// and D words that apply to it (`enter card  F focus  a accept  d discard  D
+// defer`) in place of `enter open/focus/view`, F only with a pane and the
+// three hold actions only with a hold in a readable home, and without `l/h
+// expand`, `f search` or `1-6 panes`, which the full hint has no room for at
+// 160 columns beside the hold actions (the help and the standard hints name
+// them); the standard hints otherwise. The search prompt's footer is drawn
+// by renderSearch, which knows the match count, and the accept prompt's by
+// renderAccept, which knows the width.
 function boardHints(model, view) {
   if (view.prompt) return [promptText(view.prompt)];
   const pane = model.panes[view.pane];
   const row = pane && !pane.hidden ? pane.rows[view.row] || null : null;
   if (!row || !row.card) return BOARD_FOOTER_HINTS;
-  const acts = ['enter card', row.paneId ? 'F focus' : null, row.hold && !row.hold.remote ? 'd discard  D defer' : null].filter(Boolean).join('  ');
-  return [` j/k move  tab pane  ${acts}  x hide  H hidden  1-6 panes  r refresh  . settings  ? help  q quit`, ` ${acts}  x hide  H  1-6 panes  r  . settings  ? help  q quit`, FOOTER_KEYS_MIN];
+  const acts = ['enter card', row.paneId ? 'F focus' : null, row.hold && !row.hold.remote ? 'a accept  d discard  D defer' : null].filter(Boolean).join('  ');
+  return [` j/k move  tab pane  ${acts}  x hide  H hidden  r refresh  . settings  ? help  q quit`, ` ${acts}  x hide  H  1-6 panes  r  . settings  ? help  q quit`, FOOTER_KEYS_MIN];
 }
 
 // The key hint and the transient notice share the footer; the notice wins.
@@ -455,6 +461,93 @@ function renderSearch(model, cols, rows, view) {
   return { lines: lines.slice(0, rows), zones: zones.slice(0, rows) };
 }
 
+// ------------------------------------------------------------- accept view
+// While the a prompt is up (view.prompt.kind 'accept') the row's hold card
+// replaces the grid between the title line and the footer, so the full
+// reason is in view while the captain answers: a heading `Accept <id>:
+// <title>` (with the visible card lines and the scroll keys when the card is
+// longer than the room), one line per lettered option the reason names (the
+// picked one drawn as the selection), a blank line, then the card's Markdown
+// wrapped to the width and scrolled by view.scroll[ACCEPT_SCROLL], the
+// offset lib/controller.mjs moves and this clamps to the card (handed back
+// in scrollOut, as the search's is). Nothing here is a row or a pane: the
+// zones are null. The footer is the prompt's own text, the typed answer cut
+// from the left when it is longer than the line (lib/card.mjs
+// acceptFooterText).
+export const ACCEPT_SCROLL = PANES.length + 1;
+
+// `text` broken into lines of at most `w` columns at spaces, a word wider
+// than the line cut at the width; an empty line stays one empty line.
+export function wrapText(text, w) {
+  const out = [];
+  for (const raw of String(text).split('\n')) {
+    if (width(raw) <= w) {
+      out.push(raw);
+      continue;
+    }
+    let line = '';
+    for (const word of raw.split(' ')) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (width(candidate) <= w) {
+        line = candidate;
+        continue;
+      }
+      if (line) out.push(line);
+      let rest = word;
+      while (width(rest) > w) {
+        let cut = '';
+        let used = 0;
+        for (const ch of rest) {
+          const cw = charWidth(ch.codePointAt(0));
+          if (used + cw > w) break;
+          cut += ch;
+          used += cw;
+        }
+        out.push(cut);
+        rest = rest.slice(cut.length);
+      }
+      line = rest;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+function renderAccept(model, cols, rows, view) {
+  const p = view.prompt;
+  const lines = [titleLine(model, cols)];
+  const zones = [null];
+  const optionLines = p.options.map((o) => ({ text: `   ${o.letter}. ${o.text}`, style: o.letter === p.picked ? 'selected' : 'help' }));
+  // title, heading, the options, a blank line and the footer take the rest.
+  const height = Math.max(1, Math.max(rows, MIN_ROWS) - 4 - optionLines.length);
+  const cardLines = wrapText(p.card, cols - 2);
+  const total = cardLines.length;
+  const start = Math.max(0, Math.min(view.scroll[ACCEPT_SCROLL] || 0, total - height));
+  view.scrollOut = [...view.scroll];
+  view.scrollOut[ACCEPT_SCROLL] = start;
+  const shown = cardLines.slice(start, start + height);
+  const range = total > height ? `  (card lines ${start + 1}-${start + shown.length} of ${total}; up/down and pageup/pagedown scroll)` : '';
+  lines.push(line([seg(truncate(` Accept ${p.id}: ${p.title}${range}`, cols), 'heading')], cols));
+  zones.push(null);
+  for (const o of optionLines) {
+    lines.push(line([seg(truncate(o.text, cols), o.style)], cols));
+    zones.push(null);
+  }
+  lines.push(line([], cols));
+  zones.push(null);
+  for (const t of shown) {
+    lines.push(line([seg(` ${t}`, 'row')], cols));
+    zones.push(null);
+  }
+  while (lines.length < rows - 1) {
+    lines.push(line([], cols));
+    zones.push(null);
+  }
+  lines.push(footerLine(model, cols, view, [acceptFooterText(p, cols)]));
+  zones.push(null);
+  return { lines: lines.slice(0, rows), zones: zones.slice(0, rows) };
+}
+
 // ------------------------------------------------------------ settings page
 // The `.` page replaces the grid between the title line and the footer. Pure
 // like the rest: view.settings (lib/settings.mjs) in, lines and zones out
@@ -614,12 +707,14 @@ function overlayHelp(lines, cols) {
 // key (view state) and drag the boundary being dragged, { paneId, index, ... }
 // (lib/controller.mjs), whose bar the pane draws. prompt is the discard or
 // defer prompt the footer shows (lib/card.mjs), the search prompt whose
-// results list replaces the grid (renderSearch), or null.
+// results list replaces the grid (renderSearch), the accept prompt whose
+// card replaces it (renderAccept), or null.
 // Returns { lines, cols, rows, mode, scroll, zones } where scroll holds the
 // start offsets actually used so the app can keep them for the next frame and
 // zones maps each line to what it shows (lib/layout.mjs hitTest). mode is
 // 'panes', 'list' (narrow), 'landing' (every pane hidden: the key page),
-// 'search' (the f prompt's results) or 'settings'.
+// 'search' (the f prompt's results), 'accept' (the a prompt's card) or
+// 'settings'.
 export function renderFrame(model, size, view = {}) {
   const cols = Math.max(MIN_COLS, size.cols | 0);
   const rows = Math.max(MIN_ROWS, size.rows | 0);
@@ -638,10 +733,12 @@ export function renderFrame(model, size, view = {}) {
     prompt: view.prompt || null,
   };
   const searching = v.page === 'board' && v.prompt && v.prompt.kind === 'search';
-  const mode = v.page === 'settings' ? 'settings' : searching ? 'search' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
+  const accepting = v.page === 'board' && v.prompt && v.prompt.kind === 'accept';
+  const mode = v.page === 'settings' ? 'settings' : searching ? 'search' : accepting ? 'accept' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
   let drawn;
   if (mode === 'settings') drawn = renderSettings(model, cols, rows, v);
   else if (mode === 'search') drawn = renderSearch(model, cols, rows, v);
+  else if (mode === 'accept') drawn = renderAccept(model, cols, rows, v);
   else if (mode === 'landing') drawn = renderLanding(model, cols, rows, v);
   else if (mode === 'list') drawn = renderList(model, cols, rows, v);
   else drawn = renderPanes(model, cols, rows, v);

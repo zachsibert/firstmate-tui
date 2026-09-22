@@ -21,10 +21,13 @@
 //                  ever launching a real viewer; enter on a row with a hold
 //                  card builds the card (a delegate home's record is read
 //                  through that home's fm-fleet-snapshot.sh) and shows it the
-//                  same way, from a temp file removed afterwards; d,y and
-//                  D,enter really run bash <home>/bin/fm-captain-hold.sh in
-//                  the hold's home, awaited before the frame, so a test points
-//                  the fixture's homes at scratch directories holding a fake;
+//                  same way, from a temp file removed afterwards; a builds
+//                  the same card and draws it in the frame behind the accept
+//                  prompt (no viewer, no temp file); a,<answer>,enter, d,y
+//                  and D,enter really run bash <home>/bin/fm-captain-hold.sh
+//                  in the hold's home, awaited before the frame, so a test
+//                  points the fixture's homes at scratch directories holding
+//                  a fake;
 //                  a success drops every row of that task from the frame at
 //                  once, as the app does (lib/model.mjs `dismissed`), and
 //                  against a live home then re-reads the snapshot the way r
@@ -140,8 +143,8 @@ import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
 import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
-import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openDeferPrompt, scrollFromSaved, viewProblem } from './lib/controller.mjs';
-import { deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, prepareHoldCard, removeTempDir } from './lib/hold.mjs';
+import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openAcceptPrompt, openDeferPrompt, scrollFromSaved, viewProblem } from './lib/controller.mjs';
+import { acceptHold, deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, loadHoldCard, prepareHoldCard, removeTempDir } from './lib/hold.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './lib/viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
@@ -384,7 +387,7 @@ async function driveOnce(facts, opts, size, cfg) {
     prSource: opts.prs ? { enabled: true, ...(facts.prSource || plannedPrSource(cfg.config, process.env)) } : { enabled: false },
   });
   const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, dismissed: new Set(), columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, prompt: null, busy: null, page: 'board', settings };
-  // The login a discard names: the fixture's or the live identity, else the OS user.
+  // The login a discard or an accept names: the fixture's or the live identity, else the OS user.
   const identity = facts.identity || (facts.prs && facts.prs.identity) || null;
   const holdLogin = () => (identityKnown(identity) ? { login: identity.login, os: false } : { login: userInfo().username, os: true });
   const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes, dismissed: view.dismissed });
@@ -503,12 +506,56 @@ async function driveOnce(facts, opts, size, cfg) {
         }),
       );
     },
-    // The two writes, for real, against the home the row names: a fixture
+    // The a key, as the app's holdAccept: the card and the full record loaded
+    // (a delegate home's read through its own snapshot script), the prompt
+    // opened over them with the card in the frame, or the refusal noticed;
+    // view.busy holds the next key back until the load lands.
+    holdAccept: (row) => {
+      const { hold } = row;
+      view.busy = `preparing the card of ${hold.id}`;
+      pending.push(
+        loadHoldCard(row.card, { timeoutMs: opts.snapshotTimeout * 1000, onBusy: (text) => ctx.notice(text) })
+          .then((loaded) => {
+            if (!loaded.full) {
+              ctx.notice(`${hold.id}: the full hold reason is not readable (${loaded.error || 'no record'}); accept it from ${hold.homeId} itself`, true);
+              return;
+            }
+            const problem = openAcceptPrompt(view, row, loaded);
+            if (problem) ctx.notice(problem, true);
+          })
+          .catch((e) => ctx.notice(`${hold.id}: ${e.message}`, true))
+          .finally(() => {
+            view.busy = null;
+          }),
+      );
+    },
+    // The three writes, for real, against the home the row names: a fixture
     // points its homes at scratch directories holding a fake fm-captain-hold.sh.
     // A success dismisses the row as the app does (dismissRow) and, against
     // a live home, re-reads the snapshot the way r does; view.busy stays set
     // through that refresh so a key list reads in order. The footer keeps
     // the command's result, as the app's weak refresh notices leave it.
+    holdAnswer: (row, { answer, release }) => {
+      const { hold } = row;
+      const who = holdLogin();
+      view.busy = `accepting ${hold.id}`;
+      pending.push(
+        acceptHold({ home: hold.home, id: hold.id, login: who.login, answer, release, timeoutMs: HOLD_TIMEOUT_MS })
+          .then((r) => {
+            if (!r.ok) {
+              ctx.notice(holdFailureText(r), true);
+              return null;
+            }
+            dismissRow(hold);
+            const said = firstLine(r.stdout);
+            ctx.notice(`${hold.id}: answer recorded; ${release ? 'firstmate dispatches' : 'closed'}${who.os ? ` (signed as OS user ${who.login}, GitHub login unknown)` : ''}${said ? ` · ${said}` : ''}`);
+            return refreshAfterHold();
+          })
+          .finally(() => {
+            view.busy = null;
+          }),
+      );
+    },
     holdDiscard: (row) => {
       const { hold } = row;
       const who = holdLogin();

@@ -45,6 +45,22 @@
 //   F       focus the row's herdr pane, whatever the pane (a row without one
 //           gets a notice): the secondary action on a card row, whose enter
 //           shows the card (f through 0.6.6; f is the search now)
+//   a       accept the row's captain hold (row.hold): the host loads the
+//           row's card and full record (lib/hold.mjs loadHoldCard; a delegate
+//           home's record is read first, and the accept is refused when the
+//           full reason is not readable here, as D refuses), then
+//           openAcceptPrompt draws the card in the frame and puts the answer
+//           prompt in the footer (view.prompt kind 'accept', lib/card.mjs:
+//           the reason's lettered options, a letter picks one, any other key
+//           types a line, enter records, esc cancels, the arrows and page
+//           keys scroll the card). Enter hands the answer to the host, which
+//           runs fm-captain-hold.sh answer --decision-file in the hold's
+//           home, with --release when the record's kind is not `captain` (a
+//           work item resumes) and without it for a question (the task
+//           closes); an empty answer, the reserved word `reconcile` and a
+//           record without a kind are refused before anything runs. On a
+//           Captain's Call review row (a PR to merge) a notice says the board
+//           does not merge and enter opens the PR
 //   d       discard the row's captain hold (row.hold): the footer asks
 //           `y to discard, esc to cancel`, then the host runs firstmate's
 //           fm-captain-hold.sh answer in the hold's home (lib/hold.mjs)
@@ -52,8 +68,9 @@
 //           prefilled with today plus 14 days (digits and dashes edit it,
 //           backspace deletes, enter defers, esc cancels), then the host runs
 //           fm-captain-hold.sh hold --until with the hold's full reason
-//           While either prompt is up (view.prompt, lib/card.mjs) every other
-//           key is ignored and the mouse does nothing; ctrl-c still quits.
+//           While any of the three prompts is up (view.prompt, lib/card.mjs)
+//           every other key is ignored and the mouse does nothing (the wheel
+//           scrolls the accept prompt's card); ctrl-c still quits.
 //           A row without a captain hold in a readable home gets a notice.
 //           When the command succeeds the host drops every row of that task
 //           from the frame at once (view.dismissed, a session-only set
@@ -95,9 +112,9 @@
 //   ?       help       q / ctrl-c  quit
 
 import { boundaryAt, hitTest, PANES } from './layout.mjs';
-import { allPanesHidden } from './render.mjs';
+import { ACCEPT_SCROLL, allPanesHidden } from './render.mjs';
 import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
-import { checkDeferDate, deferPrompt, discardPrompt, holdActionProblem, localDate, promptKeyAction, searchPrompt } from './card.mjs';
+import { acceptAnswer, acceptProblem, acceptPrompt, checkAcceptAnswer, checkDeferDate, deferPrompt, discardPrompt, holdActionProblem, localDate, promptKeyAction, searchPrompt } from './card.mjs';
 import { rankRows } from './search.mjs';
 
 const OPEN_PANES = new Set(['mine', 'toreview', 'needs']);
@@ -274,7 +291,8 @@ export function paneForKey(key) {
 // only reminds the captain how to bring a pane back; a key the board does not
 // bind stays the silent no-op it is everywhere else.
 const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', 'f', 'r', '.', '?', 'q', 'ctrl-c']);
-const ROW_KEYS = new Set(['enter', 'F', 'd', 'D', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
+const ROW_KEYS = new Set(['enter', 'F', 'a', 'd', 'D', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
+const NEEDS_PANE = 'needs';
 
 export function keyAction(model, view, key) {
   const pane = model.panes[view.pane];
@@ -311,6 +329,14 @@ export function keyAction(model, view, key) {
     case 'F':
       if (!row) return { type: 'notice', text: 'nothing selected to focus', bad: true };
       return { type: 'focus', row, any: true };
+    case 'a': {
+      // A review row is a PR the captain would merge; the board has no merge
+      // path, so it says so rather than answering anything.
+      if (row && pane.id === NEEDS_PANE && row.tag === 'review') return { type: 'notice', text: `${row.name}: accepting a pull request means merging it, which the board does not do; enter opens it`, bad: true };
+      const problem = holdActionProblem(row, 'accept');
+      if (problem) return { type: 'notice', text: problem, bad: true };
+      return { type: 'accept-prompt', row };
+    }
     case 'd':
     case 'D': {
       const problem = holdActionProblem(row, key === 'd' ? 'discard' : 'defer');
@@ -597,18 +623,21 @@ function applySettingsAction(ctx, action) {
 }
 
 // ctx: { view, model, rebuild(), notice(text, bad), open(row), focus(row,
-//        { any }), viewReport(row), viewCard(row), holdDiscard(row),
+//        { any }), viewReport(row), viewCard(row), holdAccept(row),
+//        holdAnswer(row, { answer, release }), holdDiscard(row),
 //        holdDefer(row, { reason, until }), holdReason(row), refresh(),
 //        persist(), settingsFetch(), settingsUpgrade(running), relaunch(),
 //        quit() }.
 // rebuild() must replace ctx.model from the current view (the expanded set,
 // the hidden set, the dismissed set and the hidden panes change which rows
 // and panes exist); persist() saves view.hidden, view.hiddenPanes and
-// view.columns, never view.dismissed. The three
-// hold effects run firstmate's command or read a delegate home (lib/hold.mjs)
-// and set view.busy to a short text meanwhile, which the actions here
-// refuse to start over; holdReason(row) reads a delegate hold's full reason
-// and then calls openDeferPrompt itself, or notices why it cannot.
+// view.columns, never view.dismissed. The hold effects run firstmate's
+// command or read a delegate home (lib/hold.mjs) and set view.busy to a
+// short text meanwhile, which the actions here refuse to start over;
+// holdReason(row) reads a delegate hold's full reason and then calls
+// openDeferPrompt itself, or notices why it cannot; holdAccept(row) loads
+// the card and the full record and then calls openAcceptPrompt, or notices
+// why it cannot; holdAnswer runs the answer the accept prompt submitted.
 export function handleKey(ctx, key) {
   const { view } = ctx;
   if (view.help) {
@@ -636,6 +665,20 @@ export function openDeferPrompt(view, row, reason) {
   view.lastClick = null;
 }
 
+// The accept prompt on `row` over its full `record` (the home's own, from
+// lib/hold.mjs loadHoldCard) with the card `text` the frame draws meanwhile.
+// Returns the reason it cannot open (lib/card.mjs acceptProblem: a record
+// without a kind), else null with the prompt up and the card scrolled to
+// its top. Called by the host once it has loaded the card.
+export function openAcceptPrompt(view, row, { record, text }) {
+  const problem = acceptProblem(row, record);
+  if (problem) return problem;
+  view.prompt = acceptPrompt(row, record, text);
+  view.lastClick = null;
+  view.scroll[ACCEPT_SCROLL] = 0;
+  return null;
+}
+
 export function handleMouse(ctx, ev) {
   const { view } = ctx;
   if (!ev) return;
@@ -648,9 +691,14 @@ export function handleMouse(ctx, ev) {
     return;
   }
   // The search prompt's results take the mouse; the hold prompts take the
-  // keyboard alone: a click neither confirms nor cancels them.
+  // keyboard alone: a click neither confirms nor cancels them, and the wheel
+  // only scrolls the accept prompt's card.
   if (view.prompt && view.prompt.kind === 'search') {
     applyAction(ctx, searchMouseAction(ctx.model, view, ev));
+    return;
+  }
+  if (view.prompt && view.prompt.kind === 'accept' && ev.type === 'wheel') {
+    applyAction(ctx, { type: 'accept-scroll', by: (ev.dir === 'up' ? -1 : 1) * WHEEL_ROWS });
     return;
   }
   if (view.prompt) return;
@@ -802,6 +850,41 @@ function applyAction(ctx, action) {
       // characters, so the host reads the home's own record first and opens
       // the prompt with the full reason, or refuses rather than shorten it.
       ctx.holdReason(action.row);
+      return;
+    }
+    case 'accept-prompt':
+      if (view.busy) {
+        ctx.notice(`busy: ${view.busy}`, true);
+        return;
+      }
+      // The host loads the card and the record (a delegate home's is read
+      // first) and opens the prompt through openAcceptPrompt, or notices why
+      // it cannot: a remote home was refused by keyAction already.
+      ctx.holdAccept(action.row);
+      return;
+    case 'accept-pick':
+      if (view.prompt && view.prompt.kind === 'accept') view.prompt = { ...view.prompt, picked: action.letter };
+      return;
+    case 'accept-edit':
+      if (view.prompt && view.prompt.kind === 'accept') view.prompt = { ...view.prompt, value: action.value };
+      return;
+    case 'accept-scroll':
+      // Unbounded above here; the renderer clamps it to the card and hands
+      // the clamped offset back with the frame.
+      if (view.prompt && view.prompt.kind === 'accept') view.scroll[ACCEPT_SCROLL] = Math.max(0, (view.scroll[ACCEPT_SCROLL] || 0) + action.by);
+      return;
+    case 'accept-submit': {
+      const p = view.prompt;
+      if (!p || p.kind !== 'accept') return;
+      const answer = acceptAnswer(p);
+      const problem = checkAcceptAnswer(answer);
+      if (problem) {
+        // The prompt stays open with its value for the captain to fix.
+        ctx.notice(`${p.id}: ${problem}`, true);
+        return;
+      }
+      view.prompt = null;
+      ctx.holdAnswer(p.row, { answer, release: p.release });
       return;
     }
     case 'prompt-cancel': {
