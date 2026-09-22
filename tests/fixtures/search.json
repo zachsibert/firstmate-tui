@@ -1,0 +1,102 @@
+{
+  "_comment": "The f key's search, 160x44, built from the shape of a real fleet snapshot with every name a placeholder. The delegate home delegate-a carries two live captain-hold decisions and no report: portal-mdm-gap-analysis (the 'mdm gap' target; the real snapshot listed the MDM gap-analysis report's task this way, as an open decision under its delegate home, since the hold is live and the task not landed, so neither Findings nor Landed could list it) and portal-ingest-expired-token-scout (the 'expired token' target, whose summary says ExpiredToken in camel case). Both are children of the collapsed delegate-a group in In flight, so a search finds them only through the expanded index and the jump expands the group. Landed holds twenty main-home rows so the pane caps with a `+N more` foot at 44 rows; its oldest row, archive-owner-scout (a done task with a report), sits beyond the cap. Findings lists three main reports (the test hides legacy-import-scout with x through a view-state file, then finds it) and the delegate's one landed report. My PRs has two live PRs; Teammates' PRs one; Needs you a live main hold. now is 2026-09-22T16:30:00Z = epoch 1790091000.",
+  "now": "2026-09-22T16:30:00Z",
+  "fm_home": "/fixture/firstmate",
+  "cols": 160,
+  "rows": 44,
+  "refresh": { "next_in": 18 },
+  "snapshot": {
+    "schema": "fm-fleet-snapshot.v1",
+    "generated": "2026-09-22T16:29:48Z",
+    "fm_home": "/fixture/firstmate",
+    "backlog": {
+      "records": [
+        { "id": "ship-cache", "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-22", "pr_url": "https://github.com/acme/widgets/pull/41", "report_path": null, "completion": { "verb": null, "date": null } },
+        { "id": "vendor-choice", "state": "queued", "title": "Pick the address vendor", "repo": "acme/api", "kind": "task", "hold_kind": "captain", "hold_bucket": "live", "captain_actionable": true, "since": "2026-09-19", "hold_reason": "Two quotes in the report; the cheaper one has no SLA", "hold_until": null, "hold_set": "2026-09-19T10:00:00Z", "hold_age_days": 3, "pr_url": null, "report_path": "data/vendor-choice/report.md", "body_lines": ["Two vendors quoted."], "completion": { "verb": null, "date": null } },
+        { "id": "legacy-import-scout", "state": "done", "title": "Scout: legacy import path", "repo": "acme/legacy", "kind": "scout", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-10", "pr_url": null, "report_path": "data/legacy-import-scout/report.md", "completion": { "verb": "reported", "date": "2026-09-12" } },
+        { "id": "rate-limit-scout", "state": "done", "title": "Scout: retry budget on the address API", "repo": "acme/api", "kind": "scout", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-18", "pr_url": null, "report_path": "data/rate-limit-scout/report.md", "completion": { "verb": "reported", "date": "2026-09-21" } },
+        { "id": "archive-owner-scout", "state": "done", "title": "Scout: who owns the archive bucket", "repo": "acme/storage", "kind": "scout", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-08-20", "pr_url": null, "report_path": "data/archive-owner-scout/report.md", "completion": { "verb": "reported", "date": "2026-08-22" } },
+        { "id": "ship-01", "state": "done", "title": "Rename the widget table", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/widgets/pull/30", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-21" } },
+        { "id": "ship-02", "state": "done", "title": "Add the ETL index", "repo": "acme/etl", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/etl/pull/12", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-20" } },
+        { "id": "ship-03", "state": "done", "title": "Retry on 429 from the address API", "repo": "acme/api", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/api/pull/7", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-19" } },
+        { "id": "ship-04", "state": "done", "title": "Fix the crash on launch", "repo": "acme/mobile", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/mobile/pull/3", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-18" } },
+        { "id": "ship-05", "state": "done", "title": "Bump the retry budget", "repo": "acme/api", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/api/pull/8", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-17" } },
+        { "id": "ship-06", "state": "done", "title": "Split the loader module", "repo": "acme/etl", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/etl/pull/13", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-16" } },
+        { "id": "ship-07", "state": "done", "title": "Rotate the export key", "repo": "acme/storage", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/storage/pull/21", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-15" } },
+        { "id": "ship-08", "state": "done", "title": "Add the health endpoint", "repo": "acme/api", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/api/pull/9", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-14" } },
+        { "id": "ship-09", "state": "done", "title": "Drop the unused view", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/widgets/pull/31", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-13" } },
+        { "id": "ship-10", "state": "done", "title": "Pin the runner image", "repo": "acme/ci", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/ci/pull/2", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-12" } },
+        { "id": "ship-11", "state": "done", "title": "Cache the vendor lookup", "repo": "acme/api", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/api/pull/10", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-11" } },
+        { "id": "ship-12", "state": "done", "title": "Fix the mobile deep link", "repo": "acme/mobile", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/mobile/pull/4", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-10" } },
+        { "id": "ship-13", "state": "done", "title": "Add the nightly backup", "repo": "acme/storage", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/storage/pull/22", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-09" } },
+        { "id": "ship-14", "state": "done", "title": "Trim the loader logs", "repo": "acme/etl", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/etl/pull/14", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-08" } },
+        { "id": "ship-15", "state": "done", "title": "Widen the id column", "repo": "acme/widgets", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/widgets/pull/32", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-07" } },
+        { "id": "ship-16", "state": "done", "title": "Retire the old queue", "repo": "acme/etl", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/etl/pull/15", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-06" } },
+        { "id": "ship-17", "state": "done", "title": "Sign the release tarball", "repo": "acme/ci", "kind": "ship", "hold_kind": null, "hold_bucket": null, "captain_actionable": false, "since": "2026-09-01", "pr_url": "https://github.com/acme/ci/pull/3", "report_path": null, "completion": { "verb": "merged", "date": "2026-09-05" } }
+      ]
+    },
+    "tasks": [
+      { "id": "ship-cache", "kind": "ship", "project": "/fixture/firstmate/projects/widgets", "mode": "direct-PR", "backend": "herdr", "current_state": { "state": "working", "source": "pane", "detail": "harness busy (claude-hook)", "observed_at": "2026-09-22T16:29:48Z", "freshness": "fresh" }, "endpoint": { "target": "default:w1A:p1", "exists": true, "agent_alive": "alive", "status": "alive" }, "pr": { "url": "https://github.com/acme/widgets/pull/41", "source": "status_event" }, "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "working: writing the cache" }, "paths": { "status_log": { "path": "/fixture/firstmate/state/ship-cache.status", "present": true, "kind": "event_history", "last_event": { "state": "working", "note": "writing the cache", "raw": "" } } }, "remote": null, "backlog": { "state": "in_flight", "title": "Add the widget cache", "repo": "acme/widgets" } },
+      { "id": "delegate-a", "kind": "secondmate", "project": "/fixture/homes/delegate-a", "mode": "secondmate", "backend": "herdr", "current_state": { "state": "working", "source": "pane", "detail": "supervising one child", "observed_at": "2026-09-22T16:29:48Z", "freshness": "fresh" }, "endpoint": { "target": "default:w1D:p1", "exists": true, "agent_alive": "alive", "status": "alive" }, "pr": { "url": null, "source": "absent" }, "hints": { "pending_decision": false, "blocked_event": false, "open_decisions": [], "scout_report_present": false, "last_event_text": "working: supervising" }, "paths": { "status_log": { "path": "/fixture/firstmate/state/delegate-a.status", "present": false, "kind": "event_history", "last_event": { "state": "working", "note": "", "raw": "" } } }, "remote": null, "backlog": null }
+    ],
+    "scout_reports": [
+      { "id": "legacy-import-scout", "path": "/fixture/firstmate/data/legacy-import-scout/report.md", "kind": "scout" },
+      { "id": "rate-limit-scout", "path": "/fixture/firstmate/data/rate-limit-scout/report.md", "kind": "scout" },
+      { "id": "vendor-choice", "path": "/fixture/firstmate/data/vendor-choice/report.md", "kind": "scout" }
+    ],
+    "secondmate_current": {
+      "records": [
+        {
+          "id": "delegate-a",
+          "home": "/fixture/homes/delegate-a",
+          "remote": false,
+          "active_children": [
+            { "id": "portal-owner-sync", "kind": "ship", "state": "working", "repo": "example-corp/portal", "name": "Owner sync", "source": "pane", "doing": "writing the sync job" }
+          ],
+          "endpoints": [
+            { "id": "portal-owner-sync", "state": "working", "source": "pane", "endpoint": { "target": "default:w2A:p2", "exists": true } }
+          ],
+          "decisions_open": [
+            { "id": "portal-ingest-expired-token-scout", "key": "portal-ingest-expired-token-scout", "verb": "captain-hold", "summary": "Scout: why the nightly ingest step failed with ExpiredToken (credentials frozen at asset start against the token lifetime)", "reason": "ExpiredToken root cause found: the ingest step freezes one-hour credentials once per attempt and took 60 min 02 s", "hold_until": null, "hold_bucket": "live", "hold_age_days": 4, "source": "backlog" },
+            { "id": "portal-mdm-gap-analysis", "key": "portal-mdm-gap-analysis", "verb": "captain-hold", "summary": "Scout: portal current state versus the master-data-management golden-record vision, with gap analysis and architecture verdict", "reason": "Eleven decisions from the golden-record gap analysis at data/portal-mdm-gap-analysis/report.md section 6", "hold_until": null, "hold_bucket": "live", "hold_age_days": 2, "source": "backlog" }
+          ],
+          "holds": [],
+          "landed": [],
+          "queued": [
+            { "id": "portal-ingest-expired-token-scout", "title": "Scout: the nightly ingest ExpiredToken failure", "repo": "example-corp/portal", "kind": "scout", "hold_bucket": "live", "captain_actionable": true },
+            { "id": "portal-mdm-gap-analysis", "title": "Scout: portal against the golden-record vision", "repo": "example-corp/portal", "kind": "scout", "hold_bucket": "live", "captain_actionable": true }
+          ]
+        }
+      ]
+    },
+    "secondmate_landed": {
+      "records": [
+        { "id": "portal-schema-scout", "title": "Scout: the portal schema drift", "kind": "scout", "hold_kind": null, "pr_url": null, "report_path": "data/portal-schema-scout/report.md", "local_note": null, "completion": { "verb": "reported", "date": "2026-09-20" }, "home": "/fixture/homes/delegate-a", "home_id": "delegate-a" },
+        { "id": "portal-login-fix", "title": "Fix the portal login redirect", "kind": "ship", "hold_kind": null, "pr_url": "https://github.com/example-corp/portal/pull/285", "report_path": null, "local_note": null, "completion": { "verb": "merged", "date": "2026-09-22" }, "home": "/fixture/homes/delegate-a", "home_id": "delegate-a" }
+      ]
+    }
+  },
+  "herdr": {
+    "agents": [
+      { "pane_id": "w1A:p1", "agent_status": "working", "terminal_title_stripped": "ship-cache" },
+      { "pane_id": "w1D:p1", "agent_status": "idle", "terminal_title_stripped": "delegate-a" },
+      { "pane_id": "w2A:p2", "agent_status": "working", "terminal_title_stripped": "portal-owner-sync" }
+    ]
+  },
+  "mtimes": {
+    "/fixture/firstmate/state/ship-cache.status": 1790090700,
+    "/fixture/firstmate/data/legacy-import-scout/report.md": 1789200000,
+    "/fixture/firstmate/data/rate-limit-scout/report.md": 1790000000,
+    "/fixture/firstmate/data/vendor-choice/report.md": 1789800000,
+    "/fixture/firstmate/data/archive-owner-scout/report.md": 1787400000,
+    "/fixture/homes/delegate-a/data/portal-schema-scout/report.md": 1789900000
+  },
+  "prs": {
+    "candidate_prs": [
+      { "num": "41", "repo": "acme/widgets", "task": "ship-cache", "url": "https://github.com/acme/widgets/pull/41", "title": "Add the widget cache", "base": "main", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-22T13:00:00Z" },
+      { "num": "52", "repo": "acme/api", "task": "-", "url": "https://github.com/acme/api/pull/52", "title": "Tighten the token refresh window", "base": "main", "review": "APPROVED", "mergeable": "MERGEABLE", "checks": "passing", "created_at": "2026-09-21T09:00:00Z" },
+      { "num": "290", "repo": "example-corp/portal", "task": "-", "url": "https://github.com/example-corp/portal/pull/290", "title": "Portal owner import: dedupe by tax id", "base": "main", "review": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "checks": "pending", "created_at": "2026-09-22T08:00:00Z", "author": "teammate", "requested": true, "pane": "toreview" }
+    ],
+    "toreview": { "scope": ["example-corp/portal"] }
+  }
+}

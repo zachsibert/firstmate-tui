@@ -1,4 +1,4 @@
-// lib/card.mjs - the hold card and the two hold prompts, pure. Data in,
+// lib/card.mjs - the hold card and the footer prompts, pure. Data in,
 // Markdown text or a small state object out; nothing here reads a file,
 // spawns a process or touches a terminal. lib/sources.mjs reads the files a
 // card shows, lib/hold.mjs writes the card to a temp file and runs
@@ -19,6 +19,18 @@
 //   { kind: 'defer', row, id, reason, value }       D: digits and dashes edit
 //                                                   the date, backspace deletes,
 //                                                   enter defers, esc cancels
+//   { kind: 'search', value, index }                f: printable characters and
+//                                                   space append to the query,
+//                                                   backspace deletes, up/down,
+//                                                   pageup/pagedown and tab/S-tab
+//                                                   move through the matches
+//                                                   (index), enter jumps to the
+//                                                   selected match, esc closes.
+//                                                   j and k type, since a query
+//                                                   may carry them ("token");
+//                                                   the matches are ranked by
+//                                                   lib/search.mjs over
+//                                                   model.search
 // Every other key is ignored while a prompt is up (ctrl-c still quits).
 
 export const CARD_REPORT_LINES = 40;
@@ -93,18 +105,41 @@ export function deferPrompt(row, reason, today) {
   return { kind: 'defer', row, id: row.hold.id, reason, value: plusDays(today, DEFER_DEFAULT_DAYS) };
 }
 
-// The footer's text while a prompt is up.
-export function promptText(prompt) {
+// The search prompt, empty, with the cursor on the first match.
+export function searchPrompt() {
+  return { kind: 'search', value: '', index: 0 };
+}
+
+export const SEARCH_MAX_LENGTH = 80;
+
+// The footer's text while a prompt is up. `matches` is the search prompt's
+// match count (the renderer and the controller compute it from model.search).
+export function promptText(prompt, matches = null) {
   if (!prompt) return '';
   if (prompt.kind === 'discard') return ` discard ${prompt.id}? y to discard, esc to cancel`;
+  if (prompt.kind === 'search') {
+    const n = Number.isInteger(matches) ? matches : 0;
+    return ` search: ${prompt.value}  ${n} match${n === 1 ? '' : 'es'}  enter jumps  esc cancels`;
+  }
   return ` defer ${prompt.id} until (YYYY-MM-DD): ${prompt.value}  enter defers  esc cancels`;
 }
+
+// The keys that move through the search matches, and how far: the arrows,
+// the page keys and tab / shift-tab. j and k are typed into the query.
+const SEARCH_MOVES = { up: -1, down: 1, tab: 1, 'S-tab': -1, pageup: -10, pagedown: 10 };
 
 // The meaning of a key while a prompt is up. Pure on (prompt, key).
 export function promptKeyAction(prompt, key) {
   if (key === 'ctrl-c') return { type: 'quit' };
-  if (key === 'escape') return { type: 'prompt-cancel' };
+  if (key === 'escape') return prompt.kind === 'search' ? { type: 'search-cancel' } : { type: 'prompt-cancel' };
   if (prompt.kind === 'discard') return key === 'y' ? { type: 'discard', row: prompt.row } : { type: 'none' };
+  if (prompt.kind === 'search') {
+    if (key === 'enter') return { type: 'search-jump' };
+    if (key === 'backspace') return { type: 'search-edit', value: prompt.value.slice(0, -1) };
+    if (Object.prototype.hasOwnProperty.call(SEARCH_MOVES, key)) return { type: 'search-move', by: SEARCH_MOVES[key] };
+    if (typeof key === 'string' && key.length === 1 && key >= ' ' && prompt.value.length < SEARCH_MAX_LENGTH) return { type: 'search-edit', value: prompt.value + key };
+    return { type: 'none' };
+  }
   if (key === 'enter') return { type: 'defer-submit' };
   if (key === 'backspace') return { type: 'defer-edit', value: prompt.value.slice(0, -1) };
   if (/^[0-9-]$/.test(key) && prompt.value.length < 10) return { type: 'defer-edit', value: prompt.value + key };

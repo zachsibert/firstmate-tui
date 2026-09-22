@@ -252,6 +252,8 @@ export function paneDemand(rowCount) {
 //                                column header also carries `header: { x0,
 //                                spec }`, the drawn columns and the x of the
 //                                first one, which boundaryAt() reads
+//   { kind: 'result', index }    one row of the f key's results list (lib/render.mjs
+//                                renderSearch), its index in the ranked matches
 //   null                         the title line, the footer, the landing page
 // A row spans the whole frame width, so only y decides; x only has to be
 // inside the frame. Hidden panes draw nothing and so own no zone: a click on
@@ -266,6 +268,8 @@ export function hitTest(frame, x, y) {
   if (zone.kind === 'pane') return { kind: 'pane', pane: zone.pane };
   // The Settings page (lib/settings.mjs): one of its selectable entries.
   if (zone.kind === 'settings') return { kind: 'settings', entry: zone.entry };
+  // The search results (lib/controller.mjs searchMouseAction).
+  if (zone.kind === 'result') return { kind: 'result', index: zone.index };
   return null;
 }
 

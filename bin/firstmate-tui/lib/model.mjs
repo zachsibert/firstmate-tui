@@ -76,7 +76,7 @@
 //                 stale or cached snapshot cannot bring the row back for a
 //                 tick
 //
-// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading, cached } x6 ], meta },
+// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading, cached } x6 ], search[], meta },
 // where header is `Title (count[, n hidden])` plus ` (stale)` when that pane's
 // own data failed to refresh and ` (cached 12m ago)` while its rows come from
 // the state cache (paneCached below; cached is null or { ageSeconds, label }
@@ -101,6 +101,19 @@
 // listed under showHidden carries hidden: true. The mapping follows the scout
 // report's section 1 table.
 //
+// search: the f key's index (lib/search.mjs), one entry per row of every
+// pane, { pane (the index in panes), paneId, paneTitle, row }, in pane order
+// then row order: the builders' full lists with the dismissed rows dropped,
+// every hidden row kept and marked as H shows it, every group expanded (a
+// collapsed group's children are searchable, and the jump expands the group)
+// and the hidden panes' rows included (the jump shows the pane). Each row
+// carries searchText and searchHead (lib/search.mjs searchTextOf), filled
+// here so the matcher never reads a pane's own fields. The list is built
+// from the same builder calls as the panes, plus one more build of any pane
+// whose rows hold a collapsed group, with every group open, so a refresh
+// that changes the rows changes the results with it. Nothing here names a
+// pane: the index follows PANES (lib/layout.mjs) and the builders map.
+//
 // card: null, or what `enter` opens as the row's hold card (lib/card.mjs,
 // lib/hold.mjs): { id, home (path), homeId, homeLabel, remote, source,
 // record }. A main-home row's record is the snapshot's backlog record
@@ -119,6 +132,7 @@
 import { PANES } from './layout.mjs';
 import { basename, clean, fmtAge, parseTime, relativeTo, repoFromUrl } from './text.mjs';
 import { identityPending, identityUnknown } from './identity.mjs';
+import { searchTextOf } from './search.mjs';
 
 const MAIN_HOME_LABEL = 'main';
 
@@ -1245,7 +1259,8 @@ function inflightRows(facts, opts) {
   for (const ledger of facts.ledgers || []) {
     const mate = mateTaskFor(tasks, ledger);
     if (mate) folded.add(mate.id);
-    entries.push(ledgerGroup(facts, ledger, mate, expanded.has(groupKeyFor(ledger)), backlogById));
+    // expandAll (the search index) opens every group so its children are listed.
+    entries.push(ledgerGroup(facts, ledger, mate, Boolean(opts.expandAll) || expanded.has(groupKeyFor(ledger)), backlogById));
   }
   const mainEntries = tasks.filter((t) => !folded.has(t.id)).map((t) => ({ row: mainTaskRow(facts, t, backlogById), children: [] }));
   const ordered = sortInflight([...mainEntries, ...entries]);
@@ -1693,8 +1708,19 @@ export function buildModel(facts, options = {}) {
   };
   const f = normalizeFacts(facts);
   const builders = { needs: needsRows, mine: mineRows, inflight: inflightRows, findings: findingsRows, landed: landedRows, toreview: toReviewRows };
+  const search = [];
   const panes = PANES.map((p, i) => {
-    const { rows, hiddenCount } = applyHidden(p.id, applyDismissed(builders[p.id](f, opts), opts), opts);
+    const full = applyDismissed(builders[p.id](f, opts), opts);
+    const { rows, hiddenCount } = applyHidden(p.id, full, opts);
+    // The search index (header): every row of the pane, hidden ones marked; a
+    // pane with a collapsed group is built again with every group open so
+    // the group's children are found too (pane-agnostic: whichever pane
+    // draws groups).
+    const collapsed = full.some((r) => r.group && !r.expanded);
+    const indexed = collapsed ? applyDismissed(builders[p.id](f, { ...opts, expandAll: true }), opts) : full;
+    // The search text is read before the hidden mark, so `(hidden)` never matches.
+    const withText = indexed.map((row) => ({ ...row, ...searchTextOf(row) }));
+    for (const row of applyHidden(p.id, withText, { ...opts, showHidden: true }).rows) search.push({ pane: i, paneId: p.id, paneTitle: p.title, row });
     const empty = PR_PANE_IDS.has(p.id) ? prPaneEmpty(f, p) : p.empty;
     const cached = paneCached(f, p, f.cached);
     return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length, hiddenCount, opts.showHidden, cached), loading: paneLoading(f, p), cached };
@@ -1702,6 +1728,7 @@ export function buildModel(facts, options = {}) {
   const homes = 1 + f.ledgers.length;
   return {
     panes,
+    search,
     // Whether a herdr pane can be reached from this board: false under
     // --no-herdr (state off, or the fixture overlay that stands in for a
     // server); a connecting or dropped link still counts, as In flight's focus
