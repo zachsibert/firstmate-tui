@@ -205,13 +205,26 @@ marker belong to later milestones.
   the ledger carries no per-child parent field (the comment above
   `inflightRows` in `lib/model.mjs` lists the fields that exist). Read it
   before changing the grouping. A home's rows are its live workers only
-  (`ledgerChildRows`: active children and live endpoints, never a done or
-  unknown one, never a hold or decision); a group row is drawn only over two
-  or more of them, one worker draws directly, none draws nothing
-  (`ledgerEntry`, `groupState`); the delegate's own task record lends the
-  group a pane and nothing else, because that record's state is the last
-  verb of the delegate's own status log and reads done after any done relay.
-  Do not rank or list it again.
+  (`ledgerChildRows`: active children and live endpoints, never a done one,
+  never a hold or decision); a group row is drawn only over two or more of
+  them, one worker draws directly, none draws nothing (`ledgerEntry`,
+  `groupState`); the delegate's own task record lends the group a pane and
+  nothing else, because that record's state is the last verb of the
+  delegate's own status log and reads done after any done relay. Do not rank
+  or list it again.
+- An endpoint or task whose current state is `unknown` is judged by its
+  pane, never by the reason text (the unknown-state rule in `lib/model.mjs`,
+  there because firstmate's run-step reader answers unknown for every task
+  on the validation pipeline): a delegate child lists in Underway when its
+  pane exists and herdr reports the agent working or busy through the HERDR
+  column's own join (`unknownEndpointLive`), a main-home task when its pane
+  is neither gone, dead nor lost and either herdr reports it busy or its
+  status log's last event is a working line (`unknownTaskLive`); both draw
+  as `working` with `validation state unreadable` in WHAT and count as live
+  workers for the group header and the held-item gate. Every other unknown
+  task is a Charted Next warning naming its case (`unavailableText`), and a
+  home-level `child current state unavailable: <ids>` reason is cut to the
+  ids not drawn (`homeWarningText`).
 - `FM_HOME` is explicit, never inferred from the current directory. The
   launcher's FM_HOME error may name a home it finds above the working
   directory as the command to run, but it never adopts one (`die_no_home`

@@ -124,6 +124,13 @@
 #                   failed child), a failed main-home task under a live captain
 #                   hold, a done one with an unmerged PR, and a merged one whose
 #                   record was cleaned up (Recently Landed only)
+#   unknown-live.json  160x60, the unknown-state rule: six main-home tasks
+#                   and four delegate children the run-step reader cannot
+#                   place (current state unknown), one per case the rule
+#                   judges by the pane: busy in herdr, idle with a working
+#                   last event, gone, agent dead, idle with a paused event,
+#                   lost from herdr; the delegate's canonical record and
+#                   ledger both carry the reason naming its two live children
 #   empty.json      120x40, every pane empty, no herdr block
 #   narrow.json     70x24, list mode with section headers, a cached local home
 #   lost.json       160x40, a main worker and a secondmate child whose panes
@@ -315,6 +322,23 @@ variant() {
     for (const [k, v] of Object.entries(patch)) fx[k] = isObj(v) && isObj(fx[k]) ? { ...fx[k], ...v } : v;
     fs.writeFileSync(dst, JSON.stringify(fx));
   ' "$FIX/$1" "$out" "$3"
+  printf '%s\n' "$out"
+}
+# variant_at <fixture> <name> <dotted path> <json value>: a copy of the fixture with the value at that
+# path replaced (keys and array indexes joined by dots, so snapshot.tasks.0.endpoint is the first
+# task's endpoint), for a change deeper than variant's one level; prints the copy's path for render()
+variant_at() {
+  local out="$SCRATCH/variant-$2.json"
+  node -e '
+    const fs = require("fs");
+    const [src, dst, path, valueText] = process.argv.slice(1);
+    const fx = JSON.parse(fs.readFileSync(src, "utf8"));
+    const keys = path.split(".");
+    let cur = fx;
+    for (const k of keys.slice(0, -1)) cur = cur[k];
+    cur[keys[keys.length - 1]] = JSON.parse(valueText);
+    fs.writeFileSync(dst, JSON.stringify(fx));
+  ' "$FIX/$1" "$out" "$3" "$4"
   printf '%s\n' "$out"
 }
 # render_open <fixture> <keys>: render with the fake opener recording into OPENER_LOG (reset first)
@@ -783,7 +807,7 @@ assert_row "$(render inflight-live.json --keys j)" '^ j/k move  tab pane  enter 
 assert_contains "$frame_il" "Charted Next (0, 3 warnings)" "inflight-live: three warnings, no queued work; the count leaves the warnings out"
 assert_row "$frame_il" '^│ warning +- +ghost-tmux +endpoint 0:fm-ghost-tmux is gone \(exists: false\) +- +stale-home +- │$' "an unknown endpoint on a tmux target that no longer exists is a warning"
 assert_row "$frame_il" '^│ warning +- +ghost-lost +endpoint default:w9B:p1 is gone \(exists: false\) +- +stale-home +- │$' "an unknown endpoint whose pane is gone is a warning"
-assert_row "$frame_il" '^│ warning +- +peek +child current state unavailable \(endpoint default:w9C:p1, none\) +- +stale-home +- │$' "an unknown endpoint whose pane exists is a warning about its state, not an Underway row"
+assert_row "$frame_il" '^│ warning +- +peek +child current state unavailable \(endpoint default:w9C:p1, none; pane alive, agent idle\) +- +stale-home +- │$' "an unknown endpoint whose pane exists but whose agent herdr reads idle is a warning naming the idle agent, not an Underway row (the unknown-state rule: only a busy pane is a worker)"
 assert_no_row "$frame_il" '^│ warning +- +(stale-done|backfill|child-a) ' "no warning for a done endpoint or a live worker"
 frame_ilx=$(render inflight-live.json --expand all) || fail "inflight-live --expand all: render exited non-zero"
 inflight_ilx=$(pane_lines "$frame_ilx" 2)
@@ -796,7 +820,7 @@ assert_row "$frame_ilx" '^│ working +working +↳ child-b +adding the schema m
 assert_not_contains "$inflight_ilx" "stale-done" "expanded: a done endpoint is not listed"
 assert_not_contains "$inflight_ilx" "ghost-tmux" "expanded: an unknown endpoint on a tmux target is not listed"
 assert_not_contains "$inflight_ilx" "ghost-lost" "expanded: an unknown endpoint whose herdr pane is gone is not listed"
-assert_not_contains "$inflight_ilx" "peek" "expanded: an unknown endpoint with a herdr pane is not listed either; it is a Charted Next warning"
+assert_not_contains "$inflight_ilx" "peek" "expanded: an unknown endpoint whose herdr agent is idle is not listed either; it is a Charted Next warning"
 assert_not_contains "$inflight_ilx" "vendor-pick" "expanded: the relayed decision is not a child row"
 assert_not_contains "$inflight_ilx" "price-hold" "expanded: the ledger's captain hold is not a child row"
 frame_ilk=$(render inflight-live.json --keys "tab,l") || fail "inflight-live keys l: render exited non-zero"
@@ -1821,7 +1845,8 @@ assert_contains "$frame_ch" "Charted Next (9, 6 warnings)" "charted: nine items 
 assert_row "$frame_ch" '^│ STATE +WHY +ID +WHAT +REPO +HOME +FILED │$' "charted: the pane's columns"
 assert_row "$frame_ch" '^│ warning +- +main inventory +main in-flight backlog item has no child metadata: orphan-item +- +main +- │$' "charted: the invalid main inventory is a warning"
 assert_row "$frame_ch" '^│ warning +- +child-gone +endpoint default:w2B:p2 is gone \(exists: false\) +- +delegate-a +- │$' "charted: an unknown endpoint whose pane is gone is a warning"
-assert_row "$frame_ch" '^│ warning +- +child-lost +child current state unavailable \(endpoint default:w2C:p2, run-step\) +- +delegate-a +- │$' "charted: an unknown endpoint under a home with no home-level warning is a warning of its own"
+assert_row "$frame_ch" '^│ warning +- +child-lost +child current state unavailable \(endpoint default:w2C:p2, run-step' "charted: an unknown endpoint under a home with no home-level warning is a warning of its own (its herdr agent reads done, so the unknown-state rule leaves it a warning)"
+assert_row "$(render charted.json --cols 200)" '^│ warning +- +child-lost +child current state unavailable \(endpoint default:w2C:p2, run-step; pane alive, agent done\) +- +delegate-a +- │$' "charted: the warning names the case, the pane alive and herdr's word for the agent (read at 200 columns, where the WHAT column has the room)"
 assert_row "$frame_ch" '^│ warning +- +delegate-b +in-flight backlog item has terminal child state: old-child=done +- +delegate-b +- │$' "charted: an invalid ledger is one home-level warning; its done endpoint draws nothing"
 assert_row "$frame_ch" '^│ warning +- +delegate-c +structured state unreadable: no ledger +- +delegate-c +- │$' "charted: a home with no ledger is a warning"
 assert_row "$frame_ch" '^│ warning +- +delegate-d +child current state unavailable: ghost-child +- +delegate-d +- │$' "charted: a home the canonical snapshot reads unknown is a warning carrying its reason"
@@ -1872,6 +1897,85 @@ frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j,j,j,j,D") || fail "ch
 assert_row "$frame_ch" "^ defer hold-blocked until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "charted: D on a held row opens the date prompt"
 frame_ch=$(render_view charted.json "tab,tab,j,j,j,j,j,j,j,j,j,enter") || fail "charted card: render exited non-zero"
 assert_contains "$frame_ch" "viewed the hold card of hold-blocked (viewer-cmd)" "charted: enter on a held row shows its card"
+
+# unknown-live.json (its _comment names every row): the unknown-state rule. firstmate's current-state
+# reader answers unknown for every task on the validation pipeline (it looks the run inventory up by
+# the task's worktree path while the daemon keys it by the primary checkout; a firstmate reader fix is
+# the other half of this), so the board judges liveness by the pane and never by the reason text: a
+# delegate child whose pane exists and whose herdr agent is working or busy, and a main-home task whose
+# pane exists, is neither dead nor lost, and is either busy in herdr or has a working line as its last
+# status event, are Underway rows reading working with `validation state unreadable` in WHAT; every
+# other unknown task stays a Charted Next warning naming its case (falsify: drop the unknownEndpointLive
+# branch from ledgerChildRows or the unknownTaskLive one from mainTaskRow, read the reason text instead
+# of herdrColumn's status, let a dead or lost pane through, count idle as busy, or leave the home-level
+# reason uncut in homeWarningText).
+frame_ul=$(render unknown-live.json) || fail "unknown-live: render exited non-zero"
+inflight_ul=$(pane_lines "$frame_ul" 2)
+charted_ul=$(pane_lines "$frame_ul" 5)
+assert_contains "$frame_ul" "Underway (3)" "unknown-live: two main workers and the delegate's group, nothing else"
+assert_row "$frame_ul" '^│ working +working +main-live +Retry on 429 from the address API · validation state unreadable +example-org/example-repo +main +10m │$' "unknown-live: a main task the reader cannot place, its pane busy in herdr, is a working row with its title and the unreadable text"
+assert_row "$frame_ul" '^│ working +idle +main-event +Add the export button · validation state unreadable +example-org/example-repo +main +25m │$' "unknown-live: a main task whose herdr agent is idle but whose last status event is a working line is a working row too (a pipeline worker's pane idles while the daemon runs a round)"
+assert_row "$frame_ul" '^│ working +2 live +▸ delegate-a +child-a, child-b +- +delegate-a +5m │$' "unknown-live: the delegate's two live unknown children draw a group header reading working, 2 live"
+assert_not_contains "$inflight_ul" "unknown " "unknown-live: no STATE or HERDR cell reads unknown"
+assert_no_row "$inflight_ul" 'main-(gone|dead|idle|lost)' "unknown-live: a main task whose pane is gone, dead or lost, or idle with no working event, is no worker row"
+frame_ulx=$(render unknown-live.json --expand all) || fail "unknown-live --expand all: render exited non-zero"
+assert_contains "$frame_ulx" "Underway (5)" "unknown-live expanded: the two children join the three rows"
+assert_row "$frame_ulx" '^│ working +working +↳ child-a +child-a · validation state unreadable +- +delegate-a +30m │$' "unknown-live expanded: a child with no title reads its id, then the unreadable text; HERDR herdr's working"
+assert_row "$frame_ulx" '^│ working +busy +↳ child-b +child-b · validation state unreadable +- +delegate-a +5m │$' "unknown-live expanded: a busy agent counts as live too; HERDR reads busy"
+assert_no_row "$(pane_lines "$frame_ulx" 2)" 'child-(gone|idle)' "unknown-live expanded: the gone and the idle child are not listed"
+assert_contains "$frame_ul" "Charted Next (0, 6 warnings)" "unknown-live: six warnings, none for the two live children or the two live main tasks"
+assert_row "$frame_ul" '^│ warning +- +main-gone +endpoint default:w1C:p1 is gone \(exists: false\) +- +main +- │$' "unknown-live: a main task whose pane is gone keeps the gone warning"
+assert_row "$frame_ul" '^│ warning +- +main-dead +current state unavailable \(endpoint default:w1D:p1, run-step; agent dead\) +- +main +- │$' "unknown-live: agent_alive dead is a warning even while herdr reads the pane working"
+assert_row "$frame_ul" '^│ warning +- +main-idle +current state unavailable \(endpoint default:w1E:p1, run-step; pane alive, agent idle\) +- +main +- │$' "unknown-live: an idle agent whose last event is paused is a warning naming the idle agent"
+assert_row "$frame_ul" '^│ warning +- +main-lost +current state unavailable \(endpoint default:w1F:p1, run-step; pane lost\) +- +main +- │$' "unknown-live: a pane herdr no longer lists is a warning naming the lost pane, whatever the status log says"
+assert_row "$frame_ul" '^│ warning +- +child-gone +endpoint default:w2C:p1 is gone \(exists: false\) +- +delegate-a +- │$' "unknown-live: the gone child keeps its gone warning"
+assert_row "$frame_ul" '^│ warning +- +child-idle +child current state unavailable \(endpoint default:w2D:p1, run-step; pane alive, agent idle\) +- +delegate-a +- │$' "unknown-live: the idle child keeps a warning naming the idle agent"
+assert_no_row "$charted_ul" 'child-a|child-b' "unknown-live: no warning names child-a or child-b, and the home-level warning that named them both is dropped"
+assert_no_row "$charted_ul" '^│ warning +- +delegate-a ' "unknown-live: no home-level warning for the delegate"
+assert_no_row "$charted_ul" 'main-(live|event)' "unknown-live: no warning for a main task drawn as a worker"
+assert_before "$frame_ul" '^│ warning +- +main-lost' '^│ warning +- +child-gone' "unknown-live: the main home's warnings come before the delegate's"
+assert_contains "$frame_ul" "Captain's Call (0)" "unknown-live: the rule puts nothing in Captain's Call"
+assert_contains "$frame_ul" "Recently Landed (0)" "unknown-live: nor in Recently Landed"
+assert_widths "$frame_ul" 160 "unknown-live frame lines are 160 columns"
+assert_lines "$frame_ul" 60 "unknown-live frame is 60 lines"
+# A worker drawn under the rule keeps every worker behavior: enter and F focus its pane, x hides it and
+# the search finds it (falsify: build the row without paneId or focusable, or skip it in the search index).
+frame_ulk=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/unknown-live.json" --keys "tab,j,j,l,j,enter") || fail "unknown-live enter child: render exited non-zero"
+assert_contains "$frame_ulk" "would focus w2A:p1 (child-a); --render-once never runs herdr agent focus" "unknown-live: enter on the live child focuses its pane"
+if [ -e "$HERDR_LOG" ]; then fail "unknown-live: a fixture render with herdr on called herdr: $(cat "$HERDR_LOG")"; else pass; fi
+frame_ulk=$(fake_herdr_env "$BOARD" --render-once --fixture "$FIX/unknown-live.json" --keys "tab,F") || fail "unknown-live F main: render exited non-zero"
+assert_contains "$frame_ulk" "would focus w1A:p1 (main-live); --render-once never runs herdr agent focus" "unknown-live: F on the live main task focuses its pane"
+frame_ulk=$(render unknown-live.json --keys "tab,j,j,l,j,x") || fail "unknown-live x: render exited non-zero"
+assert_contains "$frame_ulk" "Underway (4, 1 hidden)" "unknown-live: x hides the live child"
+assert_no_row "$(pane_lines "$frame_ulk" 2)" '↳ child-a' "unknown-live: the hidden child leaves the pane"
+frame_ulk=$(render unknown-live.json --keys "f,c,h,i,l,d,-,a") || fail "unknown-live search: render exited non-zero"
+assert_row "$frame_ulk" '^ Underway +working +working +↳ child-a +child-a · validation state unreadable +- +delegate-a +30m$' "unknown-live: the search finds the live child behind the collapsed group"
+# The home-level warning is cut to the ids the rule does not draw, and kept when one remains; the cut
+# reads the ledger's own reason when the canonical record is absent (falsify: drop unavailableIds, or
+# apply the cut to the canonical reason alone).
+frame_ulv=$(render "$(variant_at unknown-live.json unknown-reason-idle snapshot.secondmate_current.records.0.current '{"state": "unknown", "reason": "child current state unavailable: child-a, child-b, child-idle"}')") || fail "unknown-live reason-idle: render exited non-zero"
+assert_row "$frame_ulv" '^│ warning +- +delegate-a +child current state unavailable: child-idle +- +delegate-a +- │$' "unknown-live: a home-level reason naming a child the rule does not draw is kept, naming that child alone"
+assert_no_row "$(pane_lines "$frame_ulv" 5)" '^│ warning +- +child-idle ' "unknown-live: the per-child warning yields to the home-level one that names it, as before"
+assert_contains "$frame_ulv" "Charted Next (0, 6 warnings)" "unknown-live: the home-level warning replaces the per-child one, so the count holds"
+assert_contains "$frame_ulv" "Underway (3)" "unknown-live: the live children still draw when the reason names another child"
+frame_ulv=$(render "$(variant_at unknown-live.json unknown-ledger-only snapshot.secondmate_current '{"records": []}')") || fail "unknown-live ledger-only: render exited non-zero"
+assert_no_row "$(pane_lines "$frame_ulv" 5)" '^│ warning +- +delegate-a ' "unknown-live: the ledger's own invalid reason is cut the same way when the canonical record is absent"
+assert_contains "$frame_ulv" "Charted Next (0, 6 warnings)" "unknown-live ledger-only: the same six warnings"
+# With herdr disconnected and nothing known about the panes, a child cannot be proved busy and stays a
+# warning under the uncut home-level reason, while a main task's working last event still counts and a
+# pane herdr cannot see is not lost (falsify: treat a null status as busy, or a disconnected herdr as lost).
+frame_ulv=$(render "$(variant unknown-live.json unknown-disconnected '{"herdr": {"state": "disconnected", "agents": []}}')") || fail "unknown-live disconnected: render exited non-zero"
+assert_contains "$frame_ulv" "Underway (3)" "unknown-live disconnected: the three main tasks with a working last event, main-lost among them since its absence is unproved"
+assert_row "$frame_ulv" '^│ working +unknown +main-lost +Index the warehouse table · validation state unreadable ' "unknown-live disconnected: the status log's working line carries a main task whose pane herdr cannot see"
+assert_no_row "$frame_ulv" 'delegate-a +child-a, child-b' "unknown-live disconnected: no group over children herdr cannot vouch for"
+assert_row "$frame_ulv" '^│ warning +- +delegate-a +child current state unavailable: child-a, child-b +- +delegate-a +- │$' "unknown-live disconnected: the home-level reason stays whole"
+assert_row "$frame_ulv" '^│ warning +- +main-idle +current state unavailable \(endpoint default:w1E:p1, run-step; pane alive, agent unknown\) +- +main +- │$' "unknown-live disconnected: a main task with no working event names the agent unknown"
+assert_contains "$frame_ulv" "Charted Next (0, 5 warnings)" "unknown-live disconnected: main-gone, main-dead, main-idle, child-gone and the home"
+# A live unknown task under an external hold is a worker, not a gate: its held item stays out of Charted
+# Next as a working task's does (falsify: leave unknownTaskLive out of chartedRows' workingIds).
+frame_ulv=$(render "$(variant_at unknown-live.json unknown-held snapshot.backlog.records.0 '{"id": "main-live", "state": "in_flight", "structured": true, "current_role": "held", "title": "Retry on 429 from the address API", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": "external", "hold_reason": "waiting on the vendor", "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-21", "pr_url": null, "report_path": null, "completion": {"verb": null, "date": null}}')") || fail "unknown-live held: render exited non-zero"
+assert_row "$frame_ulv" '^│ working +working +main-live +Retry on 429 from the address API · validation state unreadable ' "unknown-live held: the live task under an external hold keeps its worker row"
+assert_no_row "$(pane_lines "$frame_ulv" 5)" 'main-live' "unknown-live held: its held item is no Charted Next gate while the pane is busy"
 
 # -------------------------------------------------------------------- hide
 vs="$SCRATCH/view-state.json"
