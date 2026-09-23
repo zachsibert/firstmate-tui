@@ -899,7 +899,7 @@ if [ "$tags_ok" -eq 1 ]; then
 
   # 1. A 0.2.5 install made by the 0.2.5 installer (git show
   # v0.2.5:bin/install.sh), then reinstalled through the current installer
-  # from stdin, the `curl | bash` shape the README documents for 0.2.5 and
+  # from stdin, the `curl | bash` shape docs/upgrade.md documents for 0.2.5 and
   # 0.2.6 installs, against a latest release holding the current tarball under
   # the new name only: the new asset is downloaded, the new layout lands, both
   # commands work, the record says so, and a view-state file outside the
@@ -992,7 +992,7 @@ if [ "$tags_ok" -eq 1 ]; then
   # reproduction: the 0.2.5 installer read curl exit 22 alone as "not there",
   # so against the exit-56 answer GitHub gave for the missing new name of a
   # 0.2.x release it stops with curl's status and never asks for the old name,
-  # which is why the README documents the reinstall above (if this passes,
+  # which is why docs/upgrade.md documents the reinstall above (if this passes,
   # the fake no longer sends what GitHub sent). Then the same installer
   # against the current release: it asks for the new name first and finds it,
   # so that upgrade lands in one step (falsify: rename the asset again).
@@ -1092,7 +1092,7 @@ rm -f "${next_err:?}"
 
 # ------------------------------------------------------------- workflow
 # Grep-level pins on the release workflow; actionlint is the structural check
-# (see README "Releasing"). Each pin names the behavior the README promises.
+# (see docs/releasing.md). Each pin names the behavior the docs promise.
 wf=$(cat "$WORKFLOW")
 # Every merge to main releases: both jobs pick the version with next-version.sh from the repository's
 # tags, the main job commits a bump under the bot identity with the [skip ci] guard and pushes it with
@@ -1138,20 +1138,29 @@ assert_contains "$wf" "--cleanup-tag" "deleting a beta deletes its tag too"
 assert_contains "$wf" "KEEP_BETAS: 30" "at most 30 hash betas are kept"
 assert_contains "$wf" "pulls/\$PR/commits" "the cleanup walks the PR's commits"
 if printf '%s\n' "$wf" | grep -E '^[[:space:]]*-?[[:space:]]*uses:' | grep -Evq '@v[0-9]+[[:space:]]*$'; then fail "every action must be pinned to a major version tag: $(printf '%s\n' "$wf" | grep -E 'uses:' | tr -s ' ' | tr '\n' ' ')"; else pass; fi
-# The README documents the same numbers and commands (falsify: change the
-# retention in the workflow and not the README).
+# The README and the docs document the same numbers and commands (falsify: change
+# the retention in the workflow and not docs/upgrade.md, drop a command from
+# docs/board.md or docs/upgrade.md, or change the install line in the README).
 readme=$(cat "$ROOT/README.md")
-assert_contains "$readme" "at most 30" "the README states the retention limit"
-for cmd in "firstmate-tui upgrade --pre" "firstmate-tui upgrade --stable" "firstmate-tui upgrade --version" "firstmate-tui version" "firstmate-tui help" "firstmate-tui open --detached" "firstmate-tui focus"; do
-  assert_contains "$readme" "$cmd" "the README documents $cmd"
+docs_install=$(cat "$ROOT/docs/install.md")
+docs_upgrade=$(cat "$ROOT/docs/upgrade.md")
+docs_board=$(cat "$ROOT/docs/board.md")
+assert_contains "$docs_upgrade" "at most 30" "docs/upgrade.md states the retention limit"
+for cmd in "firstmate-tui upgrade --pre" "firstmate-tui upgrade --stable" "firstmate-tui upgrade --version"; do
+  assert_contains "$docs_upgrade" "$cmd" "docs/upgrade.md documents $cmd"
 done
+for cmd in "firstmate-tui version" "firstmate-tui help" "firstmate-tui open --detached" "firstmate-tui focus"; do
+  assert_contains "$docs_board" "$cmd" "docs/board.md documents $cmd"
+done
+assert_contains "$readme" "curl -fsSL https://raw.githubusercontent.com/zachsibert/firstmate-tui/main/bin/install.sh | bash" "the README carries the install command"
+assert_contains "$readme" "firstmate-tui upgrade" "the README names the upgrade command"
 # The release notes and the README name the command users type (falsify: leave
 # `fm-board upgrade` in the workflow's notes or reintroduce it as a README command).
 assert_contains "$wf" "printf 'firstmate-tui upgrade" "the release notes say firstmate-tui upgrade"
 assert_not_contains "$wf" "printf 'fm-board upgrade" "the release notes no longer say fm-board upgrade"
-assert_contains "$readme" "alias" "the README explains the fm-board alias"
-assert_contains "$readme" "firstmate-tui-<tag>.tar.gz" "the README names the renamed asset"
-assert_contains "$readme" "herdr plugin unlink firstmate.board" "the README says a plugin linked at the old path is relinked once"
+assert_contains "$docs_install" "alias" "docs/install.md explains the fm-board alias"
+assert_contains "$docs_install" "firstmate-tui-<tag>.tar.gz" "docs/install.md names the renamed asset"
+assert_contains "$docs_install" "herdr plugin unlink firstmate.board" "docs/install.md says a plugin linked at the old path is relinked once"
 
 printf '%s checks, %s failed\n' "$checks" "$fails"
 [ "$fails" -eq 0 ]

@@ -105,7 +105,7 @@ export function describeVersion(v) {
 
 // The read-only lines on the page: one per launch flag worth seeing at a
 // glance, plus the one line that says what the PR panes' CHECKS column means
-// (lib/sources.mjs checksState; the README's My PRs paragraph says the same).
+// (lib/sources.mjs checksState; the My PRs paragraph in docs/board.md says the same).
 // A new flag is one more entry here.
 export const CHECKS_MEANING = 'passing, pending or failing, from the newest run of each check on the PR head commit';
 export function settingsFlags(opts) {

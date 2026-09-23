@@ -112,7 +112,7 @@
 // a worker row: its task is also the captain's, in Captain's Call). A row
 // listed under showHidden carries hidden: true. The panes follow the four
 // sections of firstmate's bearings digest (its chat-response contract); the
-// README's Using the board section is the current pane-to-data table.
+// docs/board.md (Using the board) is the current pane-to-data table.
 //
 // search: the f key's index (lib/search.mjs), one entry per row of every
 // pane, { pane (the index in panes), paneId, paneTitle, row }, in pane order

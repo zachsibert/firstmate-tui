@@ -44,7 +44,7 @@
 # `firstmate-tui upgrade` reads it and runs this script again with those values.
 #
 # Needs curl (for the download), tar, and sha256sum or shasum. The installed
-# board still needs what the README lists under "Prerequisites": a firstmate
+# board still needs what docs/prerequisites.md lists: a firstmate
 # home in FM_HOME, herdr 0.8.x, Node 20 or newer, jq and bash.
 #
 # Everything runs from main() on the last line, so a download that breaks off
@@ -406,7 +406,7 @@ main() {
     *) log "note: $bin_dir is not on your PATH; add it, or run $bin_dir/$NAME by its full path" ;;
   esac
   if [ -z "$old_version" ]; then
-    log "next: export FM_HOME=<your firstmate home> and run $NAME (README: Prerequisites, First run)"
+    log "next: export FM_HOME=<your firstmate home> and run $NAME (README: Install, docs/install.md: First run)"
   fi
 }
 

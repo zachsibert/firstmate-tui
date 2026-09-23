@@ -24,8 +24,8 @@ release has it, else `fm-board-<tag>.tar.gz`; when that read fails it tries
 the two names in that order and moves on from the first on any curl
 failure, never on one exit status (GitHub's redirected 404 reached the
 0.2.5 installer as exit 56, not the 22 it waited for, so a 0.2.5 install's
-own `firstmate-tui upgrade` is not reliable and the README documents one
-reinstall through the current installer). It accepts either layout inside
+own `firstmate-tui upgrade` is not reliable and `docs/upgrade.md` documents
+one reinstall through the current installer). It accepts either layout inside
 the tarball (never a mix), so a 0.2.x release can be installed again;
 installs older than 0.2.5 reach 0.3.0 only through 0.2.5 (the last release
 under the old name, and the first installer that knows both).
@@ -41,9 +41,17 @@ Teammates' PRs, both over the identity in the board's config file), and its
 section 7 table is the milestone plan. Since 0.7.0 the four fleet panes
 follow the four sections of firstmate's bearings digest (Captain's Call,
 Underway, Charted Next, Recently Landed; the chat-response contract in
-firstmate's `.agents/skills/bearings/SKILL.md`), and the README's Using the
-board section is the current pane-to-data mapping, which
-`bin/firstmate-tui/lib/model.mjs` implements row for row. Check the plan
+firstmate's `.agents/skills/bearings/SKILL.md`), and `docs/board.md` (Using
+the board) is the current pane-to-data mapping, which
+`bin/firstmate-tui/lib/model.mjs` implements row for row; the README's What
+you see section is its one-sentence summary. `docs/fm-board.png` is never a
+capture of a live board: it is a `--render-once --tags` frame of a scratch
+fixture (`populated.json` plus Teammates' PRs rows from `to-review.json` and
+Charted Next rows from `charted.json`, the home path replaced by a
+placeholder) at 160x50, converted to HTML and shot in headless Chrome at 2x
+in Menlo with the box-drawing glyphs at regular weight, because Menlo Bold
+has none and Chrome would widen them from a fallback font; refresh it the
+same way. Check the plan
 before widening scope: of its M2 actions, discarding and deferring a hold are
 here since 0.6.0 (`d` and `D`, through `fm-captain-hold.sh`) and accepting
 one with an option letter or a typed line is here too (`a`, the same
@@ -119,8 +127,8 @@ marker belong to later milestones.
   `D` refuses; then `openAcceptPrompt` in `lib/controller.mjs` draws the card
   in the frame, `renderAccept` in `lib/render.mjs`, while the footer takes
   the answer, `view.prompt` kind `accept` in `lib/card.mjs`: the reason's
-  lettered options from `parseOptions`, whose exact grammar the README key
-  table states, a letter picks one, any other printable key types a line;
+  lettered options from `parseOptions`, whose exact grammar the key table
+  in `docs/board.md` states, a letter picks one, any other printable key types a line;
   enter runs `fm-captain-hold.sh answer <id> --decision-file <tmp>` in the
   owning home with the text `acceptDecision` fixes, plus `--release` when
   `acceptRelease` says the record is a work item: its `kind` is anything but
@@ -427,7 +435,8 @@ marker belong to later milestones.
   0.11.0, the same pin firstmate uses (`npx --yes shellcheck@4.1.0 --norc bin/*.sh scripts/*.sh tests/*.sh`
   when no local binary is installed). Every `rm` on a variable path takes
   the `${VAR:?}` guard so an empty variable fails instead of widening.
-- Distribution is GitHub Releases (README "Install" and "Releasing"). The
+- Distribution is GitHub Releases (README "Install", `docs/install.md` and
+  `docs/releasing.md`). The
   one version source is `version` in `bin/firstmate-tui/package.json`, and
   `.github/workflows/release.yml` is the only release path. Every push to
   `main` is a release: `scripts/next-version.sh` picks package.json's

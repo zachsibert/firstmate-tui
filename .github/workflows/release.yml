@@ -2,8 +2,7 @@
 #
 # The version source is "version" in bin/firstmate-tui/package.json; nobody tags by
 # hand. scripts/package.sh builds every tarball (the same script
-# tests/install.test.sh runs), and the README covers the flow under
-# "Releasing".
+# tests/install.test.sh runs), and docs/releasing.md covers the flow.
 #
 # Every merge to main is a release. scripts/next-version.sh picks the version
 # in both jobs from package.json and the existing tags, taking package.json's
@@ -37,7 +36,7 @@
 # the bump's message is the second guard. One concurrency group per ref: two
 # pushes to a branch build one after the other, never at once. Lint with
 # actionlint; tests/install.test.sh pins the lines below that the installer
-# and the README depend on and checks scripts/next-version.sh.
+# and the docs depend on and checks scripts/next-version.sh.
 name: Release
 
 on:
