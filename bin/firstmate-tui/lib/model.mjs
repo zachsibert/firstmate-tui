@@ -192,9 +192,14 @@ function homeIdOf(ledger) {
 //            fixture overlay): the worker pane is gone, red in the frame
 //   unknown  herdr is connecting or disconnected: the pane may be gone, but
 //            absence cannot be proved, grey in the frame
+//   status   herdr's agent_status for the pane (working, busy, idle, done,
+//            ...) when herdr lists it, else null: off, disconnected, lost, a
+//            tmux target or a remote home. The unknown-state rule
+//            (unknownEndpointLive, unknownTaskLive) reads this field, so the
+//            join it judges by is the one the HERDR column draws
 // A remote home's panes live in another host's herdr, so they are neither.
 function herdrColumn(facts, target, { remote = false } = {}) {
-  const none = { extra: '-', paneId: null, lost: false, unknown: false };
+  const none = { extra: '-', paneId: null, lost: false, unknown: false, status: null };
   const parsed = parseTarget(target);
   if (!parsed) return none;
   if (parsed.tmux) return { ...none, extra: 'tmux' };
@@ -206,7 +211,8 @@ function herdrColumn(facts, target, { remote = false } = {}) {
     if (state === 'connected' || state === 'fixture') return { ...none, extra: 'pane lost', paneId: parsed.paneId, lost: true };
     return { ...none, extra: 'unknown', paneId: parsed.paneId, unknown: true };
   }
-  return { ...none, extra: agent.agent_status || 'unknown', paneId: parsed.paneId };
+  const status = agent.agent_status || 'unknown';
+  return { ...none, extra: status, paneId: parsed.paneId, status };
 }
 
 function decisionTag(verb) {
@@ -1064,7 +1070,8 @@ function prPaneEmpty(facts, pane) {
 // FALLBACK IN EFFECT: group by home. A home's rows are its live workers only
 // (ledgerChildRows: every active_children entry, plus the endpoints whose
 // state is live: not done, which is Recently Landed's, and not unknown, which
-// is a Charted Next warning). A home with two or more such rows draws a
+// is a Charted Next warning unless the unknown-state rule below finds its
+// pane busy). A home with two or more such rows draws a
 // collapsible group row over them; a home with exactly one draws that row
 // directly, HOME naming the home; a home with none draws nothing here (its
 // calls are Captain's Call's, its queued items and its state, when unknown,
@@ -1083,8 +1090,9 @@ function prPaneEmpty(facts, pane) {
 // these words are live work; a row with any other tag (paused, failed,
 // awaiting merge) never raises the group, so a group whose workers all failed
 // reads idle: a failed child is the delegate's own cleanup, and it shows on
-// expansion. A done or unknown row is never built (ledgerChildRows), so
-// neither is here; a hold or decision is not a worker row since 0.7.0.
+// expansion. A done row is never built (ledgerChildRows), and an unknown one
+// only as `working` under the unknown-state rule, so neither word is here; a
+// hold or decision is not a worker row since 0.7.0.
 const STATE_RANK = { blocked: 0, 'repairing PR': 1, working: 2 };
 const INFLIGHT_ORDER = { working: 0, 'repairing PR': 0, blocked: 1, paused: 2, idle: 2, 'awaiting merge': 3, done: 3, failed: 4 };
 
@@ -1157,6 +1165,97 @@ function decisionRow(ledger, d, extraFields = {}) {
   });
 }
 
+// ---------------------------------------------- the unknown-state rule
+//
+// firstmate's current-state reader answers `unknown` for a task it cannot
+// place: its run-step source finds no run for the task's worktree while the
+// pane is alive and the agent busy (a firstmate reader fix is the other
+// half of this; until it lands every task on that pipeline reads unknown).
+// The board then judges liveness by what it can see, never by prose:
+//   a delegate child   (a ledger endpoints[] entry whose state is unknown) is
+//                      a live worker when its pane exists (endpoint.exists is
+//                      not false) and herdr reports that pane's agent working
+//                      or busy (herdrColumn's status, the HERDR column's own
+//                      join); a remote home's panes cannot be seen, so its
+//                      unknown children are never live here
+//   a main-home task   (a tasks[] entry whose current_state.state is unknown)
+//                      is a live worker when its pane exists, agent_alive is
+//                      not dead, herdr does not report the pane lost, and
+//                      either herdr reports the agent working or busy or the
+//                      status log's last event is a working line
+//                      (paths.status_log.last_event.state)
+// A live one is an Underway row, STATE `working`, WHAT the title then
+// UNREADABLE_TEXT, HERDR from the join, counted as a live worker for the
+// group header rule and for the held-item gate (chartedRows' workingIds).
+// One that is not live stays a Charted Next warning (warningRows) with the
+// text naming the case: the pane gone, lost or dead, or alive with an idle
+// (or unreadable) agent, so a stalled pipeline worker is still visible.
+const BUSY_AGENT = new Set(['working', 'busy']);
+const UNREADABLE_TEXT = 'validation state unreadable';
+const UNAVAILABLE_REASON = /^child current state unavailable: (.+)$/;
+
+function busyPane(herdr) {
+  return Boolean(herdr.status) && BUSY_AGENT.has(String(herdr.status).toLowerCase());
+}
+
+function unknownEndpointLive(facts, ledger, ep) {
+  if (!ep || (ep.state || 'unknown') !== 'unknown' || ledger.remote) return false;
+  if (ep.endpoint && ep.endpoint.exists === false) return false;
+  return busyPane(herdrColumn(facts, ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) }));
+}
+
+function unknownTaskLive(facts, task) {
+  const cs = task.current_state || {};
+  if (cs.state !== 'unknown') return false;
+  const ep = task.endpoint || {};
+  if (ep.exists === false || ep.agent_alive === 'dead') return false;
+  const herdr = herdrColumn(facts, ep.target);
+  if (herdr.lost) return false;
+  const last = task.paths && task.paths.status_log && task.paths.status_log.last_event ? task.paths.status_log.last_event : null;
+  return busyPane(herdr) || Boolean(last && last.state === 'working');
+}
+
+// The warning text of an unknown-state task or child that is not live:
+// today's gone text when the pane is gone, else the unavailable text with the
+// case appended: `agent dead`, `pane lost`, or `pane alive, agent <status>`
+// (herdr's word, or `unknown` when herdr is off, disconnected or remote).
+function unavailableText(facts, { target, source, exists, agentAlive = null, remote = false, child = true }) {
+  const shown = target || '?';
+  if (exists === false) return `endpoint ${shown} is gone (exists: false)`;
+  const herdr = herdrColumn(facts, target, { remote });
+  const detail = agentAlive === 'dead' ? 'agent dead' : herdr.lost ? 'pane lost' : `pane alive, agent ${herdr.status || 'unknown'}`;
+  return `${child ? 'child ' : ''}current state unavailable (endpoint ${shown}, ${source || 'pane'}; ${detail})`;
+}
+
+// The ids a home-level reason of the shape `child current state unavailable:
+// a, b` names, or null when the reason has another shape.
+function unavailableIds(reason) {
+  const m = typeof reason === 'string' ? reason.match(UNAVAILABLE_REASON) : null;
+  if (!m) return null;
+  return m[1].split(',').map((id) => id.trim()).filter(Boolean);
+}
+
+// The ids of one ledger's unknown endpoints that the rule draws as live workers.
+function liveUnknownIds(facts, ledger) {
+  const summary = ledger.summary || {};
+  const out = new Set();
+  for (const ep of Array.isArray(summary.endpoints) ? summary.endpoints : []) if (ep && ep.id && unknownEndpointLive(facts, ledger, ep)) out.add(ep.id);
+  return out;
+}
+
+// A child's title from the ledger: its active_children name, else the title
+// of its holds or queued entry, else the id itself.
+function ledgerChildTitle(ledger, id) {
+  const summary = ledger.summary || {};
+  const child = (Array.isArray(summary.active_children) ? summary.active_children : []).find((c) => c && c.id === id);
+  if (child && child.name) return child.name;
+  for (const list of [summary.holds, summary.queued]) {
+    const hit = (Array.isArray(list) ? list : []).find((x) => x && x.id === id);
+    if (hit && hit.title) return hit.title;
+  }
+  return id;
+}
+
 // A main-home worker's row, or null when the task is not a worker: a task
 // whose backlog record is held (a captain hold or an external one) lists
 // here only while it is working (the hold is a Captain's Call or Charted
@@ -1166,19 +1265,24 @@ function decisionRow(ledger, d, extraFields = {}) {
 // focuses it. A task that said done lists only while its PR awaits the
 // captain's merge (`awaiting merge`): a plain done task is finished work,
 // Recently Landed's row, until firstmate cleans its record up. Working,
-// blocked, paused and failed tasks list.
+// blocked, paused and failed tasks list. A task whose state is unknown lists
+// only when unknownTaskLive says its pane is busy (the rule above), then as
+// `working` with UNREADABLE_TEXT for what it is doing; otherwise it is a
+// Charted Next warning and never a row here.
 function mainTaskRow(facts, task, backlogById = new Map()) {
   const cs = task.current_state || {};
   const record = backlogById.get(task.id);
   const held = Boolean(record && record.hold_kind);
   const captainHeld = heldForCaptain(record);
-  if (held && cs.state !== 'working') return null;
+  const unreadable = cs.state === 'unknown';
+  if (unreadable && !unknownTaskLive(facts, task)) return null;
+  if (held && cs.state !== 'working' && !unreadable) return null;
   if (cs.state === 'done' && !awaitingMerge(task, backlogById)) return null;
   const herdr = herdrColumn(facts, task.endpoint && task.endpoint.target);
-  const doing = cs.detail || (task.hints && task.hints.last_event_text) || (task.paths && task.paths.status_log && task.paths.status_log.last_event && task.paths.status_log.last_event.note) || '';
-  const title = (record && record.title) || (task.backlog && task.backlog.title) || '';
+  const doing = unreadable ? UNREADABLE_TEXT : cs.detail || (task.hints && task.hints.last_event_text) || (task.paths && task.paths.status_log && task.paths.status_log.last_event && task.paths.status_log.last_event.note) || '';
+  const title = (record && record.title) || (task.backlog && task.backlog.title) || (unreadable ? task.id : '');
   return makeRow({
-    tag: prStateTag(cs.state, { awaiting: awaitingMerge(task, backlogById), repairing: isRepairing(facts, task) }),
+    tag: unreadable ? 'working' : prStateTag(cs.state, { awaiting: awaitingMerge(task, backlogById), repairing: isRepairing(facts, task) }),
     extra: herdr.extra,
     id: captainHeld ? `!${task.id}` : task.id,
     name: task.id,
@@ -1199,9 +1303,11 @@ function mainTaskRow(facts, task, backlogById = new Map()) {
 // active_children entry, then the endpoints entries the ledger lists on their
 // own whose state is live. An endpoint whose state is done is finished work
 // (Recently Landed lists it from the ledger's landed entries) and is skipped;
-// one whose state is unknown, or missing, is skipped too: nothing is known to
-// run there, and the canonical snapshot reports the home's state unavailable
-// for it, which Charted Next draws as a warning (warningRows). Working,
+// one whose state is unknown, or missing, lists only when unknownEndpointLive
+// says its pane is busy (the unknown-state rule above), as `working` with
+// UNREADABLE_TEXT for what it is doing; otherwise nothing is known to run
+// there, and the canonical snapshot reports the home's state unavailable for
+// it, which Charted Next draws as a warning (warningRows). Working,
 // repairing, blocked, paused and failed endpoints list. A row is never built
 // from the delegate's own task record, its status lines, its relayed notes or
 // its ledger's decisions; a child the ledger holds for the captain (a live
@@ -1247,17 +1353,19 @@ function ledgerChildRows(facts, ledger) {
   for (const ep of endpoints) {
     if (covered.has(ep.id)) continue;
     const epState = ep.state || 'unknown';
-    if (epState === 'done' || epState === 'unknown') continue;
+    if (epState === 'done') continue;
+    const unreadable = epState === 'unknown';
+    if (unreadable && !unknownEndpointLive(facts, ledger, ep)) continue;
     const herdr = herdrColumn(facts, ep.endpoint ? ep.endpoint.target : null, { remote: Boolean(ledger.remote) });
     const held = heldIds.has(ep.id);
     const h = holdsById.get(ep.id);
     rows.push(
       makeRow({
-        tag: prStateTag(epState, { repairing: childRepairing(facts, ledger, ep.id, epState, childPrUrl(ledger, ep.id)) }),
+        tag: unreadable ? 'working' : prStateTag(epState, { repairing: childRepairing(facts, ledger, ep.id, epState, childPrUrl(ledger, ep.id)) }),
         extra: herdr.extra,
         id: held ? `!${ep.id}` : ep.id,
         name: ep.id,
-        text: h && h.title ? whatText(h.title, h.reason && h.reason !== h.title ? h.reason : '') : `endpoint ${ep.endpoint && ep.endpoint.target ? ep.endpoint.target : '?'} (${ep.source || 'pane'})`,
+        text: unreadable ? whatText(ledgerChildTitle(ledger, ep.id), UNREADABLE_TEXT) : h && h.title ? whatText(h.title, h.reason && h.reason !== h.title ? h.reason : '') : `endpoint ${ep.endpoint && ep.endpoint.target ? ep.endpoint.target : '?'} (${ep.source || 'pane'})`,
         repo: '-',
         home: homeLabel(ledger),
         homeId: homeIdOf(ledger),
@@ -1370,15 +1478,22 @@ function inflightRows(facts, opts) {
 //   blocked / dated / aged   a captain hold in that bucket, WHY its structured
 //              reason: `by <first blocker> +N`, `until MM-DD`, `held Nd`
 //   warning    an integrity notice, nothing to act on: the main inventory
-//              invalid (main_inventory), a delegate home unreadable, its
-//              ledger invalid or its state unknown (the canonical snapshot's
-//              current.state and reason, else the ledger's valid, state and
-//              reason), a ledger endpoint whose state is unknown and that is
-//              not an active child: gone (exists false), or its child's
-//              current state unavailable (when no home-level warning already
-//              names the home). A lost pane behind a live worker, main or
-//              delegate, is not a warning: its Underway row already reads
-//              `pane lost` in red
+//              invalid (main_inventory), a main-home task whose state is
+//              unknown and that the unknown-state rule does not draw as a
+//              live worker (unknownTaskLive: its pane gone, lost or dead, or
+//              alive with an idle agent and no working event), a delegate
+//              home unreadable, its ledger invalid or its state unknown (the
+//              canonical snapshot's current.state and reason, else the
+//              ledger's valid, state and reason; a reason of the shape
+//              `child current state unavailable: a, b` is cut to the ids the
+//              rule does not draw as live, and dropped when it names none),
+//              a ledger endpoint whose state is unknown, that is not an
+//              active child and that the rule does not draw: gone (exists
+//              false), or its child's current state unavailable with the
+//              case named (unavailableText; when no home-level warning
+//              already names the home). A lost pane behind a live worker,
+//              main or delegate, is not a warning: its Underway row already
+//              reads `pane lost` in red
 // Warnings come first, are left out of the pane's count (row.warning,
 // paneHeader) and carry no card; the items follow newest filed first (the
 // record's `since` date, drawn as FILED in the last column, in place of an
@@ -1448,13 +1563,37 @@ function warningRow({ id, text, home = MAIN_HOME_LABEL, homeId = MAIN_HOME_LABEL
   return row;
 }
 
+// The home-level warning text of a delegate home, or null when it has none:
+// the canonical snapshot's current.state and reason, else the ledger's valid,
+// state and reason. A reason naming unavailable children (unavailableIds) is
+// cut to the ids the unknown-state rule does not draw as live workers, and
+// is null when every id it names is one.
+function homeWarningText(facts, ledger, current) {
+  const summary = ledger.summary || {};
+  const reason = (current.state === 'unknown' && (current.reason || 'current home state unavailable')) || (summary.valid === false && (summary.reason || 'home ledger invalid')) || (summary.state === 'unknown' && (summary.reason || 'current home state unavailable')) || null;
+  const ids = unavailableIds(reason);
+  if (!ids) return reason;
+  const live = liveUnknownIds(facts, ledger);
+  const left = ids.filter((id) => !live.has(id));
+  return left.length ? `child current state unavailable: ${left.join(', ')}` : null;
+}
+
 // The fleet's integrity warnings (the header above lists them), main home
-// first, then each delegate home in ledger order.
+// first (the inventory, then its unknown-state tasks that are not live
+// workers, in task order, a task folded into a ledger left to that ledger),
+// then each delegate home in ledger order.
 function warningRows(facts) {
   const rows = [];
   const snap = facts.snapshot || {};
   const inv = snap.main_inventory;
   if (inv && inv.valid === false) rows.push(warningRow({ id: 'main inventory', text: inv.reason || 'main inventory invalid' }));
+  const tasks = Array.isArray(snap.tasks) ? snap.tasks : [];
+  const folded = new Set((facts.ledgers || []).map((l) => mateTaskFor(tasks, l)).filter(Boolean).map((t) => t.id));
+  for (const task of tasks) {
+    if (folded.has(task.id) || !task.current_state || task.current_state.state !== 'unknown' || unknownTaskLive(facts, task)) continue;
+    const ep = task.endpoint || {};
+    rows.push(warningRow({ id: task.id, text: unavailableText(facts, { target: ep.target, source: task.current_state.source, exists: ep.exists, agentAlive: ep.agent_alive, child: false }) }));
+  }
   const records = snap.secondmate_current && Array.isArray(snap.secondmate_current.records) ? snap.secondmate_current.records : [];
   for (const ledger of facts.ledgers || []) {
     const home = homeLabel(ledger);
@@ -1465,19 +1604,18 @@ function warningRows(facts) {
       continue;
     }
     const rec = records.find((r) => r && String(r.home || '').replace(/\/+$/, '') === ledger.home) || null;
-    const current = rec && rec.current ? rec.current : {};
-    const reason = (current.state === 'unknown' && (current.reason || 'current home state unavailable')) || (summary.valid === false && (summary.reason || 'home ledger invalid')) || (summary.state === 'unknown' && (summary.reason || 'current home state unavailable')) || null;
+    const reason = homeWarningText(facts, ledger, rec && rec.current ? rec.current : {});
     if (reason) rows.push(warningRow({ id: homeId, text: reason, home, homeId }));
     const active = new Set((Array.isArray(summary.active_children) ? summary.active_children : []).map((c) => c && c.id));
     for (const ep of Array.isArray(summary.endpoints) ? summary.endpoints : []) {
       if (!ep || !ep.id) continue;
-      const target = ep.endpoint && ep.endpoint.target ? ep.endpoint.target : '?';
       // Only an endpoint nothing is known to run behind warns: a done one is
       // finished work, a live one is an Underway row (its HERDR cell reads
-      // pane lost when the pane is gone), an active child is a worker.
-      if ((ep.state || 'unknown') !== 'unknown' || active.has(ep.id)) continue;
-      if (ep.endpoint && ep.endpoint.exists === false) rows.push(warningRow({ id: ep.id, text: `endpoint ${target} is gone (exists: false)`, home, homeId }));
-      else if (!reason) rows.push(warningRow({ id: ep.id, text: `child current state unavailable (endpoint ${target}, ${ep.source || 'pane'})`, home, homeId }));
+      // pane lost when the pane is gone), an active child is a worker, and so
+      // is an unknown one whose pane herdr reports busy (the unknown-state rule).
+      if ((ep.state || 'unknown') !== 'unknown' || active.has(ep.id) || unknownEndpointLive(facts, ledger, ep)) continue;
+      const gone = ep.endpoint && ep.endpoint.exists === false;
+      if (gone || !reason) rows.push(warningRow({ id: ep.id, text: unavailableText(facts, { target: ep.endpoint && ep.endpoint.target, source: ep.source, exists: gone ? false : true, remote: Boolean(ledger.remote) }), home, homeId }));
     }
   }
   return rows;
@@ -1487,7 +1625,8 @@ function chartedRows(facts) {
   const snap = facts.snapshot || {};
   const tasks = Array.isArray(snap.tasks) ? snap.tasks : [];
   const backlog = snap.backlog && Array.isArray(snap.backlog.records) ? snap.backlog.records : [];
-  const workingIds = new Set(tasks.filter((t) => t.kind !== 'secondmate' && t.current_state && t.current_state.state === 'working').map((t) => t.id));
+  // A worker the unknown-state rule draws as live counts as working here too, so its held item is no gate.
+  const workingIds = new Set(tasks.filter((t) => t.kind !== 'secondmate' && t.current_state && (t.current_state.state === 'working' || unknownTaskLive(facts, t))).map((t) => t.id));
   const items = [];
   for (const r of backlog) if (chartedItem(r, workingIds)) items.push(chartedRow(facts, r, mainCard(facts, r.id, r)));
   for (const ledger of facts.ledgers || []) {
