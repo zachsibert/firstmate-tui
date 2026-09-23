@@ -46,8 +46,8 @@ export const PR_SOURCES = ['board', 'firstmate'];
 
 // The documented example, byte for byte what docs/config.example.json holds
 // and what the board writes on a first launch: one placeholder repository
-// rule (example-corp/portal is not a real repository; the README says how a
-// user puts their own in its place) and the default PR source spelled out.
+// rule (example-corp/portal is not a real repository; docs/configuration.md
+// says how a user puts their own in its place) and the default PR source spelled out.
 // No real organisation, repository or product is named here or anywhere in
 // this repository's examples, comments and fixtures.
 export const EXAMPLE_CONFIG = {

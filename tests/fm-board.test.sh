@@ -1785,7 +1785,7 @@ assert_row "$pure_a" '^none null xa$' "while picked a letter is ignored and back
 
 # --------------------------------------------------------- placement rules
 # The four fleet panes follow the bearings digest's placement rules, one check per row type of the
-# README's Using the board section. relayed-hold.json is the duplicate-hold shape the 0.6.x board drew
+# pane list in docs/board.md (Using the board). relayed-hold.json is the duplicate-hold shape the 0.6.x board drew
 # twice: the delegate home holds etl-cutover for the captain and the parent channel relayed the same
 # hold into the delegate's task record as captain-hold-etl-cutover-1; a second relay,
 # captain-hold-orphan-call-1, names a task the ledger does not carry (falsify: compare the relayed key

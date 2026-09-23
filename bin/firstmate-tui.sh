@@ -163,7 +163,7 @@ more flags, same places: --all-homes-needs, --opener-cmd <argv>, --viewer-cmd <a
   --snapshot-timeout <s>;
   test mode: --render-once, --fixture <json>, --cols N, --rows N, --keys <list>,
   --mouse <list>, --expand <all|ids>, --tags, --headless, --curl-cmd <argv>,
-  --install-root <dir>. The README's Launch section explains each one.
+  --install-root <dir>. docs/board.md (Launch flags) explains each one.
 
 The board reads the firstmate home in FM_HOME (export it first). Press ? inside the
 board for the keys, and . for the Settings page: the installed version, the latest
