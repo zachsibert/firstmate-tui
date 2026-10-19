@@ -55,6 +55,9 @@
 //   statusVerbs(path)  the verbs of a task's status log in file order
 //                 (['working', 'done', 'working']), or null when it cannot be
 //                 read; only isRepairing reads it
+//   summaries     null, or { lookup(kind, text) } (lib/summary.mjs, the
+//                 store's lookup): the summary already made for a text, or
+//                 null; Charted Next's item rows read it (chartedRow)
 //
 // Options (second argument of buildModel):
 //   expanded      Set of In flight group keys currently expanded
@@ -81,9 +84,14 @@
 //                 listed stays dismissed until a later refresh agrees, so a
 //                 stale or cached snapshot cannot bring the row back for a
 //                 tick
+//   showBookkeeping  list Charted Next's bookkeeping warnings (the `w`
+//                 toggle; session state, off at launch)
 //
-// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, loading, cached } x6 ], search[], meta },
-// where header is `Title (count[, n warnings][, n hidden])` (the count leaves
+// Output: { panes: [ { id, title, empty, header, rows[], hidden, hiddenCount, bookkeepingCount, loading, cached } x6 ], search[], summaryWants[], meta },
+// where summaryWants lists { kind, text } for every shown row whose summary
+// does not exist yet (the host asks lib/summary.mjs for each, and the row
+// draws its raw text meanwhile), and
+// header is `Title (count[, n warnings][, n hidden])` (the count leaves
 // Charted Next's warning rows out) plus ` (stale)` when that pane's
 // own data failed to refresh, ` (cached 12m ago)` while its rows come from
 // the state cache (paneCached below; cached is null or { ageSeconds, label }
@@ -107,7 +115,10 @@
 // focusable, url (a PR URL the row can open, or null), reportPath (Recently
 // Landed: the absolute report path on this host, or null; reportRemote when a
 // remote home holds it), card and hold (below), warning (a Charted Next
-// integrity notice, left out of the pane's count) and, for Underway grouping,
+// integrity notice, left out of the pane's count; bookkeeping when it only
+// records the fleet's upkeep), rawText, summarySource and summarized (a
+// Charted Next item: its raw words, the text its summary is made from, and
+// whether the drawn text is that summary) and, for Underway grouping,
 // group / expanded / flag on a group row and parent on its children (flag on
 // a worker row: its task is also the captain's, in Captain's Call). A row
 // listed under showHidden carries hidden: true. The panes follow the four
@@ -146,7 +157,7 @@
 // (truncated: true), so a defer reads the full record first (lib/app.mjs).
 
 import { PANES } from './layout.mjs';
-import { basename, clean, fmtAge, parseTime, relativeTo, repoFromUrl } from './text.mjs';
+import { basename, clean, fmtAge, parseTime, relativeTo, repoFromUrl, width } from './text.mjs';
 import { identityPending, identityUnknown } from './identity.mjs';
 import { searchTextOf } from './search.mjs';
 
@@ -257,6 +268,10 @@ function makeRow(fields) {
     card: null,
     hold: null,
     warning: false,
+    bookkeeping: false,
+    rawText: null,
+    summarySource: null,
+    summarized: false,
     ...fields,
   };
   row.name = fields.name ?? row.id;
@@ -1494,6 +1509,13 @@ function inflightRows(facts, opts) {
 //              already names the home). A lost pane behind a live worker,
 //              main or delegate, is not a warning: its Underway row already
 //              reads `pane lost` in red
+//              The upkeep notices among them (a pane or endpoint gone, a
+//              child state that cannot be read) are bookkeeping
+//              (row.bookkeeping): hidden until `w` shows them (the
+//              showBookkeeping option), counted in the title either way; the
+//              others (the main inventory, a delegate home whose work list
+//              or state firstmate cannot read) are drawn always, in plain
+//              words
 // Warnings come first, are left out of the pane's count (row.warning,
 // paneHeader) and carry no card; the items follow newest filed first (the
 // record's `since` date, drawn as FILED in the last column, in place of an
@@ -1540,15 +1562,49 @@ function filedDate(rec) {
   return { epoch, filed: epoch === null ? null : String(rec.since).slice(5, 10) };
 }
 
+// The text a Charted Next item's summary is made from (lib/summary.mjs, the
+// row kind), or null when the item says nothing beyond a short title, which
+// is already plain enough to read. Only the fields that change when the item
+// does go in, never an age, so a cached summary holds until the item itself
+// changes.
+const SUMMARY_SHORT_TITLE = 90;
+const SUMMARY_BODY_LINES = 40;
+
+export function chartedSummarySource(rec) {
+  const title = clean(rec.title || rec.id);
+  const reason = clean(rec.hold_reason || rec.blocked_reason || '');
+  const blockers = Array.isArray(rec.unresolved_blocker_ids) ? rec.unresolved_blocker_ids.map((b) => clean(b)).filter(Boolean) : [];
+  const body = Array.isArray(rec.body_lines) ? rec.body_lines.map((l) => clean(l)).filter(Boolean).slice(0, SUMMARY_BODY_LINES) : [];
+  const ownReason = reason && reason !== title ? reason : '';
+  if (!ownReason && !blockers.length && !body.length && width(title) <= SUMMARY_SHORT_TITLE) return null;
+  const lines = [`Title: ${title}`, `State: ${chartedState(rec)}`];
+  if (ownReason) lines.push(`Reason: ${ownReason}`);
+  if (blockers.length) lines.push(`Waits for: ${blockers.join(', ')}`);
+  if (rec.hold_until) lines.push(`Deferred until: ${String(rec.hold_until).slice(0, 10)}`);
+  if (body.length) lines.push('Details:', ...body);
+  return lines.join('\n');
+}
+
+// WHAT is the item's summary once lib/summary.mjs has one (its WHAT line),
+// else the raw title and reason; WHY is the structured reason, or the
+// summary's WHY line when the record gives none. rawText keeps the raw words
+// for the search and summarySource the text the host asks a summary for.
 function chartedRow(facts, rec, fields = {}) {
   const { epoch, filed } = filedDate(rec);
   const title = clean(rec.title || rec.id);
   const reason = clean(rec.hold_reason || rec.blocked_reason || '');
+  const raw = reason && reason !== title ? `${title} · ${reason}` : title;
+  const source = facts.summaries ? chartedSummarySource(rec) : null;
+  const summary = source ? facts.summaries.lookup('row', source) : null;
+  const why = chartedWhy(rec);
   const row = makeRow({
     tag: chartedState(rec),
-    extra: chartedWhy(rec),
+    extra: why === '-' && summary && summary.why ? summary.why : why,
     id: rec.id,
-    text: reason && reason !== title ? `${title} · ${reason}` : title,
+    text: summary ? summary.what : raw,
+    rawText: raw,
+    summarySource: source,
+    summarized: Boolean(summary),
     repo: rec.repo,
     ageSeconds: ageSince(facts.now, epoch),
     ...fields,
@@ -1557,11 +1613,18 @@ function chartedRow(facts, rec, fields = {}) {
   return row;
 }
 
-function warningRow({ id, text, home = MAIN_HOME_LABEL, homeId = MAIN_HOME_LABEL }) {
-  const row = makeRow({ tag: 'warning', extra: '-', id, text: clean(text), repo: '-', home, homeId, hideKey: `charted:${homeId}:warning:${id}`, warning: true });
+// A warning is bookkeeping when it only records the fleet's own upkeep (an
+// agent pane or endpoint that is gone, a child whose current state cannot be
+// read) and nothing in it needs the captain: the `w` key shows those, and
+// the pane title counts them either way. Every other warning is drawn always,
+// in plain words.
+function warningRow({ id, text, home = MAIN_HOME_LABEL, homeId = MAIN_HOME_LABEL, bookkeeping = false }) {
+  const row = makeRow({ tag: 'warning', extra: '-', id, text: clean(text), repo: '-', home, homeId, hideKey: `charted:${homeId}:warning:${id}`, warning: true, bookkeeping });
   row.age = '-';
   return row;
 }
+
+const UNAVAILABLE_ANYWHERE = /child current state unavailable/;
 
 // The home-level warning text of a delegate home, or null when it has none:
 // the canonical snapshot's current.state and reason, else the ledger's valid,
@@ -1586,13 +1649,13 @@ function warningRows(facts) {
   const rows = [];
   const snap = facts.snapshot || {};
   const inv = snap.main_inventory;
-  if (inv && inv.valid === false) rows.push(warningRow({ id: 'main inventory', text: inv.reason || 'main inventory invalid' }));
+  if (inv && inv.valid === false) rows.push(warningRow({ id: 'main inventory', text: `firstmate's main backlog does not add up: ${inv.reason || 'no reason given'}` }));
   const tasks = Array.isArray(snap.tasks) ? snap.tasks : [];
   const folded = new Set((facts.ledgers || []).map((l) => mateTaskFor(tasks, l)).filter(Boolean).map((t) => t.id));
   for (const task of tasks) {
     if (folded.has(task.id) || !task.current_state || task.current_state.state !== 'unknown' || unknownTaskLive(facts, task)) continue;
     const ep = task.endpoint || {};
-    rows.push(warningRow({ id: task.id, text: unavailableText(facts, { target: ep.target, source: task.current_state.source, exists: ep.exists, agentAlive: ep.agent_alive, child: false }) }));
+    rows.push(warningRow({ id: task.id, text: unavailableText(facts, { target: ep.target, source: task.current_state.source, exists: ep.exists, agentAlive: ep.agent_alive, child: false }), bookkeeping: true }));
   }
   const records = snap.secondmate_current && Array.isArray(snap.secondmate_current.records) ? snap.secondmate_current.records : [];
   for (const ledger of facts.ledgers || []) {
@@ -1600,12 +1663,12 @@ function warningRows(facts) {
     const homeId = homeIdOf(ledger);
     const summary = ledger.summary;
     if (!summary) {
-      rows.push(warningRow({ id: homeId, text: `structured state unreadable: ${ledger.error || 'no ledger'}`, home, homeId }));
+      rows.push(warningRow({ id: homeId, text: `firstmate cannot read this home's work list, so its items are missing here (${ledger.error || 'no ledger'})`, home, homeId }));
       continue;
     }
     const rec = records.find((r) => r && String(r.home || '').replace(/\/+$/, '') === ledger.home) || null;
     const reason = homeWarningText(facts, ledger, rec && rec.current ? rec.current : {});
-    if (reason) rows.push(warningRow({ id: homeId, text: reason, home, homeId }));
+    if (reason) rows.push(UNAVAILABLE_ANYWHERE.test(reason) ? warningRow({ id: homeId, text: reason, home, homeId, bookkeeping: true }) : warningRow({ id: homeId, text: `firstmate cannot read this home's current state (${reason})`, home, homeId }));
     const active = new Set((Array.isArray(summary.active_children) ? summary.active_children : []).map((c) => c && c.id));
     for (const ep of Array.isArray(summary.endpoints) ? summary.endpoints : []) {
       if (!ep || !ep.id) continue;
@@ -1615,7 +1678,7 @@ function warningRows(facts) {
       // is an unknown one whose pane herdr reports busy (the unknown-state rule).
       if ((ep.state || 'unknown') !== 'unknown' || active.has(ep.id) || unknownEndpointLive(facts, ledger, ep)) continue;
       const gone = ep.endpoint && ep.endpoint.exists === false;
-      if (gone || !reason) rows.push(warningRow({ id: ep.id, text: unavailableText(facts, { target: ep.endpoint && ep.endpoint.target, source: ep.source, exists: gone ? false : true, remote: Boolean(ledger.remote) }), home, homeId }));
+      if (gone || !reason) rows.push(warningRow({ id: ep.id, text: unavailableText(facts, { target: ep.endpoint && ep.endpoint.target, source: ep.source, exists: gone ? false : true, remote: Boolean(ledger.remote) }), home, homeId, bookkeeping: true }));
     }
   }
   return rows;
@@ -1968,9 +2031,12 @@ function paneUpdating(facts, pane, loading) {
 }
 
 // The pane title's count leaves Charted Next's warning rows out and names
-// them apart (`Charted Next (43, 2 warnings)`), so the number is queued work.
-function paneHeader(facts, pane, count, warnings, hiddenCount, showHidden, cached, loading) {
-  const warningNote = warnings > 0 ? `, ${warnings} warning${warnings === 1 ? '' : 's'}` : '';
+// them apart (`Charted Next (43, 2 warnings)`), so the number is queued work;
+// the bookkeeping warnings count there too, shown or not, with the w key
+// named beside them (`3 warnings: 2 bookkeeping, w shows`).
+function paneHeader(facts, pane, count, warnings, hiddenCount, showHidden, cached, loading, bookkeeping = null) {
+  const bookNote = bookkeeping && bookkeeping.count > 0 ? `: ${bookkeeping.count} bookkeeping, w ${bookkeeping.shown ? 'hides' : 'shows'}` : '';
+  const warningNote = warnings > 0 ? `, ${warnings} warning${warnings === 1 ? '' : 's'}${bookNote}` : '';
   const hiddenNote = hiddenCount > 0 ? `, ${hiddenCount} hidden${showHidden ? ' shown' : ''}` : '';
   return `${pane.title} (${count}${warningNote}${hiddenNote})${paneStale(facts, pane) ? ' (stale)' : ''}${cached ? ` (${cached.label})` : ''}${paneUpdating(facts, pane, loading) ? ' (updating)' : ''}`;
 }
@@ -2104,6 +2170,7 @@ function normalizeFacts(facts) {
     cached: facts.cached && typeof facts.cached === 'object' ? facts.cached : null,
     mtime: typeof facts.mtime === 'function' ? facts.mtime : () => null,
     statusVerbs: typeof facts.statusVerbs === 'function' ? facts.statusVerbs : () => null,
+    summaries: facts.summaries && typeof facts.summaries.lookup === 'function' ? facts.summaries : null,
   };
 }
 
@@ -2115,32 +2182,39 @@ export function buildModel(facts, options = {}) {
     showHidden: Boolean(options.showHidden),
     hiddenPanes: asSet(options.hiddenPanes),
     dismissed: asSet(options.dismissed),
+    showBookkeeping: Boolean(options.showBookkeeping),
   };
   const f = normalizeFacts(facts);
   const builders = { needs: needsRows, mine: mineRows, inflight: inflightRows, charted: chartedRows, landed: landedRows, toreview: toReviewRows };
   const search = [];
+  const summaryWants = [];
   const panes = PANES.map((p, i) => {
-    const full = applyDismissed(builders[p.id](f, opts), opts);
+    const built = applyDismissed(builders[p.id](f, opts), opts);
+    const bookkeepingCount = built.filter((r) => r.bookkeeping).length;
+    const full = opts.showBookkeeping ? built : built.filter((r) => !r.bookkeeping);
     const { rows, hiddenCount } = applyHidden(p.id, full, opts);
     // The search index (header): every row of the pane, hidden ones marked; a
     // pane with a collapsed group is built again with every group open so
     // the group's children are found too (pane-agnostic: whichever pane
     // draws groups).
     const collapsed = full.some((r) => r.group && !r.expanded);
-    const indexed = collapsed ? applyDismissed(builders[p.id](f, { ...opts, expandAll: true }), opts) : full;
+    const indexed = collapsed ? applyDismissed(builders[p.id](f, { ...opts, expandAll: true }), opts).filter((r) => opts.showBookkeeping || !r.bookkeeping) : full;
     // The search text is read before the hidden mark, so `(hidden)` never matches.
     const withText = indexed.map((row) => ({ ...row, ...searchTextOf(row) }));
     for (const row of applyHidden(p.id, withText, { ...opts, showHidden: true }).rows) search.push({ pane: i, paneId: p.id, paneTitle: p.title, row });
     const empty = PR_PANE_IDS.has(p.id) ? prPaneEmpty(f, p) : p.empty;
     const cached = paneCached(f, p, f.cached);
     const loading = paneLoading(f, p);
-    const warnings = rows.filter((r) => r.warning).length;
-    return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length - warnings, warnings, hiddenCount, opts.showHidden, cached, loading), loading, cached };
+    const shownWarnings = rows.filter((r) => r.warning).length;
+    const warnings = shownWarnings + (opts.showBookkeeping ? 0 : bookkeepingCount);
+    if (!opts.hiddenPanes.has(p.id)) for (const r of rows) if (r.summarySource && !r.summarized) summaryWants.push({ kind: 'row', text: r.summarySource });
+    return { id: p.id, title: p.title, key: String(i + 1), empty, rows, hiddenCount, bookkeepingCount, hidden: opts.hiddenPanes.has(p.id), header: paneHeader(f, p, rows.length - shownWarnings, warnings, hiddenCount, opts.showHidden, cached, loading, { count: bookkeepingCount, shown: opts.showBookkeeping }), loading, cached };
   });
   const homes = 1 + f.ledgers.length;
   return {
     panes,
     search,
+    summaryWants,
     // Whether a herdr pane can be reached from this board: false under
     // --no-herdr (state off, or the fixture overlay that stands in for a
     // server); a connecting or dropped link still counts, as In flight's focus
@@ -2155,6 +2229,7 @@ export function buildModel(facts, options = {}) {
       hiddenPanes: panes.filter((p) => p.hidden).map((p) => p.key),
       hiddenRows: panes.reduce((n, p) => n + p.hiddenCount, 0),
       showHidden: opts.showHidden,
+      showBookkeeping: opts.showBookkeeping,
       ledgerErrors: f.ledgers.filter((l) => l.error).map((l) => `${l.id || basename(l.home)}: ${l.error}`),
     },
   };

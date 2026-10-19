@@ -125,12 +125,12 @@ export function rankRows(query, entries) {
 
 // The search text of one row and the length of its head: the id (and the
 // undecorated name when the id is decorated, as a group row's is), the title
-// or what text, then the repo, the home label, the report path and the PR
+// or what text (and the raw words a summary replaced), then the repo, the home label, the report path and the PR
 // URL, joined by single spaces. Fields that read `-` or are absent are left
 // out, so a dash never matches.
 export function searchTextOf(row) {
   const keep = (v) => (typeof v === 'string' && v && v !== '-' ? v : null);
-  const headParts = [keep(row.id), row.name !== row.id ? keep(row.name) : null, keep(row.text)].filter(Boolean);
+  const headParts = [keep(row.id), row.name !== row.id ? keep(row.name) : null, keep(row.text), row.rawText !== row.text ? keep(row.rawText) : null].filter(Boolean);
   const tailParts = [keep(row.repo), keep(row.home), keep(row.reportPath), keep(row.url)].filter(Boolean);
   const head = headParts.join(' ');
   const text = tailParts.length ? `${head} ${tailParts.join(' ')}` : head;

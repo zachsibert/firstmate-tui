@@ -149,6 +149,21 @@ export function readHoldMaterials(home, id, { reportLines = 40, statusLines = 10
   return { dataDir, files, report, brief, status };
 }
 
+export const REPORT_MAX_BYTES = 256 * 1024;
+
+// A report's text for the summary view, read-only: { text, error }, the text
+// cut at `maxBytes` with a line saying so, error the read's failure.
+export function readReportText(path, { maxBytes = REPORT_MAX_BYTES } = {}) {
+  let buf;
+  try {
+    buf = readFileSync(path);
+  } catch (e) {
+    return { text: '', error: e.code || e.message };
+  }
+  if (buf.length <= maxBytes) return { text: buf.toString('utf8'), error: null };
+  return { text: `${buf.subarray(0, maxBytes).toString('utf8')}\n\n[the first ${maxBytes} bytes of ${buf.length}; enter shows the whole file]`, error: null };
+}
+
 // The backlog record of task `id` in `home`, read through that home's own
 // bin/fm-fleet-snapshot.sh --json (runSnapshot, the one parser of a backlog;
 // the board never parses backlog.md itself): { record, error }. Used for a

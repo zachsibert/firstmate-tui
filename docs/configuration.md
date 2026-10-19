@@ -1,14 +1,14 @@
 # Configuration
 
-The three files the board owns, config.json, view-state.json and state-cache.json, plus the pane record: where they live, what is in each and what the board does with them.
+The three files the board owns, config.json, view-state.json and state-cache.json, its summaries folder and the pane record: where they live, what is in each and what the board does with them.
 
-The board owns three files and writes nowhere else: never into a firstmate home, a project or a `state/` directory (the `d` and `D` keys change a hold through firstmate's own command, not through a file the board edits).
-All three live in the same directory: the one `herdr plugin config-dir firstmate.board` prints when herdr answers, else `$XDG_CONFIG_HOME/fm-board/`, else `~/.config/fm-board/`.
-`--config`, `--view-state` and `--cache` override the three paths one at a time.
+The board owns three files and one folder and writes nowhere else: never into a firstmate home, a project or a `state/` directory (the `a`, `d` and `D` keys change a hold through firstmate's own command, not through a file the board edits).
+All of them live in the same directory: the one `herdr plugin config-dir firstmate.board` prints when herdr answers, else `$XDG_CONFIG_HOME/fm-board/`, else `~/.config/fm-board/`.
+`--config`, `--view-state`, `--cache` and `--summary-dir` override the paths one at a time.
 
 ## config.json
 
-The config file holds the three things about the pull request panes that are yours to set.
+The config file holds the three things about the pull request panes that are yours to set, and the summaries switch.
 When no file exists at startup, the board writes this example, [`docs/config.example.json`](config.example.json), byte for byte, and never touches the file again:
 
 ```json
@@ -29,6 +29,10 @@ When no file exists at startup, the board writes this example, [`docs/config.exa
   },
   "prs": {
     "source": "board"
+  },
+  "summaries": {
+    "enabled": true,
+    "model": "claude-haiku-4-5-20251001"
   }
 }
 ```
@@ -40,11 +44,13 @@ When no file exists at startup, the board writes this example, [`docs/config.exa
 | `review.default_labels` | the labels a pull request must carry one of to be listed in Teammates' PRs, in every repository without its own entry under `repos`; an empty list means no filter |
 | `review.repos` | one entry per repository, `"owner/name": { "labels": [...] }`. Each named repository is searched even when firstmate has no work in it, and its `labels` list is its own rule; an empty list means no filter there whatever `default_labels` says |
 | `prs.source` | where the pull request panes get their data. `board` (the default, and what a file without the key means) is the board's own GitHub fetch described under [Using the board](board.md), which still falls back to firstmate's script when gh is not on `PATH`. `firstmate` runs firstmate's own `FM_HOME/bin/fm-bearings-snapshot.sh --include-prs` on every refresh instead, whether or not gh is there. That script lists open pull requests only, in the repositories firstmate works in, without titles, base branches, creation times, authors or labels, so a row shows the recorded task's title or the URL, `-` under BASE and the task's status-log age marked `~` under AGE; its CHECKS word is the script's own verdict; and Teammates' PRs reads `config prs.source = firstmate: Teammates' PRs needs the board's own fetch`. The script calls gh itself, so this source needs gh on `PATH` and logged in exactly as the default does |
+| `summaries.enabled` | `true` (the default, and what a file without the key means) lets the board ask claude for plain-English summaries ([Summaries](board.md#summaries)); `false` turns every call off, so Charted Next shows the raw backlog text and the summary view shows the whole card or report. `--no-summaries` does the same for one run |
+| `summaries.model` | the model `claude -p --model` gets for each summary, default `claude-haiku-4-5-20251001`; any name claude accepts, such as an alias. A summary already on disk is kept when the model changes; only new texts use the new model |
 
 The example's `example-corp/portal` entry is a placeholder, not a real repository.
 To add your own rule, replace it with the repository as GitHub spells it, `owner/name`, and list the labels a pull request there must carry one of; add one entry per repository, or delete the entry to search only the repositories firstmate works in.
 Unknown keys are ignored.
-A malformed file (bad JSON, a wrong type, a repository name that is not `owner/name`, a `prs.source` other than the two words) is reported once in the footer and on the Settings page, and the board runs with the defaults: no login from the file, no label rules, no extra repositories, the `board` source.
+A malformed file (bad JSON, a wrong type, a repository name that is not `owner/name`, a `prs.source` other than the two words, a `summaries.enabled` that is not `true` or `false`) is reported once in the footer and on the Settings page, and the board runs with the defaults: no login from the file, no label rules, no extra repositories, the `board` source, summaries on.
 The Settings page (`.`) shows the identity and where it came from, such as `Identity  zachsibert  (from gh api user)`, the config file's path with `(created from the example)` or `(using defaults: <reason>)` when that applies, the PR source the last refresh used and why (`PR source  board: the board's own GitHub fetch (default)`, `(config)` when the file set it, `firstmate: fm-bearings-snapshot.sh (config prs.source)`, or `(gh not on PATH; the script needs gh too, so both sources fail the same way)` when gh is missing whatever the file says), and the label rules in effect.
 
 **What the `firstmate` source cannot show yet.**
@@ -75,6 +81,15 @@ A pane whose live fetch failed keeps its cached rows, its marker and the `(stale
 Every cached row works as usual, and `enter` on a pull request row whose pane still shows cached data opens the pull request and says `opening PR from data cached 12m ago` in the footer, so you know what you are acting on; there is no prompt.
 With no cache, a cache older than the limit or `--no-cache`, the first frame is the spinner-per-pane start described in [First run](install.md#first-run); `--no-cache` skips the read only, and the file is still written.
 A cache that fails to parse, names another schema or was written for another firstmate home is ignored with a footer notice and replaced by the next clean refresh.
+
+## summaries/
+
+The summaries folder holds every plain-English summary claude wrote for the board, one small JSON file per summarized text ([Summaries](board.md#summaries)).
+A file's name is the SHA-256 of the prompt version and the exact text, so the board finds a text's summary without a call, and a changed text gets a new file.
+Each file names its schema (`fm-board-summary.v1`), the kind (`row` for a Charted Next line, `doc` for a card or a report), the prompt version, the model, when it was made, and the summary as claude wrote it.
+The board moves a file's time forward whenever it reads it and, at launch, removes the files nobody read for 30 days; it never touches another name in the folder.
+Delete the folder to have everything summarized again; delete one file to redo one text.
+A `--summary-dir` inside `FM_HOME` is refused, and the folder beside the view-state file is used instead.
 
 ## The pane record
 

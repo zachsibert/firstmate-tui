@@ -1,10 +1,11 @@
 // lib/hold.mjs - the I/O behind the hold card and the board's three write
-// actions. The card is written to a fresh mkdtemp directory under the OS
-// temp directory as <id>.md, handed to the viewer by the host (lib/app.mjs,
-// index.mjs) and removed afterwards; removeTempDir() only ever deletes a
-// directory makeTempDir() returned, never anything else (the accept prompt
-// draws the same card in the frame instead, from loadHoldCard's text, and
-// writes no file for it). The three writes, accept (`fm-captain-hold.sh
+// actions. The card is built by loadHoldCard and drawn in the frame: the
+// summary view behind enter and the accept prompt both take its text. Only
+// the summary view's full-card key writes it to a file, a fresh mkdtemp
+// directory under the OS temp directory holding <id>.md (writeCardFile),
+// which the host hands to the viewer (lib/app.mjs, index.mjs) and removes
+// afterwards; removeTempDir() only ever deletes a directory makeTempDir()
+// returned, never anything else. The three writes, accept (`fm-captain-hold.sh
 // answer <id> --decision-file <tmp> [--release]`), discard (the same
 // `answer` without --release) and defer (`fm-captain-hold.sh hold <id>
 // --reason <reason> --until <date>`), run
@@ -143,15 +144,13 @@ export async function loadHoldCard(card, { timeoutMs, onBusy = () => {} } = {}) 
   return { text, record, partial, full, error };
 }
 
-// The same card written to a temp file for the viewer: { dir, path, text,
-// partial }. The caller runs the viewer on `path` and then calls
-// removeTempDir(dir).
-export async function prepareHoldCard(card, opts = {}) {
-  const { text, partial } = await loadHoldCard(card, opts);
+// A loaded card's text written to a temp file for the viewer: { dir, path }.
+// The caller runs the viewer on `path` and then calls removeTempDir(dir).
+export function writeCardFile(id, text) {
   const dir = makeTempDir();
-  const path = join(dir, `${fileNameFor(card.id)}.md`);
+  const path = join(dir, `${fileNameFor(id)}.md`);
   writeFileSync(path, text);
-  return { dir, path, text, partial };
+  return { dir, path };
 }
 
 // Discard a hold: write the decision text to a temp file, run `answer` in the

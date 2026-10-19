@@ -37,6 +37,7 @@
 #                               [--keys <list>] [--mouse <list>] [--expand <all|ids>]
 #                               [--opener-cmd <argv>] [--viewer-cmd <argv>]
 #                               [--view-state <file>] [--cache <file>] [--tags]
+#                               [--summary-dir <dir>] [--no-summaries]
 #                               [--curl-cmd <argv>] [--install-root <dir>]
 #                                      print one frame to stdout and exit
 #   firstmate-tui --headless [flags]   run the refresh schedule with no terminal
@@ -47,7 +48,7 @@
 # with no subcommand alike; see `firstmate-tui --help` for the list (--home,
 # --refresh, --no-prs, --no-herdr, --no-mouse, --all-homes-needs,
 # --opener-cmd, --viewer-cmd, --view-state, --cache, --cache-max-age,
-# --no-cache, --curl-cmd, --install-root,
+# --no-cache, --summary-dir, --no-summaries, --curl-cmd, --install-root,
 # --herdr-cmd, --herdr-socket, --snapshot-timeout, --keys, --mouse, --expand,
 # --tags, --headless; --prs is accepted and does nothing, live PR data being
 # the default).
@@ -78,10 +79,13 @@
 # (the last data rendered, drawn at once on the next launch) as
 # state-cache.json beside it (--cache overrides), with the
 # config file (the GitHub login and the To review label rules) beside it as
-# config.json, passed the same way as --config. Its actions are
-# `herdr agent focus`, opening a PR URL in the browser (`open` / `xdg-open`, or
-# --opener-cmd) and showing a report in a terminal viewer (glow, $EDITOR, vim,
-# less, or --viewer-cmd). It never moves or closes a pane.
+# config.json, passed the same way as --config, and the plain-English
+# summaries it asked claude for, one file each under summaries/ beside it
+# (--summary-dir overrides). Its actions are `herdr agent focus`, opening a
+# PR URL in the browser (`open` / `xdg-open`, or --opener-cmd), a one-shot
+# `claude -p` call per text it summarizes, and showing a full report or card
+# in a terminal viewer (glow, $EDITOR, vim, less, or --viewer-cmd). It never
+# moves or closes a pane.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -159,7 +163,8 @@ common flags, after `open` or with no subcommand:
 more flags, same places: --all-homes-needs, --opener-cmd <argv>, --viewer-cmd <argv>,
   --view-state <path>, --config <path> (the GitHub login and the Teammates' PRs
   label rules), --cache <path>, --cache-max-age <s>, --no-cache (the state cache
-  the next launch draws first), --herdr-cmd <argv>, --herdr-socket <path>,
+  the next launch draws first), --summary-dir <path>, --no-summaries (the
+  plain-English summaries claude makes), --herdr-cmd <argv>, --herdr-socket <path>,
   --snapshot-timeout <s>;
   test mode: --render-once, --fixture <json>, --cols N, --rows N, --keys <list>,
   --mouse <list>, --expand <all|ids>, --tags, --headless, --curl-cmd <argv>,
@@ -318,7 +323,7 @@ while [ "$#" -gt 0 ]; do
     --herdr-cmd) [ "$#" -ge 2 ] || die "--herdr-cmd needs a value"; herdr_cmd=$2; pass+=("$1" "$2"); shift ;;
     --view-state) [ "$#" -ge 2 ] || die "--view-state needs a value"; view_state=$2; pass+=("$1" "$2"); shift ;;
     --config) [ "$#" -ge 2 ] || die "--config needs a value"; config_path=$2; pass+=("$1" "$2"); shift ;;
-    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root|--cache|--cache-max-age)
+    --home|--refresh|--cols|--rows|--herdr-socket|--snapshot-timeout|--fm-home|--keys|--mouse|--expand|--opener-cmd|--viewer-cmd|--curl-cmd|--install-root|--cache|--cache-max-age|--summary-dir)
       [ "$#" -ge 2 ] || die "$1 needs a value"; pass+=("$1" "$2"); shift ;;
     *) pass+=("$1") ;;
   esac

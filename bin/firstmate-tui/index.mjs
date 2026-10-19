@@ -15,13 +15,15 @@
 //                  the snapshot and then the PR fetch (unless --no-prs) and
 //                  against a fixture only reports that it cannot; enter on a
 //                  Recently Landed row whose report is its first
-//                  reachable target, runs --viewer-cmd when given and otherwise only
-//                  reports the viewer the chain resolved to, naming the binary
-//                  found on PATH, so a test can shadow glow with a fake without
-//                  ever launching a real viewer; enter on a row with a hold
-//                  card builds the card (a delegate home's record is read
-//                  through that home's fm-fleet-snapshot.sh) and shows it the
-//                  same way, from a temp file removed afterwards; a builds
+//                  reachable target reads the report and opens the summary
+//                  view over it, and enter on a row with a hold card builds
+//                  the card (a delegate home's record is read through that
+//                  home's fm-fleet-snapshot.sh) and opens the same view; the
+//                  view's own enter runs --viewer-cmd on the report or on the
+//                  card from a temp file removed afterwards, and without the
+//                  flag only reports the viewer the chain resolved to, naming
+//                  the binary found on PATH, so a test can shadow glow with a
+//                  fake without ever launching a real viewer; a builds
 //                  the same card and draws it in the frame behind the accept
 //                  prompt (no viewer, no temp file); a,<answer>,enter, d,y
 //                  and D,enter really run bash <home>/bin/fm-captain-hold.sh
@@ -61,7 +63,13 @@
 //                  reads the board's config (the GitHub login, the To review
 //                  label rules) and writes the example there when absent
 //                  (without the flag a fixture render reads none, and a live
-//                  render walks the default chain as the app does).
+//                  render walks the default chain as the app does);
+//                  --summary-dir <dir> turns the summaries on (without it a
+//                  one-shot render calls nothing and draws the raw text): a
+//                  summary that directory holds is drawn as it is, and one it
+//                  does not hold is made by claude on PATH (a test puts a fake
+//                  first) and awaited before the next key and before the
+//                  frame, so the frame is the same on every render.
 //                  `.` opens the Settings page: its install identity comes
 //                  from --install-root (default: the directory above bin/),
 //                  its release data from --curl-cmd (without the flag a
@@ -142,16 +150,17 @@ import { buildModel, dismissKey, initialPrs, mergePrs, prsFailureText, pruneDism
 import { renderFrame, toPlain } from './lib/render.mjs';
 import { toTags } from './lib/tui-blessed.mjs';
 import { agentsFromSnapshot, HerdrClient } from './lib/herdr.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
-import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openAcceptPrompt, openDeferPrompt, scrollFromSaved, viewProblem } from './lib/controller.mjs';
-import { acceptHold, deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, loadHoldCard, prepareHoldCard, removeTempDir } from './lib/hold.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, readReportText, resolveIdentityLive, runSnapshot, statusVerbs } from './lib/sources.mjs';
+import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openAcceptPrompt, openDeferPrompt, openSummaryPrompt, scrollFromSaved, viewProblem } from './lib/controller.mjs';
+import { acceptHold, deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, loadHoldCard, removeTempDir, writeCardFile } from './lib/hold.mjs';
+import { createSummaryStore, resolveSummaryDir } from './lib/summary.mjs';
 import { isOpenableUrl, openUrl } from './lib/opener.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './lib/viewer.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './lib/viewstate.mjs';
 import { cachedFlags, loadStateCache, resolveCachePath, saveStateCache } from './lib/cache.mjs';
 import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsConfig, settingsFlags } from './lib/settings.mjs';
 import { defaultInstallRoot, readInstall, runUpgrade } from './lib/upgrade.mjs';
-import { defaultConfig, loadOrCreateConfig } from './lib/config.mjs';
+import { defaultConfig, loadOrCreateConfig, summariesSetting } from './lib/config.mjs';
 import { identityKnown } from './lib/identity.mjs';
 
 function fail(msg, code = 1) {
@@ -386,12 +395,28 @@ async function driveOnce(facts, opts, size, cfg) {
     config: settingsConfig(cfg),
     prSource: opts.prs ? { enabled: true, ...(facts.prSource || plannedPrSource(cfg.config, process.env)) } : { enabled: false },
   });
-  const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, dismissed: new Set(), columns: loaded.state.columns, drag: null, showHidden: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, prompt: null, busy: null, page: 'board', settings };
+  const view = { pane: 0, row: 0, scroll: scrollFromSaved(loaded.state.scroll), expanded: new Set(loaded.state.expanded), hidden: loaded.state.hidden, hiddenPanes: loaded.state.hiddenPanes, dismissed: new Set(), columns: loaded.state.columns, drag: null, showHidden: false, showBookkeeping: false, help: false, frame: null, lastClick: null, notice: '', noticeBad: false, prompt: null, busy: null, page: 'board', settings };
+  // The summaries: on only with --summary-dir, made by claude on PATH and
+  // awaited (settleSummaries) so the frame never depends on timing.
+  const summarySetting = summariesSetting(cfg.config);
+  const summaryDir = opts.summaryDir ? resolveSummaryDir({ explicit: opts.summaryDir, viewStatePath: vs.path, fmHome: facts.fmHome }) : { path: null, problem: null };
+  const summaryOff = !opts.summaryDir ? 'off (no --summary-dir in --render-once)' : opts.summaries === false ? 'off (--no-summaries)' : !summarySetting.enabled ? `off (summaries.enabled is false in ${cfg.path || 'the config file'})` : null;
+  const summaries = createSummaryStore({ dir: summaryDir.path, model: summarySetting.model, off: summaryOff, onFailure: (reason) => ctx.notice(`summaries: ${reason}; showing the raw text`, true) });
+  facts.summaries = summaries.enabled ? summaries : null;
   // The login a discard or an accept names: the fixture's or the live identity, else the OS user.
   const identity = facts.identity || (facts.prs && facts.prs.identity) || null;
   const holdLogin = () => (identityKnown(identity) ? { login: identity.login, os: false } : { login: userInfo().username, os: true });
-  const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes, dismissed: view.dismissed });
+  const build = () => buildModel(facts, { expanded: view.expanded, allHomesNeeds: opts.allHomesNeeds, hidden: view.hidden, showHidden: view.showHidden, hiddenPanes: view.hiddenPanes, dismissed: view.dismissed, showBookkeeping: view.showBookkeeping });
   let model = build();
+  // Every summary the frame asks for, made and landed, then the model rebuilt
+  // over them and the summary view's status read, as the app's draws do over
+  // time.
+  const settleSummaries = async () => {
+    for (const want of model.summaryWants) summaries.request(want.kind, want.text);
+    await summaries.idle();
+    model = build();
+    if (view.prompt && view.prompt.kind === 'summary') view.prompt.summary = view.prompt.error ? null : summaries.status('doc', view.prompt.text);
+  };
   // The cursor onto a row that still exists, as the app clamps it on every draw.
   const clamp = () => {
     const v = moveSelection(model, view, null);
@@ -473,37 +498,76 @@ async function driveOnce(facts, opts, size, cfg) {
       ctx.notice(problem || `would focus ${row.paneId} (${row.name}); --render-once never runs herdr agent focus`, Boolean(problem));
     },
     // The hold card: built for real (a delegate home's record read through
-    // its own snapshot script), shown through --viewer-cmd when given and
-    // only described otherwise; the temp file goes either way.
-    viewCard: (row) => {
+    // its own snapshot script) and the summary view opened over it, its
+    // summary awaited; view.busy holds the next key back until both land.
+    showCard: (row) => {
       const what = `the hold card of ${row.name}`;
       view.busy = `preparing ${what}`;
       pending.push(
         (async () => {
-          let prepared;
+          let loaded;
           try {
-            prepared = await prepareHoldCard(row.card, { timeoutMs: opts.snapshotTimeout * 1000, onBusy: (text) => ctx.notice(text) });
+            loaded = await loadHoldCard(row.card, { timeoutMs: opts.snapshotTimeout * 1000, onBusy: (text) => ctx.notice(text) });
           } catch (e) {
             ctx.notice(`${what}: ${e.message}`, true);
             return;
           }
-          const partial = prepared.partial ? ' (partial record)' : '';
-          const { argv, source } = resolveViewer({ cmd: opts.viewerCmd, env: process.env });
-          try {
-            if (!opts.viewerCmd) {
-              ctx.notice(`would view ${what}${partial}, ${prepared.text.split('\n').length} lines, with ${argv.join(' ')} (${source}); no --viewer-cmd in --render-once`);
-              return;
-            }
-            const r = await runViewer(prepared.path, { argv });
-            ctx.notice(r.code === 0 || r.code === null ? `viewed ${what}${partial} (${source})` : `${argv[0]} exited ${r.code} · ${what}`, r.code !== 0 && r.code !== null);
-          } catch (e) {
-            ctx.notice(`viewer failed (${argv[0]}): ${e.message} · ${what}`, true);
-          } finally {
-            removeTempDir(prepared.dir);
-          }
+          openSummaryPrompt(view, row, { source: 'card', id: row.card.id, title: (loaded.record && loaded.record.title) || row.card.id, text: loaded.text, partial: loaded.partial });
+          summaries.request('doc', loaded.text);
+          await settleSummaries();
         })().finally(() => {
           view.busy = null;
         }),
+      );
+    },
+    // A Recently Landed report: read, and the summary view opened over it.
+    showReport: (row) => {
+      const pane = model.panes[view.pane];
+      const problem = viewProblem(pane, row);
+      if (problem) {
+        ctx.notice(problem, true);
+        return;
+      }
+      const { text, error } = readReportText(row.reportPath);
+      openSummaryPrompt(view, row, { source: 'report', id: row.name, title: row.reportPath, text, path: row.reportPath, error });
+      if (error) return;
+      summaries.request('doc', text);
+      view.busy = `summarizing ${row.name}`;
+      pending.push(
+        settleSummaries().finally(() => {
+          view.busy = null;
+        }),
+      );
+    },
+    // The summary view's enter: the full report or card through --viewer-cmd
+    // when given (a card from a temp file removed afterwards), and only
+    // described otherwise.
+    viewFull: (p) => {
+      const { argv, source } = resolveViewer({ cmd: opts.viewerCmd, env: process.env });
+      if (p.source === 'report') {
+        if (!opts.viewerCmd) {
+          ctx.notice(`would view ${p.path} with ${argv.join(' ')} (${source}); no --viewer-cmd in --render-once`);
+          return;
+        }
+        pending.push(
+          runViewer(p.path, { argv })
+            .then((r) => ctx.notice(r.code === 0 || r.code === null ? `viewed ${p.path} (${source})` : `${argv[0]} exited ${r.code} · ${p.path}`, r.code !== 0 && r.code !== null))
+            .catch((e) => ctx.notice(`viewer failed (${argv[0]}): ${e.message} · ${p.path}`, true)),
+        );
+        return;
+      }
+      const what = `the hold card of ${p.row.name}`;
+      const partial = p.partial ? ' (partial record)' : '';
+      if (!opts.viewerCmd) {
+        ctx.notice(`would view ${what}${partial}, ${p.text.split('\n').length} lines, with ${argv.join(' ')} (${source}); no --viewer-cmd in --render-once`);
+        return;
+      }
+      const file = writeCardFile(p.id, p.text);
+      pending.push(
+        runViewer(file.path, { argv })
+          .then((r) => ctx.notice(r.code === 0 || r.code === null ? `viewed ${what}${partial} (${source})` : `${argv[0]} exited ${r.code} · ${what}`, r.code !== 0 && r.code !== null))
+          .catch((e) => ctx.notice(`viewer failed (${argv[0]}): ${e.message} · ${what}`, true))
+          .finally(() => removeTempDir(file.dir)),
       );
     },
     // The a key, as the app's holdAccept: the card and the full record loaded
@@ -617,24 +681,6 @@ async function driveOnce(facts, opts, size, cfg) {
           }),
       );
     },
-    viewReport: (row) => {
-      const pane = model.panes[view.pane];
-      const problem = viewProblem(pane, row);
-      if (problem) {
-        ctx.notice(problem, true);
-        return;
-      }
-      const { argv, source } = resolveViewer({ cmd: opts.viewerCmd, env: process.env });
-      if (!opts.viewerCmd) {
-        ctx.notice(`would view ${row.reportPath} with ${argv.join(' ')} (${source}); no --viewer-cmd in --render-once`);
-        return;
-      }
-      pending.push(
-        runViewer(row.reportPath, { argv })
-          .then((r) => ctx.notice(r.code === 0 || r.code === null ? `viewed ${row.reportPath} (${source})` : `${argv[0]} exited ${r.code} · ${row.reportPath}`, r.code !== 0 && r.code !== null))
-          .catch((e) => ctx.notice(`viewer failed (${argv[0]}): ${e.message} · ${row.reportPath}`, true)),
-      );
-    },
     refresh: () => {
       if (opts.fixture) {
         ctx.notice('refresh is not available with --fixture', true);
@@ -685,6 +731,8 @@ async function driveOnce(facts, opts, size, cfg) {
   if (cachePath.problem) ctx.notice(cachePath.problem, true);
   if (cfg.problem) ctx.notice(cfg.problem, true);
   if (cfg.status === 'defaults' && cfg.error) ctx.notice(`config: ${cfg.error}; running with the defaults`, true);
+  if (summaryDir.problem) ctx.notice(summaryDir.problem, true);
+  await settleSummaries();
   for (const [n, input] of opts.inputs.entries()) {
     // On the Settings page, and while a hold effect runs (view.busy: a card,
     // a delegate record read that opens the defer prompt, the command), the
@@ -703,6 +751,7 @@ async function driveOnce(facts, opts, size, cfg) {
     }
   }
   await Promise.all(pending);
+  await settleSummaries();
   // After the frame: the rendered facts go to the cache when none of them
   // came from it and nothing failed, as a clean tick of the app writes them.
   const finish = () => {

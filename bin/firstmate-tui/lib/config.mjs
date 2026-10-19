@@ -18,7 +18,8 @@
 //     "identity": { "github_login": null },
 //     "review": { "default_labels": [],
 //                 "repos": { "<owner/name>": { "labels": [ "<label>", ... ] } } },
-//     "prs": { "source": "board" } }
+//     "prs": { "source": "board" },
+//     "summaries": { "enabled": true, "model": "claude-haiku-4-5-20251001" } }
 // identity.github_login names the captain's GitHub login; null means "ask gh,
 // then git" (lib/identity.mjs). review.repos adds each named repository to
 // the To review scope and gives it a label rule: a PR there is listed only
@@ -30,19 +31,27 @@
 // PATH; "firstmate" runs that script whether or not gh is there (My PRs from
 // the script's open-PR rows, Teammates' PRs unavailable). The parsed config
 // carries prs.configured, true when the file set the key, so the Settings
-// page can say whether "board" came from the file or the default. Unknown
-// keys are ignored. A malformed file is reported once and the board runs
-// with the defaults (no login from the file, no label rules, no configured
-// repositories, the board source); the file is never overwritten once it
-// exists.
+// page can say whether "board" came from the file or the default.
+// summaries.enabled (default true) turns the plain-English summaries on or
+// off: the Charted Next WHAT text and the summary view behind enter
+// (lib/summary.mjs); summaries.model names the model the one-shot claude
+// call uses (default DEFAULT_SUMMARY_MODEL). Unknown keys are ignored. A
+// malformed file is reported once and the board runs with the defaults (no
+// login from the file, no label rules, no configured repositories, the board
+// source, summaries on); the file is never overwritten once it exists.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { DEFAULT_SUMMARY_MODEL } from './summary.mjs';
 
 export const CONFIG_SCHEMA = 'firstmate-tui-config.v1';
 
 // The two values prs.source takes (the header says what each does).
 export const PR_SOURCES = ['board', 'firstmate'];
+
+// A model name as claude's --model takes it: one argv element that cannot
+// read as a flag.
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/;
 
 // The documented example, byte for byte what docs/config.example.json holds
 // and what the board writes on a first launch: one placeholder repository
@@ -55,6 +64,7 @@ export const EXAMPLE_CONFIG = {
   identity: { github_login: null },
   review: { default_labels: [], repos: { 'example-corp/portal': { labels: ['ready-to-merge'] } } },
   prs: { source: 'board' },
+  summaries: { enabled: true, model: DEFAULT_SUMMARY_MODEL },
 };
 
 export function exampleConfigText() {
@@ -63,7 +73,7 @@ export function exampleConfigText() {
 
 // The defaults the board runs with when there is no usable file.
 export function defaultConfig() {
-  return { schema: CONFIG_SCHEMA, identity: { github_login: null }, review: { default_labels: [], repos: {} }, prs: { source: 'board', configured: false } };
+  return { schema: CONFIG_SCHEMA, identity: { github_login: null }, review: { default_labels: [], repos: {} }, prs: { source: 'board', configured: false }, summaries: { enabled: true, model: DEFAULT_SUMMARY_MODEL } };
 }
 
 export function defaultConfigPath(env = process.env) {
@@ -139,7 +149,20 @@ export function parseConfig(text) {
       config.prs = { source, configured: true };
     }
   }
+  if (doc.summaries !== undefined) {
+    if (!isObject(doc.summaries)) return { config: defaultConfig(), error: 'summaries is not an object' };
+    const { enabled, model } = doc.summaries;
+    if (enabled !== undefined && typeof enabled !== 'boolean') return { config: defaultConfig(), error: `summaries.enabled is not true or false (got ${JSON.stringify(enabled)})` };
+    if (model !== undefined && model !== null && (typeof model !== 'string' || !MODEL_RE.test(model.trim()))) return { config: defaultConfig(), error: `summaries.model is not a model name (got ${JSON.stringify(model)})` };
+    config.summaries = { enabled: enabled !== false, model: typeof model === 'string' ? model.trim() : DEFAULT_SUMMARY_MODEL };
+  }
   return { config, error: null };
+}
+
+// The summaries setting in effect: { enabled, model }.
+export function summariesSetting(config) {
+  const s = config && config.summaries ? config.summaries : {};
+  return { enabled: s.enabled !== false, model: typeof s.model === 'string' && s.model ? s.model : DEFAULT_SUMMARY_MODEL };
 }
 
 // The PR source the config asks for: 'firstmate' or 'board' (the default, and

@@ -83,7 +83,12 @@ marker belong to later milestones.
   `lib/model.mjs` carries the per-source flags and `lib/app.mjs` clears
   them). The cache holds only what came from outside (snapshot, ledgers, PR
   data with its identity, herdr agents), never view state or the refresh
-  bookkeeping, and a failed refresh never overwrites it. The board writes `config.json` once,
+  bookkeeping, and a failed refresh never overwrites it. Beside them sits the
+  `summaries/` folder (`lib/summary.mjs`, `--summary-dir`): one
+  JSON file per summarized text, named by the SHA-256 of the prompt version
+  and the exact text, so a hit costs no call and a changed text (or a new
+  prompt version) is summarized again; files unread for 30 days go at
+  launch. The board writes `config.json` once,
   from `EXAMPLE_CONFIG`, when no file is there, and never again; the test
   suite pins that constant byte for byte to `docs/config.example.json`, so
   change both together. Hiding is view state because firstmate retires Done
@@ -94,15 +99,24 @@ marker belong to later milestones.
   are not GitHub logins. With `--no-prs` gh is not asked at all.
 - The board owns no authority. Its actions are `herdr agent focus`, opening a
   PR URL in the browser (`lib/opener.mjs`: an argv spawn of `open` /
-  `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), showing a
-  report in a terminal viewer (`lib/viewer.mjs`, argv spawn, path appended),
-  showing a hold card (enter on a Captain's Call hold, decide or blocked row,
+  `xdg-open` / `--opener-cmd`, never a shell string, http(s) only), one
+  headless `claude -p` call per text it summarizes (`lib/summary.mjs`: a
+  Charted Next item's WHAT and WHY, a card's or a report's summary; argv
+  spawn, the text on stdin, `--tools ""`, `--no-session-persistence`,
+  `--safe-mode`, cwd the OS temp directory, a fixed prompt per kind; it
+  never resumes or messages a firstmate or worker session, and a failure
+  leaves the raw text with one footer notice; off with the config file's
+  `summaries.enabled` or `--no-summaries`), showing a report or a hold card
+  in the summary view inside the board (`lib/render.mjs renderSummary`,
+  `view.prompt` kind `summary`), whose `enter` hands the full document to a
+  terminal viewer (`lib/viewer.mjs`, argv spawn, path appended); the card
+  (enter on a Captain's Call hold, decide or blocked row,
   on a Charted Next queued or held row, on a delegate's decision row, or on
   an Underway or Recently Landed row whose task is a captain hold;
   `lib/card.mjs` builds it, pure, from the backlog record and
   the files `lib/sources.mjs` reads under `data/<id>/` and `state/<id>.status`,
-  and `lib/hold.mjs` writes it to a mkdtemp directory the same viewer path
-  shows and then removes; a delegate home's record comes from that home's own
+  and only the full-card key has `lib/hold.mjs` write it to a mkdtemp
+  directory the viewer shows and then removes; a delegate home's record comes from that home's own
   `fm-fleet-snapshot.sh --json`, never from a backlog parser of the board's,
   and a remote or unreadable home gets the ledger's fields under a partial
   notice), discarding a hold (`d`, after `y`: `fm-captain-hold.sh answer <id>
@@ -224,7 +238,11 @@ marker belong to later milestones.
   workers for the group header and the held-item gate. Every other unknown
   task is a Charted Next warning naming its case (`unavailableText`), and a
   home-level `child current state unavailable: <ids>` reason is cut to the
-  ids not drawn (`homeWarningText`).
+  ids not drawn (`homeWarningText`). Those warnings, and a gone endpoint,
+  are bookkeeping (`row.bookkeeping`): hidden until `w` shows them and
+  counted in the title either way; a warning that needs the captain (the
+  main inventory, a delegate home whose work list or state is unreadable)
+  is always drawn, in plain words (`warningRows`).
 - `FM_HOME` is explicit, never inferred from the current directory. The
   launcher's FM_HOME error may name a home it finds above the working
   directory as the command to run, but it never adopts one (`die_no_home`
@@ -243,6 +261,8 @@ marker belong to later milestones.
   and a delegate home's record through `readHoldRecord`), `herdr.mjs`
   (herdr), `upgrade.mjs` (the install record and the upgrade child),
   `hold.mjs` (the card's text and temp file and the three `fm-captain-hold.sh` runs),
+  `summary.mjs` (the claude calls and the summaries folder; its parse of
+  claude's answer is pure beside them),
   `viewstate.mjs` and `config.mjs` (the board's two files; both hold their
   pure parse beside the read and write). A row's `card` and `hold` fields
   (`lib/model.mjs` header) say what enter, `a`, `d` and `D` may do with it; the
@@ -344,9 +364,16 @@ marker belong to later milestones.
   state cache only with `--cache <file>` and writes that file only when
   nothing in the frame came from it, which is how the suite builds a cache
   from `populated.json` and restores it over `cold-start.json`); a PR open must go to `--opener-cmd bash
-  tests/fake-opener.sh` and a report view to `--viewer-cmd bash
-  tests/fake-viewer.sh`, never a real browser or editor (a one-shot render
-  without `--viewer-cmd` only reports the resolved viewer for that reason).
+  tests/fake-opener.sh` and a full report or card (the summary view's
+  `enter`) to `--viewer-cmd bash tests/fake-viewer.sh`, never a real
+  browser or editor (a one-shot render without `--viewer-cmd` only reports
+  the resolved viewer for that reason). The app summarizes by default, so
+  every headless and pty run must have `tests/fake-claude.sh` first on PATH
+  as `claude` (the suite's FAKE_BIN holds it), or it reaches the real
+  claude and spends tokens; a one-shot render summarizes only with
+  `--summary-dir`, awaits every call before the next key and the frame, and
+  the fake logs each call to `FM_BOARD_TEST_CLAUDE_LOG` and fails under
+  `FAKE_CLAUDE_FAIL`.
   The `r` key is tested against a stand-in home whose snapshot scripts only
   log that they ran, with `tests/fake-gh.sh` first on PATH as `gh` (see
   `render_live` in the test): every live render must put that fake first on

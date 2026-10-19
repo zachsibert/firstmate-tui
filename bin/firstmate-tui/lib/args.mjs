@@ -33,10 +33,18 @@ options:
                          line still starts the board)
   --opener-cmd <argv>    command that opens a URL in the browser (default: open on
                          macOS, xdg-open on Linux); quoted string, split on whitespace
-  --viewer-cmd <argv>    command that shows a report or a hold card in the
-                         terminal (default: glow -p when glow is on PATH, else $EDITOR,
-                         else vim, else less); quoted string, split on whitespace; the
-                         path is appended
+  --viewer-cmd <argv>    command that shows the full report or hold card in the
+                         terminal from the summary view's enter (default: glow -p when
+                         glow is on PATH, else $EDITOR, else vim, else less); quoted
+                         string, split on whitespace; the path is appended
+  --summary-dir <path>   where the plain-English summaries are kept, one file per
+                         summarized text (default: summaries/ beside the view-state
+                         file; never inside FM_HOME). With --render-once nothing is
+                         summarized without this flag; with it, claude on PATH is
+                         called for each text the directory does not hold yet
+  --no-summaries         never call claude: Charted Next shows the raw backlog text and
+                         the summary view shows the full card or report (the config
+                         file's summaries.enabled false does the same)
   --view-state <path>    where hidden rows, hidden panes, dragged column widths and the
                          selection (focused pane, selected row, expanded groups, scroll)
                          are remembered (default:
@@ -170,6 +178,8 @@ export function parseArgs(argv, env = {}) {
     allHomesNeeds: false,
     openerCmd: null,
     viewerCmd: null,
+    summaryDir: null, // --summary-dir <path>; null means summaries/ beside the view-state file
+    summaries: true, // --no-summaries turns every claude call off
     viewState: null,
     config: null,
     cache: true, // read the state cache at launch (--no-cache turns reading off; writing stays)
@@ -252,6 +262,12 @@ export function parseArgs(argv, env = {}) {
         break;
       case '--viewer-cmd':
         opts.viewerCmd = need(a).split(/\s+/).filter(Boolean);
+        break;
+      case '--summary-dir':
+        opts.summaryDir = need(a);
+        break;
+      case '--no-summaries':
+        opts.summaries = false;
         break;
       case '--view-state':
         opts.viewState = need(a);
