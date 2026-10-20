@@ -870,9 +870,10 @@ assert_row "$chain" '^viewer-cmd bash fake$' "chain: --viewer-cmd overrides ever
 # viewer; without --viewer-cmd that only reports the viewer the chain resolved to, naming the fake glow
 # shadowing PATH; nothing runs (falsify: run the viewer without --viewer-cmd in driveOnce, or drop
 # whichOnPath). In lost.json the two PR panes and Charted Next are empty, so two tabs from Captain's
-# Call reach Recently Landed, whose first row is the scout-beta report.
+# Call reach Recently Landed, whose first row is the scout-beta report. The notice carries FAKE_BIN's
+# full temp path, so it is read at 260 columns, where no TMPDIR cuts it.
 rm -f "$VIEWER_LOG"
-frame_v=$(FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" PATH="$FAKE_BIN:$PATH" render lost.json --keys "tab,tab,enter,enter") || fail "viewer report-only: render exited non-zero"
+frame_v=$(FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" PATH="$FAKE_BIN:$PATH" render lost.json --cols 260 --keys "tab,tab,enter,enter") || fail "viewer report-only: render exited non-zero"
 assert_contains "$frame_v" "would view /fixture/firstmate/data/scout-beta/report.md with $FAKE_BIN/glow -p (glow)" "fake glow on PATH is the resolved viewer, reported with its path and -p"
 assert_not_viewed "without --viewer-cmd the resolved viewer is never spawned"
 # With --viewer-cmd the report path is the only appended argument (falsify: drop reportPath from the
@@ -2083,7 +2084,7 @@ frame_s=$(render_sum "$SUM_DIR" --keys "f,w,a,i,t,i,n,g,space,o,n,space,t,h,e,sp
 assert_row "$frame_s" '^ Charted Next +queued +fake why +held-external +Summary of Vendor cutover ' "summaries: the search matches the raw reason of a summarized row"
 # The pure parts (falsify: change the key's inputs, the parse, the refused directory or the prune rule).
 pure=$(node --input-type=module -e "
-  import { parseRowSummary, parseDocSummary, summaryKey, summaryInput, resolveSummaryDir, pruneSummaries } from '$ROOT/bin/firstmate-tui/lib/summary.mjs';
+  import { createSummaryStore, parseRowSummary, parseDocSummary, summaryKey, summaryInput, resolveSummaryDir, pruneSummaries } from '$ROOT/bin/firstmate-tui/lib/summary.mjs';
   import { mkdirSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
   console.log(summaryKey('row', 'a') === summaryKey('row', 'a'), summaryKey('row', 'a') !== summaryKey('row', 'b'), summaryKey('row', 'a') !== summaryKey('doc', 'a'), /^[0-9a-f]{64}\$/.test(summaryKey('doc', 'x')));
   console.log(JSON.stringify(parseRowSummary('WHAT: Move the cache\nWHY: vendor contract')));
@@ -2101,6 +2102,7 @@ pure=$(node --input-type=module -e "
   utimesSync(d + '/' + old, past, past);
   utimesSync(d + '/' + other, past, past);
   console.log(pruneSummaries(d), existsSync(d + '/' + old), existsSync(d + '/' + fresh), existsSync(d + '/' + other));
+  console.log(JSON.stringify(createSummaryStore().status('doc', ' \\n')));
 ")
 assert_row "$pure" '^true true true true$' "summaryKey: the same text, the same key; another text or kind, another key; 64 hex digits"
 assert_row "$pure" '^\{"what":"Move the cache","why":"vendor contract"\}$' "parseRowSummary: the two lines"
@@ -2111,6 +2113,7 @@ assert_row "$pure" '^"<item>\\nTitle: x\\n</item>\\n"$' "summaryInput: the text 
 assert_row "$pure" '^\{"path":"/c/fm-board/summaries","problem":"refusing --summary-dir inside FM_HOME \(/h/fm/sum\)"\}$' "resolveSummaryDir: a dir inside FM_HOME is refused for the one beside the view state"
 assert_row "$pure" '^\{"path":"/c/fm-board/summaries","problem":null\}$' "resolveSummaryDir: summaries/ beside the view-state file by default"
 assert_row "$pure" '^1 false true true$' "pruneSummaries: only a key-named file older than the limit goes"
+assert_row "$pure" '^\{"state":"failed","error":"the text is empty"\}$' "store status: an empty document is a failure, never a summary that stays pending (an empty report file)"
 
 # Bookkeeping warnings (a gone endpoint, an unreadable child state) hide until w; the title counts them
 # either way and names the key; the warnings that need the captain stay, in plain words (falsify: drop
@@ -2144,7 +2147,7 @@ rm -f "$CLAUDE_LOG"
 frame_s=$(FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render_hold "j,enter" --summary-dir "$SCRATCH/summaries-cards") || fail "summary view: render exited non-zero"
 assert_count "$(claude_calls)" "claude doc " 1 "summary view: one document call for the card"
 assert_contains "$(claude_calls)" "claude doc Pick the vendor for the address API |" "summary view: the call carries the card's text"
-assert_row "$frame_s" '^ summary by claude-haiku-4-5-20251001, made [0-9]{4}-[0-9]{2}-[0-9]{2}; the full card follows +$' "summary view: the status line names the model and the day it was made"
+assert_row "$frame_s" "^ summary by claude-haiku-4-5-20251001, made $TODAY; the full card follows +\$" "summary view: the status line names the model and the local day it was made (falsify: print the UTC date of created_at)"
 assert_row "$frame_s" '^ - Summary of Pick the vendor for the address API +$' "summary view: the summary's first line"
 assert_row "$frame_s" '^ - Fake summary line three +$' "summary view: the summary's last line"
 assert_row "$frame_s" '^ ── full card ─+ +$' "summary view: a rule separates the summary from the full card"

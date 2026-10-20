@@ -169,6 +169,8 @@ export function resolveSummaryDir({ explicit = null, viewStatePath = null, fmHom
 
 const KEY_FILE = /^[0-9a-f]{64}\.json$/;
 
+const blank = (text) => text === null || text === undefined || !String(text).trim();
+
 // Remove the summary files under `dir` whose file time is older than
 // `keepDays`: only names a summary key gives, nothing else in the directory.
 // Returns how many went.
@@ -375,6 +377,7 @@ export function createSummaryStore({ dir = null, model = DEFAULT_SUMMARY_MODEL, 
     },
     status(kind, text) {
       if (off) return { state: 'off', error: off };
+      if (blank(text)) return { state: 'failed', error: 'the text is empty' };
       const { e } = entryOf(kind, text);
       if (e.state === 'done') return { state: 'done', summary: e.parsed, model: e.model, createdAt: e.createdAt };
       if (e.state === 'pending' || e.state === 'queued') return { state: 'pending' };
@@ -388,7 +391,7 @@ export function createSummaryStore({ dir = null, model = DEFAULT_SUMMARY_MODEL, 
       return e.state === 'done' ? e.parsed : null;
     },
     request(kind, text) {
-      if (off || text === null || text === undefined || text === '') return;
+      if (off || blank(text)) return;
       const { key, e } = entryOf(kind, text);
       if (e.state !== 'none' || stopped) return;
       e.state = 'queued';

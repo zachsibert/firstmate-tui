@@ -5,7 +5,7 @@
 
 import { columns, GUTTER, layoutMode, MIN_COLS, MIN_ROWS, PANES, paneDemand, paneHeights } from './layout.mjs';
 import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, settingsInfo, upgradeOffer } from './settings.mjs';
-import { acceptFooterText, promptText, summaryFooterText, summaryNoun } from './card.mjs';
+import { acceptFooterText, localDate, promptText, summaryFooterText, summaryNoun } from './card.mjs';
 import { searchIndex, searchResults } from './controller.mjs';
 import { charWidth, fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
@@ -567,7 +567,8 @@ export function summaryStatusText(prompt) {
   const noun = summaryNoun(prompt);
   const s = prompt.summary || { state: 'none' };
   if (prompt.error) return `the ${noun} cannot be read here (${prompt.error}); enter still hands its path to the viewer`;
-  if (s.state === 'done') return `summary by ${s.model || 'claude'}${s.createdAt ? `, made ${String(s.createdAt).slice(0, 10)}` : ''}; the full ${noun} follows`;
+  const made = s.createdAt ? Date.parse(s.createdAt) : NaN;
+  if (s.state === 'done') return `summary by ${s.model || 'claude'}${Number.isFinite(made) ? `, made ${localDate(made)}` : ''}; the full ${noun} follows`;
   if (s.state === 'pending' || s.state === 'none') return `summarizing with claude...; the full ${noun} follows meanwhile`;
   if (s.state === 'failed') return `no summary (${s.error}); the full ${noun} follows`;
   return `no summary: ${s.error}; the full ${noun} follows`;
