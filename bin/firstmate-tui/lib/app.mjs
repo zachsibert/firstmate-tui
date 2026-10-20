@@ -87,12 +87,27 @@
 // against a stand-in home, and stops it with a signal): nothing is drawn, no
 // key is read and neo-blessed is never loaded, so the suite needs only Node.
 //
-// The report viewer takes the terminal over: the screen is suspended (normal
-// buffer, raw mode off, input paused), the viewer runs with inherited stdio,
-// and the screen is resumed and repainted when it exits. SIGINT is ignored by
-// the board meanwhile so a ctrl-c meant for the viewer never quits the board.
-// A hold card (enter on a held row, lib/card.mjs) goes through the same path
-// (viewFile) from a temp file lib/hold.mjs writes and removes afterwards.
+// Summaries (lib/summary.mjs): one store per session, its files under
+// summaries/ beside the view-state file (--summary-dir overrides), off with
+// --no-summaries or the config file's summaries.enabled false. Every draw
+// asks it for the Charted Next rows the model lists in summaryWants; each
+// call runs in the background, at most a few at once, and its landing
+// redraws, so a row shows its raw text until its summary is there and a
+// repaint never waits for one. The first failure (claude not on PATH, an
+// error, a timeout) is named in the footer once and the rows keep their raw
+// text. Files nobody read for 30 days are removed at launch.
+//
+// Enter on a card or report row opens the summary view inside the board
+// (lib/card.mjs, lib/render.mjs renderSummary): the card is loaded
+// (lib/hold.mjs loadHoldCard, a delegate home's record read first) or the
+// report read, its summary asked for, and the view shows the summary above
+// the full text once it lands. The full document is one key away: enter
+// there hands it to the viewer, which takes the terminal over: the screen is
+// suspended (normal buffer, raw mode off, input paused), the viewer runs
+// with inherited stdio, and the screen is resumed and repainted when it
+// exits. SIGINT is ignored by the board meanwhile so a ctrl-c meant for the
+// viewer never quits the board. A card goes to the viewer from a temp file
+// lib/hold.mjs writes and removes afterwards; a report as its own path.
 //
 // The two writes, d (discard) and D (defer), run firstmate's own
 // fm-captain-hold.sh in the hold's home through lib/hold.mjs once the footer
@@ -119,17 +134,18 @@
 import { userInfo } from 'node:os';
 import { buildModel, dismissKey, initialPrs, mergePrs, parseTarget, prsFailureText, pruneDismissed } from './model.mjs';
 import { renderFrame } from './render.mjs';
-import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
+import { collectLedgers, discoverHomes, fetchPrs, fetchReleases, mtime, plannedPrSource, readHoldRecord, readReportText, resolveIdentityLive, runSnapshot, statusVerbs } from './sources.mjs';
 import { HerdrClient } from './herdr.mjs';
 import { defaultOpenerCmd, isOpenableUrl, openUrl } from './opener.mjs';
-import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openAcceptPrompt, openDeferPrompt, savedFocus, savedScroll, viewProblem } from './controller.mjs';
+import { focusFromSaved, focusProblem, handleKey, handleMouse, moveSelection, openAcceptPrompt, openDeferPrompt, openSummaryPrompt, savedFocus, savedScroll, viewProblem } from './controller.mjs';
 import { resolveViewer, runViewer, whichOnPath } from './viewer.mjs';
-import { acceptHold, deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, loadHoldCard, prepareHoldCard, removeTempDir } from './hold.mjs';
+import { acceptHold, deferHold, discardHold, firstLine, HOLD_TIMEOUT_MS, holdFailureText, loadHoldCard, removeTempDir, writeCardFile } from './hold.mjs';
+import { createSummaryStore, pruneSummaries, resolveSummaryDir } from './summary.mjs';
 import { loadViewState, resolveViewStatePath, saveViewState } from './viewstate.mjs';
 import { cachedFlags, loadStateCache, resolveCachePath, saveStateCache } from './cache.mjs';
 import { finishUpgrade, initialSettings, RELAUNCH_EXIT, resultNotice, settingsConfig, settingsFlags } from './settings.mjs';
 import { defaultInstallRoot, readInstall, runUpgrade } from './upgrade.mjs';
-import { loadOrCreateConfig } from './config.mjs';
+import { loadOrCreateConfig, summariesSetting } from './config.mjs';
 import { identityKnown } from './identity.mjs';
 
 export { moveSelection } from './controller.mjs';
@@ -209,6 +225,7 @@ export async function runApp(opts) {
       columns: loaded.state.columns, // dragged column widths by pane id and column key (view state)
       drag: null, // the column boundary being dragged, or null (lib/controller.mjs)
       showHidden: false,
+      showBookkeeping: false, // Charted Next's bookkeeping warnings, shown by w for the session
       help: false,
       frame: null, // the last drawn frame's { cols, rows, zones }: what the mouse points at
       lastClick: null,
@@ -242,6 +259,20 @@ export async function runApp(opts) {
   let screen = null;
   let quitting = false;
 
+  // The summary store: its landings redraw, its first failure is named once
+  // (on the next tick: a missing claude fails inside the draw that asked).
+  const summarySetting = summariesSetting(cfg.config);
+  const summaryDir = resolveSummaryDir({ explicit: opts.summaryDir, viewStatePath: viewStatePath.path, fmHome: opts.fmHome });
+  const summaryOff = opts.summaries === false ? 'off (--no-summaries)' : !summarySetting.enabled ? `off (summaries.enabled is false in ${cfg.path || 'the config file'})` : null;
+  const summaries = createSummaryStore({
+    dir: summaryDir.path,
+    model: summarySetting.model,
+    off: summaryOff,
+    onLanded: () => draw(),
+    onFailure: (reason) => setImmediate(() => notice(`summaries: ${reason}; showing the raw text`, true, 15000)),
+  });
+  if (!summaryOff && summaryDir.path) pruneSummaries(summaryDir.path);
+
   const facts = () => ({
     now: Math.floor(Date.now() / 1000),
     fmHome: state.fmHome,
@@ -262,6 +293,7 @@ export async function runApp(opts) {
     },
     mtime,
     statusVerbs,
+    summaries: summaries.enabled ? summaries : null,
   });
 
   const rebuild = () => {
@@ -272,6 +304,7 @@ export async function runApp(opts) {
       showHidden: state.view.showHidden,
       hiddenPanes: state.view.hiddenPanes,
       dismissed: state.view.dismissed,
+      showBookkeeping: state.view.showBookkeeping,
     });
     syncSpinner();
     return state.model;
@@ -328,9 +361,18 @@ export async function runApp(opts) {
     if (!pending.focus && !Object.keys(pending.scroll).length) state.pendingView = null;
   };
 
+  // The summaries the frame needs: the rows the model lists, asked for in
+  // the background, and the summary view's document status, read fresh.
+  const syncSummaries = () => {
+    for (const want of state.model.summaryWants) summaries.request(want.kind, want.text);
+    const p = state.view.prompt;
+    if (p && p.kind === 'summary') p.summary = p.error ? null : summaries.status('doc', p.summaryText);
+  };
+
   const draw = () => {
     if (!screen || quitting || state.viewing) return;
     rebuild();
+    syncSummaries();
     applyPendingView();
     const v = moveSelection(state.model, state.view, null); // clamp only
     state.view.pane = v.pane;
@@ -637,8 +679,8 @@ export async function runApp(opts) {
   // Show one file in the viewer: suspend the screen, run the viewer with the
   // terminal, resume and repaint. Refreshes keep running underneath; their
   // draws are skipped until the viewer has exited. Resolves to { argv,
-  // source, result, failure } for the caller's notice. Shared by a Findings
-  // report (viewRow) and a hold card (viewCard).
+  // source, result, failure } for the caller's notice. The summary view's
+  // full-document key is its one caller (viewFull).
   const viewFile = async (path) => {
     const { argv, source } = resolveViewer({ cmd: opts.viewerCmd, env: process.env });
     state.viewing = true;
@@ -669,7 +711,10 @@ export async function runApp(opts) {
     else notice(`viewed ${what} (${source})`, false, 8000);
   };
 
-  const viewRow = async (row) => {
+  // Enter on a Recently Landed report: the summary view over the file's text
+  // (a file that cannot be read opens the view with the reason, and its
+  // enter still hands the path to the viewer).
+  const showReport = (row) => {
     const pane = state.model.panes[state.view.pane];
     const problem = viewProblem(pane, row);
     if (problem) {
@@ -677,20 +722,23 @@ export async function runApp(opts) {
       return;
     }
     if (state.viewing) return;
-    viewNotice(await viewFile(row.reportPath), row.reportPath);
+    const { text, error } = readReportText(row.reportPath);
+    openSummaryPrompt(state.view, row, { source: 'report', id: row.name, title: row.reportPath, text, path: row.reportPath, error });
+    if (!error) summaries.request('doc', text);
     draw();
   };
 
-  // The hold card of a row: built from durable records (lib/hold.mjs
-  // prepareHoldCard, which reads a delegate home's record on demand), shown
-  // through the viewer from a temp file that is removed once it exits.
-  const viewCard = async (row) => {
+  // Enter on a card row: the card built from durable records (lib/hold.mjs
+  // loadHoldCard, which reads a delegate home's record on demand) and the
+  // summary view opened over it.
+  const showCard = async (row) => {
     if (state.viewing || state.view.busy) return;
     const what = `the hold card of ${row.name}`;
     state.view.busy = `preparing ${what}`;
-    let prepared;
+    draw();
+    let loaded;
     try {
-      prepared = await prepareHoldCard(row.card, { timeoutMs: opts.snapshotTimeout * 1000, onBusy: (text) => notice(text, false, 60000) });
+      loaded = await loadHoldCard(row.card, { timeoutMs: opts.snapshotTimeout * 1000, onBusy: (text) => notice(text, false, 60000) });
     } catch (e) {
       state.view.busy = null;
       notice(`${what}: ${e.message.slice(0, 80)}`, true, 15000);
@@ -698,13 +746,30 @@ export async function runApp(opts) {
       return;
     }
     state.view.busy = null;
+    openSummaryPrompt(state.view, row, { source: 'card', id: row.card.id, title: (loaded.record && loaded.record.title) || row.card.id, text: loaded.text, partial: loaded.partial });
+    summaries.request('doc', state.view.prompt.summaryText);
+    notice('', false, 1);
+    draw();
+  };
+
+  // The summary view's enter: the whole document in the viewer, a report as
+  // its own path and a card from a temp file removed once the viewer exits.
+  // The view stays open behind it.
+  const viewFull = async (prompt) => {
+    if (state.viewing) return;
+    if (prompt.source === 'report') {
+      viewNotice(await viewFile(prompt.path), prompt.path);
+      draw();
+      return;
+    }
+    const file = writeCardFile(prompt.id, prompt.text);
     let shown;
     try {
-      shown = await viewFile(prepared.path);
+      shown = await viewFile(file.path);
     } finally {
-      removeTempDir(prepared.dir);
+      removeTempDir(file.dir);
     }
-    viewNotice(shown, `${what}${prepared.partial ? ' (partial record)' : ''}`);
+    viewNotice(shown, `the hold card of ${prompt.row.name}${prompt.partial ? ' (partial record)' : ''}`);
     draw();
   };
 
@@ -890,11 +955,14 @@ export async function runApp(opts) {
     focus: (row, o) => {
       focusRow(row, o);
     },
-    viewReport: (row) => {
-      viewRow(row);
+    showReport: (row) => {
+      showReport(row);
     },
-    viewCard: (row) => {
-      viewCard(row);
+    showCard: (row) => {
+      showCard(row);
+    },
+    viewFull: (prompt) => {
+      viewFull(prompt);
     },
     holdAccept: (row) => {
       holdAccept(row);
@@ -950,6 +1018,7 @@ export async function runApp(opts) {
   if (cachePath.problem) notice(cachePath.problem, true, 15000);
   if (cfg.problem) notice(cfg.problem, true, 15000);
   if (cfg.status === 'defaults' && cfg.error) notice(`config: ${cfg.error}; running with the defaults`, true, 15000);
+  if (summaryDir.problem && !summaryOff) notice(`${summaryDir.problem}; summaries are kept for this session only`, true, 15000);
   if (herdr) {
     herdr.on('state', () => draw());
     herdr.on('event', (ev) => {

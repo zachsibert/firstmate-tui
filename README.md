@@ -2,7 +2,7 @@
 
 I built firstmate-tui because I had several coding agents working for me at the same time and no single place to see where things stood. A coding agent is a program that takes a task and writes the code for it on its own. [firstmate](https://github.com/kunchenguid/firstmate) runs a fleet of them from my machine, each in its own pane of [herdr](https://herdr.dev), a terminal multiplexer, which is one terminal window split into many. Every agent ends up with a pull request, a proposed set of code changes waiting for review on GitHub, and every so often one of them stops and asks me something. Scrolling back through their chats didn't tell me who was stuck, what was waiting on me, or which of my pull requests had green checks.
 
-So this is a board that sits in a terminal pane next to the work and puts all of it on one screen: what needs my answer, what each agent is doing right now, my own pull requests and the ones teammates asked me to review, what's queued behind something, and what shipped. It reads the state firstmate keeps on disk, asks GitHub about the pull requests, asks herdr which agent panes are still alive, and refreshes every 30 seconds. It's read-only, with one exception: when an agent has parked a question for me, three keys let me answer it, drop it, or push it to a later date, and those hand the answer to firstmate's own command rather than editing anything themselves. The board never edits a firstmate file itself and never merges anything.
+So this is a board that sits in a terminal pane next to the work and puts all of it on one screen: what needs my answer, what each agent is doing right now, my own pull requests and the ones teammates asked me to review, what's queued behind something, and what shipped. It reads the state firstmate keeps on disk, asks GitHub about the pull requests, asks herdr which agent panes are still alive, and refreshes every 30 seconds. It also asks claude, the Claude Code CLI, for a short plain-English summary of each queued item, card and report it shows, once per text, and keeps the answers on disk so the same text never costs a second call. It's read-only, with one exception: when an agent has parked a question for me, three keys let me answer it, drop it, or push it to a later date, and those hand the answer to firstmate's own command rather than editing anything themselves. The board never edits a firstmate file itself and never merges anything.
 
 ## Install
 
@@ -31,7 +31,7 @@ Six panes, top to bottom. Each pane's number is its key.
 2. **Underway** is one row per live agent, with what it's doing, firstmate's state for it (`working`, `blocked`, `awaiting merge` and so on) and whether its herdr pane is still there.
 3. **My PRs** is every open pull request I authored plus the ones on unfinished firstmate tasks, with their checks judged from the newest run of each check, and anything of either kind that merged or closed in the last 12 hours.
 4. **Teammates' PRs** is the open pull requests where someone asked me to review, filtered by the label rules in the config file.
-5. **Charted Next** is work that's queued or waiting on something, with the reason: another task that has to land first, a blocker, or a date I deferred it to.
+5. **Charted Next** is work that's queued or waiting on something, with the reason: another task that has to land first, a blocker, or a date I deferred it to. Each item reads as one plain-English line from its summary. Warnings that only record the fleet's upkeep, such as an agent pane that is gone, stay hidden until `w` shows them; the title still counts them.
 6. **Recently Landed** is what finished, newest first: merged pull requests, done tasks, reports agents wrote, and the questions I already answered.
 
 ## Keys
@@ -42,11 +42,12 @@ Press `?` inside the board for the full list. These are the ones I actually use:
 | --- | --- |
 | `1` to `6` | show or hide that pane |
 | `j` / `k` | move down and up; `tab` jumps to the next pane |
-| `enter` | act on the row: open its pull request in the browser, show a hold's card or an agent's report in the terminal, or jump to the agent's herdr pane |
+| `enter` | act on the row: open its pull request in the browser, open a hold's card or an agent's report as a short summary inside the board (`enter` there shows the whole document in the terminal viewer), or jump to the agent's herdr pane |
 | `a` | accept the selected hold: press one of its lettered options or type an answer, and firstmate takes it from there |
 | `d` | discard the selected hold; it asks for `y` first |
 | `D` | defer the selected hold to a date, prefilled two weeks out |
 | `f` | search every pane at once: type a few letters, `enter` jumps to the match |
+| `w` | show or hide Charted Next's bookkeeping warnings |
 | `.` | the Settings page: the version, an upgrade from inside the board, and the identity and config file in effect |
 | `?` | help |
 | `q` | quit |
@@ -55,14 +56,15 @@ The mouse works too: click a row to select it, double-click to act on it, scroll
 
 ## Configuration
 
-There's one file worth knowing about, `config.json`. It holds my GitHub login, so the two pull request panes know who "me" is, and the rules for Teammates' PRs: which repositories to watch (a repository is where a project's code lives on GitHub) and which labels a pull request must carry to show up there. The first launch writes it from the shipped example, so there's a real file to edit. It lives in the directory `herdr plugin config-dir firstmate.board` prints, or in `~/.config/fm-board/` when herdr isn't around. Press `.` for the Settings page to see the login, the config file and the pull request source the board is actually using, and where each came from. [docs/configuration.md](docs/configuration.md) has every key.
+There's one file worth knowing about, `config.json`. It holds my GitHub login, so the two pull request panes know who "me" is, and the rules for Teammates' PRs: which repositories to watch (a repository is where a project's code lives on GitHub) and which labels a pull request must carry to show up there. The first launch writes it from the shipped example, so there's a real file to edit. It lives in the directory `herdr plugin config-dir firstmate.board` prints, or in `~/.config/fm-board/` when herdr isn't around. The same file turns the summaries off (`summaries.enabled`) or picks the model claude uses for them (`summaries.model`); the summaries themselves live in a `summaries/` folder beside it. Press `.` for the Settings page to see the login, the config file and the pull request source the board is actually using, and where each came from. [docs/configuration.md](docs/configuration.md) has every key.
 
 ## Troubleshooting
 
 - **Both pull request panes show `identity unknown: see Settings (.)`.** gh isn't logged in and the config file has no login. Run `gh auth login` once, or put your login in `identity.github_login` in `config.json`, then press `r`.
 - **`firstmate-tui` stops before drawing anything and mentions `FM_HOME`.** It isn't set. Copy the `export` line it prints into your shell profile and run it again.
+- **The footer reads `summaries: claude not on PATH; showing the raw text`.** The board cannot find claude, so rows keep their raw backlog text. Install Claude Code and log in once ([prerequisites](docs/prerequisites.md)), or set `summaries.enabled` to `false` in `config.json` to stop the notice.
 - **The title line reads `herdr disconnected (...)` in red.** herdr isn't running, so the board can't tell which agent panes are alive. Start herdr, or run the board inside a herdr pane. If you meant to run without it, start with `--no-herdr`.
 
 ## More
 
-Everything else lives in `docs/`: [prerequisites](docs/prerequisites.md) (each requirement with a check and an install command), [install](docs/install.md) (what the installer writes, the herdr plugin link, the first run in detail), [upgrade and betas](docs/upgrade.md), [using the board](docs/board.md) (every pane, key, gesture, command and launch flag), [configuration](docs/configuration.md) (the three files the board owns), [troubleshooting](docs/troubleshooting.md) (all six entries), [releasing](docs/releasing.md) and [development](docs/development.md) (running from a checkout, the tests).
+Everything else lives in `docs/`: [prerequisites](docs/prerequisites.md) (each requirement with a check and an install command), [install](docs/install.md) (what the installer writes, the herdr plugin link, the first run in detail), [upgrade and betas](docs/upgrade.md), [using the board](docs/board.md) (every pane, key, gesture, command and launch flag), [configuration](docs/configuration.md) (the three files and the summaries folder the board owns), [troubleshooting](docs/troubleshooting.md) (all seven entries), [releasing](docs/releasing.md) and [development](docs/development.md) (running from a checkout, the tests).

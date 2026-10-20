@@ -4,7 +4,8 @@
 // frame, to one action object. handleKey() and handleMouse() apply that action
 // to the view through one applyAction() and call back into the host for
 // anything that touches the outside world (herdr focus, the browser opener,
-// the report viewer, a refresh, saving view state, quitting), so a test can
+// a card or report and its summary, the viewer for the full document, a
+// refresh, saving view state, quitting), so a test can
 // drive the same code with fakes and read the resulting frame.
 //
 // Mouse (lib/tui-blessed.mjs translates the terminal's events; --mouse feeds
@@ -36,12 +37,17 @@
 //           lib/model.mjs: Captain's Call's hold, decide and blocked rows, a
 //           delegate's decision rows, Charted Next's queued and held rows,
 //           and any Underway or Recently Landed row whose task is a captain
-//           hold): show the card in the viewer; My PRs, Teammates' PRs or
-//           Captain's Call row with a PR URL: open it; Underway worker or
-//           Captain's Call worker: herdr focus; Charted Next warning: a
-//           notice; Recently Landed row: the first target it has
-//           (landedTarget): its PR, else its report on this host, else its
-//           worker pane while herdr lists it, else a footer notice
+//           hold): the host loads the card and opens the summary view over
+//           it (view.prompt kind 'summary', lib/card.mjs; drawn by
+//           lib/render.mjs renderSummary: the card's plain-English summary
+//           from lib/summary.mjs above the full card, inside the board),
+//           where enter shows the full card in the viewer and esc comes
+//           back; My PRs, Teammates' PRs or Captain's Call row with a PR
+//           URL: open it; Underway worker or Captain's Call worker: herdr
+//           focus; Charted Next warning: a notice; Recently Landed row: the
+//           first target it has (landedTarget): its PR, else its report on
+//           this host in the same summary view, else its worker pane while
+//           herdr lists it, else a footer notice
 //   F       focus the row's herdr pane, whatever the pane (a row without one
 //           gets a notice): the secondary action on a card row, whose enter
 //           shows the card (f through 0.6.6; f is the search now)
@@ -80,6 +86,9 @@
 //           row or from one of its children; the selection lands on the group)
 //   x       hide the row (view state); on a hidden row shown by H: unhide it
 //   X       unhide every row of the current pane
+//   w       show or hide Charted Next's bookkeeping warnings (a gone pane or
+//           endpoint, a child state that cannot be read; lib/model.mjs
+//           showBookkeeping), hidden at launch; session state only
 // Board-wide:
 //   f       search every pane's rows at once (the landing page too): the
 //           footer takes a query (view.prompt kind 'search', lib/card.mjs)
@@ -112,9 +121,9 @@
 //   ?       help       q / ctrl-c  quit
 
 import { boundaryAt, hitTest, PANES } from './layout.mjs';
-import { ACCEPT_SCROLL, allPanesHidden } from './render.mjs';
+import { ACCEPT_SCROLL, allPanesHidden, SUMMARY_SCROLL } from './render.mjs';
 import { confirmText, settingsKeyAction, settingsMouseAction, upgradeArgs } from './settings.mjs';
-import { acceptAnswer, acceptProblem, acceptPrompt, checkAcceptAnswer, checkDeferDate, deferPrompt, discardPrompt, holdActionProblem, localDate, promptKeyAction, searchPrompt } from './card.mjs';
+import { acceptAnswer, acceptProblem, acceptPrompt, checkAcceptAnswer, checkDeferDate, deferPrompt, discardPrompt, holdActionProblem, localDate, promptKeyAction, searchPrompt, summaryPrompt } from './card.mjs';
 import { rankRows } from './search.mjs';
 
 const OPEN_PANES = new Set(['mine', 'toreview', 'needs']);
@@ -291,12 +300,15 @@ export function paneForKey(key) {
 // only reminds the captain how to bring a pane back; a key the board does not
 // bind stays the silent no-op it is everywhere else.
 const LANDING_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', 'f', 'r', '.', '?', 'q', 'ctrl-c']);
-const ROW_KEYS = new Set(['enter', 'F', 'a', 'd', 'D', 'x', 'X', 'H', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
+const ROW_KEYS = new Set(['enter', 'F', 'a', 'd', 'D', 'x', 'X', 'H', 'w', 'l', 'right', 'h', 'left', 'j', 'down', 'k', 'up', 'tab', 'S-tab', 'pageup', 'pagedown']);
 const NEEDS_PANE = 'needs';
 
-export function keyAction(model, view, key) {
+// `rowOverride` is the row a key acts on in place of the selection: the
+// summary view hands its own row back with a, d, D and F, so a refresh that
+// moved the cursor meanwhile never turns the key onto another task.
+export function keyAction(model, view, key, rowOverride = null) {
   const pane = model.panes[view.pane];
-  const row = pane && !pane.hidden ? pane.rows[view.row] || null : null;
+  const row = rowOverride || (pane && !pane.hidden ? pane.rows[view.row] || null : null);
   if (allPanesHidden(model) && !LANDING_KEYS.has(key)) return ROW_KEYS.has(key) ? { type: 'notice', text: 'all panes hidden · 1-6 shows a pane, 0 shows all' } : { type: 'none' };
   switch (key) {
     case 'q':
@@ -312,6 +324,8 @@ export function keyAction(model, view, key) {
       return { type: 'reset-columns' };
     case 'H':
       return { type: 'toggle-hidden' };
+    case 'w':
+      return { type: 'toggle-bookkeeping' };
     case '0':
       return { type: 'show-panes' };
     case '1':
@@ -623,7 +637,8 @@ function applySettingsAction(ctx, action) {
 }
 
 // ctx: { view, model, rebuild(), notice(text, bad), open(row), focus(row,
-//        { any }), viewReport(row), viewCard(row), holdAccept(row),
+//        { any }), showReport(row), showCard(row), viewFull(prompt),
+//        holdAccept(row),
 //        holdAnswer(row, { answer, release }), holdDiscard(row),
 //        holdDefer(row, { reason, until }), holdReason(row), refresh(),
 //        persist(), settingsFetch(), settingsUpgrade(running), relaunch(),
@@ -638,6 +653,10 @@ function applySettingsAction(ctx, action) {
 // openDeferPrompt itself, or notices why it cannot; holdAccept(row) loads
 // the card and the full record and then calls openAcceptPrompt, or notices
 // why it cannot; holdAnswer runs the answer the accept prompt submitted.
+// showCard(row) loads the row's card and showReport(row) reads its report,
+// each then calling openSummaryPrompt and asking lib/summary.mjs for the
+// document's summary; viewFull(prompt) shows the summary view's whole
+// document in the viewer (lib/viewer.mjs) and leaves the view open.
 export function handleKey(ctx, key) {
   const { view } = ctx;
   if (view.help) {
@@ -670,6 +689,14 @@ export function openDeferPrompt(view, row, reason) {
 // Returns the reason it cannot open (lib/card.mjs acceptProblem: a record
 // without a kind), else null with the prompt up and the card scrolled to
 // its top. Called by the host once it has loaded the card.
+// The summary view over a loaded document (lib/card.mjs summaryPrompt),
+// scrolled to its top. Called by the host once the card or report is read.
+export function openSummaryPrompt(view, row, fields) {
+  view.prompt = summaryPrompt({ row, ...fields });
+  view.lastClick = null;
+  view.scroll[SUMMARY_SCROLL] = 0;
+}
+
 export function openAcceptPrompt(view, row, { record, text }) {
   const problem = acceptProblem(row, record);
   if (problem) return problem;
@@ -690,15 +717,20 @@ export function handleMouse(ctx, ev) {
     applySettingsAction(ctx, settingsMouseAction(view.settings, view, ev, { dblclickMs: DBLCLICK_MS }));
     return;
   }
-  // The search prompt's results take the mouse; the hold prompts take the
-  // keyboard alone: a click neither confirms nor cancels them, and the wheel
-  // only scrolls the accept prompt's card.
+  // The search prompt's results take the mouse; the hold prompts and the
+  // summary view take the keyboard alone: a click neither confirms nor
+  // cancels them, and the wheel only scrolls the accept prompt's card and the
+  // summary view.
   if (view.prompt && view.prompt.kind === 'search') {
     applyAction(ctx, searchMouseAction(ctx.model, view, ev));
     return;
   }
   if (view.prompt && view.prompt.kind === 'accept' && ev.type === 'wheel') {
     applyAction(ctx, { type: 'accept-scroll', by: (ev.dir === 'up' ? -1 : 1) * WHEEL_ROWS });
+    return;
+  }
+  if (view.prompt && view.prompt.kind === 'summary' && ev.type === 'wheel') {
+    applyAction(ctx, { type: 'summary-scroll', by: (ev.dir === 'up' ? -1 : 1) * WHEEL_ROWS });
     return;
   }
   if (view.prompt) return;
@@ -819,14 +851,41 @@ function applyAction(ctx, action) {
       ctx.focus(action.row, { any: Boolean(action.any) });
       return;
     case 'view':
-      ctx.viewReport(action.row);
+      if (view.busy) {
+        ctx.notice(`busy: ${view.busy}`, true);
+        return;
+      }
+      ctx.showReport(action.row);
       return;
     case 'card':
       if (view.busy) {
         ctx.notice(`busy: ${view.busy}`, true);
         return;
       }
-      ctx.viewCard(action.row);
+      ctx.showCard(action.row);
+      return;
+    case 'summary-close':
+      view.prompt = null;
+      return;
+    case 'summary-full':
+      if (view.prompt && view.prompt.kind === 'summary') ctx.viewFull(view.prompt);
+      return;
+    case 'summary-scroll':
+      // Unbounded above here; the renderer clamps it to the document.
+      if (view.prompt && view.prompt.kind === 'summary') view.scroll[SUMMARY_SCROLL] = Math.max(0, (view.scroll[SUMMARY_SCROLL] || 0) + action.by);
+      return;
+    case 'summary-key': {
+      const p = view.prompt;
+      if (!p || p.kind !== 'summary') return;
+      view.prompt = null;
+      applyAction(ctx, keyAction(ctx.model, view, action.key, p.row));
+      return;
+    }
+    case 'toggle-bookkeeping':
+      view.showBookkeeping = !view.showBookkeeping;
+      ctx.rebuild();
+      clamp();
+      ctx.notice(view.showBookkeeping ? 'showing bookkeeping warnings in Charted Next; w hides them' : 'bookkeeping warnings hidden; w shows them');
       return;
     case 'discard-prompt':
       if (view.busy) {

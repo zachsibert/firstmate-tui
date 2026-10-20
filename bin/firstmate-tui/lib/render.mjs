@@ -5,7 +5,7 @@
 
 import { columns, GUTTER, layoutMode, MIN_COLS, MIN_ROWS, PANES, paneDemand, paneHeights } from './layout.mjs';
 import { clampCursor, confirmText, DEFAULT_REPO, describeVersion, settingsEntries, settingsInfo, upgradeOffer } from './settings.mjs';
-import { acceptFooterText, promptText } from './card.mjs';
+import { acceptFooterText, localDate, promptText, summaryFooterText, summaryNoun } from './card.mjs';
 import { searchIndex, searchResults } from './controller.mjs';
 import { charWidth, fit, fitRaw, padRight, truncate, width } from './text.mjs';
 
@@ -18,12 +18,11 @@ export const HELP_LINES = [
   '  j / down     next row            k / up       previous row',
   '  tab          next pane           shift-tab    previous pane',
   "  enter        My PRs, Teammates' PRs, Recently Landed or Captain's Call PR row: open it in the browser",
-  "               Captain's Call hold, decision or blocked row, Charted Next queued or held row, or a held",
-  '               task in Underway or Recently Landed: show its card in the viewer (facts, reason, body,',
-  '               PR, report, files, status)',
-  '               Recently Landed row without a PR: view its report (glow, $EDITOR, vim, less), else',
-  '               focus its worker pane. Underway group row: expand or collapse it',
-  "               Underway worker or Captain's Call worker: focus its herdr pane",
+  "               Captain's Call hold, decision or blocked row, Charted Next queued or held row, a held task",
+  '               in Underway or Recently Landed, or a Recently Landed report: show its plain-English summary',
+  '               in the board; enter there shows the full card or report in the viewer (glow, $EDITOR, vim,',
+  '               less). Recently Landed row with neither: focus its worker pane. Underway group: expand or',
+  "               collapse it. Underway worker or Captain's Call worker: focus its herdr pane",
   '  f            search all panes: type loosely (any order, any case, letters apart), enter jumps, esc closes',
   "  F            focus the selected row's herdr pane, in any pane",
   '  a            accept the selected hold: pick an option letter or type a line; fm-captain-hold.sh answer',
@@ -34,6 +33,7 @@ export const HELP_LINES = [
   '  x            hide the selected row from view (x on a shown hidden row unhides it)',
   '  X            unhide every row in the current pane',
   '  H            toggle showing hidden rows, greyed and marked (hidden)',
+  '  w            show or hide Charted Next bookkeeping warnings (a gone pane, an unreadable child state)',
   "  1 - 6        show or hide a pane; each pane title carries its key: [1] Captain's Call",
   "               [2] Underway  [3] My PRs  [4] Teammates' PRs  [5] Charted Next  [6] Recently Landed",
   '  0            show every pane (with all six hidden the board lists these keys)',
@@ -548,6 +548,73 @@ function renderAccept(model, cols, rows, view) {
   return { lines: lines.slice(0, rows), zones: zones.slice(0, rows) };
 }
 
+// ------------------------------------------------------------ summary view
+// While the summary view is up (view.prompt.kind 'summary', lib/card.mjs) the
+// document replaces the grid between the title line and the footer: a
+// heading naming the card or report (with the visible lines and the scroll
+// keys when it is longer than the room), one line saying where its summary
+// stands (summaryStatusText: made, being made, failed or off), then the
+// summary and the full document below it, wrapped to the width and scrolled
+// by view.scroll[SUMMARY_SCROLL], clamped here and handed back in scrollOut
+// as the accept card's offset is. Until the summary is made the full
+// document is all there is to read. Nothing here is a row or a pane: the
+// zones are null. The footer names the keys (lib/card.mjs
+// summaryFooterText), giving way to shorter hints beside a long notice as
+// the board's footer does.
+export const SUMMARY_SCROLL = PANES.length + 2;
+
+export function summaryStatusText(prompt) {
+  const noun = summaryNoun(prompt);
+  const s = prompt.summary || { state: 'none' };
+  if (prompt.error) return `the ${noun} cannot be read here (${prompt.error}); enter still hands its path to the viewer`;
+  const made = s.createdAt ? Date.parse(s.createdAt) : NaN;
+  if (s.state === 'done') return `summary by ${s.model || 'claude'}${Number.isFinite(made) ? `, made ${localDate(made)}` : ''}; the full ${noun} follows`;
+  if (s.state === 'pending' || s.state === 'none') return `summarizing with claude...; the full ${noun} follows meanwhile`;
+  if (s.state === 'failed') return `no summary (${s.error}); the full ${noun} follows`;
+  return `no summary: ${s.error}; the full ${noun} follows`;
+}
+
+function renderSummary(model, cols, rows, view) {
+  const p = view.prompt;
+  const noun = summaryNoun(p);
+  const lines = [titleLine(model, cols)];
+  const zones = [null];
+  const w = cols - 2;
+  const body = [];
+  const s = p.summary || {};
+  if (s.state === 'done' && typeof s.summary === 'string') {
+    const label = ` full ${noun} `;
+    body.push(...wrapText(s.summary, w), '', `${H.repeat(2)}${label}${H.repeat(Math.max(0, w - 2 - width(label)))}`, '');
+  }
+  if (!p.error) body.push(...wrapText(p.text, w));
+  // title, heading, status, a blank line and the footer take the rest.
+  const height = Math.max(1, Math.max(rows, MIN_ROWS) - 5);
+  const total = body.length;
+  const start = Math.max(0, Math.min(view.scroll[SUMMARY_SCROLL] || 0, total - height));
+  view.scrollOut = [...view.scroll];
+  view.scrollOut[SUMMARY_SCROLL] = start;
+  const shown = body.slice(start, start + height);
+  const range = total > height ? `  (lines ${start + 1}-${start + shown.length} of ${total}; j/k and pageup/pagedown scroll)` : '';
+  const head = `${noun === 'report' ? 'Report' : 'Card'} ${p.id}: ${p.title}${p.partial ? ' (partial record)' : ''}`;
+  lines.push(line([seg(truncate(` ${head}${range}`, cols), 'heading')], cols));
+  zones.push(null);
+  lines.push(line([seg(truncate(` ${summaryStatusText(p)}`, cols), 'dim')], cols));
+  zones.push(null);
+  lines.push(line([], cols));
+  zones.push(null);
+  for (const t of shown) {
+    lines.push(line([seg(` ${t}`, 'row')], cols));
+    zones.push(null);
+  }
+  while (lines.length < rows - 1) {
+    lines.push(line([], cols));
+    zones.push(null);
+  }
+  lines.push(footerLine(model, cols, view, [summaryFooterText(p), ` enter full ${noun}  esc back`, ' esc back']));
+  zones.push(null);
+  return { lines: lines.slice(0, rows), zones: zones.slice(0, rows) };
+}
+
 // ------------------------------------------------------------ settings page
 // The `.` page replaces the grid between the title line and the footer. Pure
 // like the rest: view.settings (lib/settings.mjs) in, lines and zones out
@@ -708,13 +775,14 @@ function overlayHelp(lines, cols) {
 // (lib/controller.mjs), whose bar the pane draws. prompt is the discard or
 // defer prompt the footer shows (lib/card.mjs), the search prompt whose
 // results list replaces the grid (renderSearch), the accept prompt whose
-// card replaces it (renderAccept), or null.
+// card replaces it (renderAccept), the summary view whose document replaces
+// it (renderSummary), or null.
 // Returns { lines, cols, rows, mode, scroll, zones } where scroll holds the
 // start offsets actually used so the app can keep them for the next frame and
 // zones maps each line to what it shows (lib/layout.mjs hitTest). mode is
 // 'panes', 'list' (narrow), 'landing' (every pane hidden: the key page),
-// 'search' (the f prompt's results), 'accept' (the a prompt's card) or
-// 'settings'.
+// 'search' (the f prompt's results), 'accept' (the a prompt's card),
+// 'summary' (the summary view) or 'settings'.
 export function renderFrame(model, size, view = {}) {
   const cols = Math.max(MIN_COLS, size.cols | 0);
   const rows = Math.max(MIN_ROWS, size.rows | 0);
@@ -734,11 +802,13 @@ export function renderFrame(model, size, view = {}) {
   };
   const searching = v.page === 'board' && v.prompt && v.prompt.kind === 'search';
   const accepting = v.page === 'board' && v.prompt && v.prompt.kind === 'accept';
-  const mode = v.page === 'settings' ? 'settings' : searching ? 'search' : accepting ? 'accept' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
+  const summarizing = v.page === 'board' && v.prompt && v.prompt.kind === 'summary';
+  const mode = v.page === 'settings' ? 'settings' : searching ? 'search' : accepting ? 'accept' : summarizing ? 'summary' : allPanesHidden(model) ? 'landing' : layoutMode(cols);
   let drawn;
   if (mode === 'settings') drawn = renderSettings(model, cols, rows, v);
   else if (mode === 'search') drawn = renderSearch(model, cols, rows, v);
   else if (mode === 'accept') drawn = renderAccept(model, cols, rows, v);
+  else if (mode === 'summary') drawn = renderSummary(model, cols, rows, v);
   else if (mode === 'landing') drawn = renderLanding(model, cols, rows, v);
   else if (mode === 'list') drawn = renderList(model, cols, rows, v);
   else drawn = renderPanes(model, cols, rows, v);

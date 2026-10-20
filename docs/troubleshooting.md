@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Six things that go wrong, each with its symptom, cause, check and fix. The README lists the three most common in one line each.
+Seven things that go wrong, each with its symptom, cause, check and fix. The README lists the four most common in one line each.
 
 **The title line reads `refresh failed ... ago, retrying in ...` in red and the pull request panes say `(stale)`.**
 Symptom: the title line turns red with a line such as `refresh failed 40s ago, retrying in 20s`, both pull request panes carry `(stale)` in their titles and keep their old rows, a footer notice starting `PR fetch: My PRs:` names the error once, and a recorded pull request in My PRs reads `checks: fetch failed`.
@@ -43,3 +43,13 @@ Check: run `herdr status`.
 It reports the running server, or fails when there is none.
 Fix: start herdr, or run the board from inside a herdr pane, where the socket is known through the environment; the board reconnects on its own and the warning goes as soon as the subscription is back.
 Outside herdr on purpose, start with `--no-herdr` and read the warning as a reminder rather than a fault.
+
+**The footer reads `summaries: <reason>; showing the raw text`, and Charted Next keeps its raw backlog text.**
+Symptom: the footer shows that notice once, Charted Next's WHAT column keeps each item's title and reason as firstmate wrote them, and the summary view behind `enter` reads `no summary (<reason>); the full card follows`.
+Cause: the board could not get a summary from claude ([Summaries](board.md#summaries)).
+`claude not on PATH` means the Claude Code CLI is not installed or not on the board's `PATH`; `claude exited 1: ...` ends with claude's own last error line, most often a login that expired or a model name claude does not know; `timed out after 90 s` means claude did not answer in time.
+After three failures in a row the board stops asking until it restarts.
+Check: run `echo hi | claude -p --model <the model in summaries.model>` in the terminal the board runs in.
+It prints an answer when claude works.
+Fix: install Claude Code or log in again (`claude`, then follow its login prompt), or correct `summaries.model` in the config file, then restart the board.
+To stop the calls and the notice for good, set `summaries.enabled` to `false`.

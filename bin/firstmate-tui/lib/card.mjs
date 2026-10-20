@@ -53,6 +53,26 @@
 //                                                   the matches are ranked by
 //                                                   lib/search.mjs over
 //                                                   model.search
+//   { kind: 'summary', row, source, id, title,      enter on a card row or a
+//     text, path, partial, error, summary }         report row: the document's
+//                                                   summary drawn in the frame
+//                                                   above its full text
+//                                                   (lib/render.mjs
+//                                                   renderSummary). source is
+//                                                   'card' or 'report', text the
+//                                                   document, path the report's
+//                                                   file (null for a card,
+//                                                   which has none), error why
+//                                                   a report could not be read,
+//                                                   summary the host's latest
+//                                                   lib/summary.mjs status of
+//                                                   text. enter shows the full
+//                                                   document in the viewer, esc
+//                                                   and q close, j/k, up/down
+//                                                   and the page keys scroll,
+//                                                   and a, d, D and F close it
+//                                                   and act on its row as they
+//                                                   do on the board
 // Every other key is ignored while a prompt is up (ctrl-c still quits).
 
 import { charWidth, width } from './text.mjs';
@@ -233,6 +253,31 @@ export function deferPrompt(row, reason, today) {
   return { kind: 'defer', row, id: row.hold.id, reason, value: plusDays(today, DEFER_DEFAULT_DAYS) };
 }
 
+// The card text a summary is asked for and keyed on: the card without its age
+// row, which changes every day and would summarize the same hold again.
+export function cardSummarySource(text) {
+  return String(text || '').split('\n').filter((l) => !l.startsWith('| age |')).join('\n');
+}
+
+// The summary view over one document, before its summary status is known.
+// `summaryText` is the text its summary is requested and read back by.
+export function summaryPrompt({ row, source, id, title, text = '', path = null, partial = null, error = null }) {
+  const full = String(text || '');
+  return { kind: 'summary', row, source, id, title: title || id, text: full, summaryText: source === 'card' ? cardSummarySource(full) : full, path, partial, error, summary: null };
+}
+
+// What the summary view calls its document: `card` or `report`.
+export function summaryNoun(prompt) {
+  return prompt && prompt.source === 'report' ? 'report' : 'card';
+}
+
+// The summary view's footer: the keys that apply to its row.
+export function summaryFooterText(prompt) {
+  const row = prompt.row || {};
+  const acts = [row.hold && !row.hold.remote ? 'a accept  d discard  D defer' : null, row.paneId ? 'F focus' : null].filter(Boolean).join('  ');
+  return ` enter full ${summaryNoun(prompt)} in the viewer  j/k scroll${acts ? `  ${acts}` : ''}  esc back`;
+}
+
 // The search prompt, empty, with the cursor on the first match.
 export function searchPrompt() {
   return { kind: 'search', value: '', index: 0 };
@@ -289,6 +334,7 @@ export function promptText(prompt, matches = null) {
   if (!prompt) return '';
   if (prompt.kind === 'discard') return ` discard ${prompt.id}? y to discard, esc to cancel`;
   if (prompt.kind === 'accept') return acceptFooterText(prompt);
+  if (prompt.kind === 'summary') return summaryFooterText(prompt);
   if (prompt.kind === 'search') {
     const n = Number.isInteger(matches) ? matches : 0;
     return ` search: ${prompt.value}  ${n} match${n === 1 ? '' : 'es'}  enter jumps  esc cancels`;
@@ -302,12 +348,23 @@ const SEARCH_MOVES = { up: -1, down: 1, tab: 1, 'S-tab': -1, pageup: -10, pagedo
 // The keys that scroll the card behind the accept prompt, and how far; j and
 // k type, as in the search.
 const ACCEPT_MOVES = { up: -1, down: 1, pageup: -10, pagedown: 10 };
+// The summary view types nothing, so j and k scroll it too; the row keys it
+// hands back to the board.
+const SUMMARY_MOVES = { ...ACCEPT_MOVES, j: 1, k: -1 };
+const SUMMARY_ROW_KEYS = new Set(['a', 'd', 'D', 'F']);
 const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
 // The meaning of a key while a prompt is up. Pure on (prompt, key).
 export function promptKeyAction(prompt, key) {
   if (key === 'ctrl-c') return { type: 'quit' };
-  if (key === 'escape') return prompt.kind === 'search' ? { type: 'search-cancel' } : { type: 'prompt-cancel' };
+  if (key === 'escape') return prompt.kind === 'search' ? { type: 'search-cancel' } : prompt.kind === 'summary' ? { type: 'summary-close' } : { type: 'prompt-cancel' };
+  if (prompt.kind === 'summary') {
+    if (key === 'enter') return { type: 'summary-full' };
+    if (key === 'q') return { type: 'summary-close' };
+    if (hasOwn(SUMMARY_MOVES, key)) return { type: 'summary-scroll', by: SUMMARY_MOVES[key] };
+    if (SUMMARY_ROW_KEYS.has(key)) return { type: 'summary-key', key };
+    return { type: 'none' };
+  }
   if (prompt.kind === 'discard') return key === 'y' ? { type: 'discard', row: prompt.row } : { type: 'none' };
   if (prompt.kind === 'search') {
     if (key === 'enter') return { type: 'search-jump' };

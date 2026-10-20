@@ -73,8 +73,15 @@ Install: macOS `brew install gh`.
 Debian and Ubuntu: `sudo apt install gh`, or the packages at https://github.com/cli/cli/blob/trunk/docs/install_linux.md.
 Then run `gh auth login` once.
 
+**claude, the Claude Code CLI, logged in.**
+claude writes the short plain-English summaries the board shows: one line per Charted Next item, and a few lines at the top of a card or report when you press `enter` on it.
+The board runs `claude -p` once per text, with a small fast model, no tools and no saved session, and keeps each answer on disk, so the same text is never summarized twice ([Summaries](board.md#summaries)).
+Without claude on `PATH` the board shows the raw text and says so once in the footer; the config file's `summaries.enabled` or `--no-summaries` turns the calls off on purpose.
+Check: `claude --version` prints a version, and `echo hi | claude -p` answers.
+Install: https://docs.claude.com/en/docs/claude-code/setup, then run `claude` once to log in.
+
 **glow.**
-glow renders a Markdown report, or a hold card, in the terminal when you press `enter` on a Recently Landed row with a report or on a held task.
+glow renders the full Markdown report or hold card in the terminal when you press `enter` in the board's summary view.
 Without it the board uses `$EDITOR`, then `vim`, then `less`.
 Check: `glow --version`.
 Install: macOS `brew install glow`.

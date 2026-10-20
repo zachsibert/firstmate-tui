@@ -204,6 +204,13 @@ chmod +x "$FAKE_BIN/glow"
 # that no fetch reaches GitHub.
 cp "$ROOT/tests/fake-gh.sh" "$FAKE_BIN/gh"
 chmod +x "$FAKE_BIN/gh"
+# Fake on PATH: `claude` (the one-shot summary call, lib/summary.mjs), logging each call to
+# FM_BOARD_TEST_CLAUDE_LOG and answering the row and document shapes tests/fake-claude.sh names. The
+# app summarizes by default, so every headless and pty run below, which puts FAKE_BIN first on PATH,
+# reaches this fake and never the real claude; a one-shot render summarizes only with --summary-dir.
+cp "$ROOT/tests/fake-claude.sh" "$FAKE_BIN/claude"
+chmod +x "$FAKE_BIN/claude"
+CLAUDE_LOG="$SCRATCH/claude-calls.log"
 # Fake on HERDR_BIN_PATH and PATH: `herdr`, for the wrapper checks and the Recently Landed focus checks: it logs every call to
 # FM_BOARD_TEST_HERDR_LOG, answers `plugin config-dir` with a scratch directory and fails
 # everything else, so no wrapper path can reach the captain's live server.
@@ -614,9 +621,9 @@ assert_opened "https://github.com/acme/api/pull/7" "enter on the Captain's Call 
 frame_o=$(render_open populated.json "tab,tab,tab,tab,j,enter") || fail "open landed enter: render exited non-zero"
 assert_opened "https://github.com/acme/etl/pull/12" "enter on the second Recently Landed row (four tabs reach the pane past the empty Teammates' PRs) opens its PR"
 assert_contains "$frame_o" "opened https://github.com/acme/etl/pull/12 (etl-index)" "footer notice names the Recently Landed URL"
-frame_o=$(render_open populated.json "tab,tab,tab,tab,enter") || fail "open landed report: render exited non-zero"
+frame_o=$(render_open populated.json "tab,tab,tab,tab,enter,enter") || fail "open landed report: render exited non-zero"
 assert_not_opened "enter on the first Recently Landed row, the report, calls no opener"
-assert_contains "$frame_o" "would view /fixture/firstmate/data/scout-beta/report.md" "enter on a report row falls to the viewer (the landed targets section below)"
+assert_contains "$frame_o" "would view /fixture/firstmate/data/scout-beta/report.md" "enter on a report row opens its summary view and enter there falls to the viewer (the landed targets and summary view sections below)"
 frame_o=$(render_open populated.json "tab,tab,tab,tab,j,j,j,j,enter") || fail "open landed no url: render exited non-zero"
 assert_not_opened "enter on a Recently Landed row without a PR URL calls no opener"
 assert_not_contains "$frame_o" "no PR URL on this row" "a Recently Landed row without a PR is no longer an error: enter falls back to its report (the landed targets section below)"
@@ -771,7 +778,7 @@ assert_lines "$frame_g" 44 "grouped frame is 44 lines"
 pane_lines() { # <frame> <pane key 1-6>: that pane's lines, title to bottom border
   printf '%s\n' "$1" | sed -n "/^┌─ \[$2\]/,/^└/p"
 }
-frame_il=$(render inflight-live.json) || fail "inflight-live: render exited non-zero"
+frame_il=$(render inflight-live.json --keys w) || fail "inflight-live: render exited non-zero" # w shows the bookkeeping warnings this section checks
 inflight_il=$(pane_lines "$frame_il" 2)
 # Underway is the live workers alone: the busy home's group, the awaiting-merge main task and the
 # failed home's one child drawn directly. An idle home, a home whose ledger lists only done and
@@ -804,7 +811,7 @@ assert_row "$(render inflight-live.json --keys j)" '^ j/k move  tab pane  enter 
 # Charted Next warns about what Underway no longer lists: the two endpoints whose panes are gone and
 # the one whose state is unavailable; a done endpoint and a live child with a lost pane are not warnings
 # (falsify: warn on a done or a live endpoint in warningRows).
-assert_contains "$frame_il" "Charted Next (0, 3 warnings)" "inflight-live: three warnings, no queued work; the count leaves the warnings out"
+assert_contains "$frame_il" "Charted Next (0, 3 warnings: 3 bookkeeping, w hides)" "inflight-live: three warnings, all bookkeeping, no queued work; the count leaves the warnings out"
 assert_row "$frame_il" '^│ warning +- +ghost-tmux +endpoint 0:fm-ghost-tmux is gone \(exists: false\) +- +stale-home +- │$' "an unknown endpoint on a tmux target that no longer exists is a warning"
 assert_row "$frame_il" '^│ warning +- +ghost-lost +endpoint default:w9B:p1 is gone \(exists: false\) +- +stale-home +- │$' "an unknown endpoint whose pane is gone is a warning"
 assert_row "$frame_il" '^│ warning +- +peek +child current state unavailable \(endpoint default:w9C:p1, none; pane alive, agent idle\) +- +stale-home +- │$' "an unknown endpoint whose pane exists but whose agent herdr reads idle is a warning naming the idle agent, not an Underway row (the unknown-state rule: only a busy pane is a worker)"
@@ -859,28 +866,30 @@ assert_row "$chain" "^vim $chain_dir/b/vim\$" "chain: without glow or EDITOR, vi
 assert_row "$chain" '^less less$' "chain: less is the last resort"
 assert_row "$chain" '^viewer-cmd bash fake$' "chain: --viewer-cmd overrides everything"
 
-# Enter on a Recently Landed report row without --viewer-cmd only reports the viewer the chain resolved to,
-# naming the fake glow shadowing PATH; nothing runs (falsify: run the viewer without --viewer-cmd in
-# driveOnce, or drop whichOnPath). In lost.json the two PR panes and Charted Next are empty, so two tabs
-# from Captain's Call reach Recently Landed, whose first row is the scout-beta report.
+# Enter on a Recently Landed report row opens its summary view, and enter there hands the report to the
+# viewer; without --viewer-cmd that only reports the viewer the chain resolved to, naming the fake glow
+# shadowing PATH; nothing runs (falsify: run the viewer without --viewer-cmd in driveOnce, or drop
+# whichOnPath). In lost.json the two PR panes and Charted Next are empty, so two tabs from Captain's
+# Call reach Recently Landed, whose first row is the scout-beta report. The notice carries FAKE_BIN's
+# full temp path, so it is read at 260 columns, where no TMPDIR cuts it.
 rm -f "$VIEWER_LOG"
-frame_v=$(FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" PATH="$FAKE_BIN:$PATH" render lost.json --keys "tab,tab,enter") || fail "viewer report-only: render exited non-zero"
+frame_v=$(FM_BOARD_TEST_VIEWER_LOG="$VIEWER_LOG" PATH="$FAKE_BIN:$PATH" render lost.json --cols 260 --keys "tab,tab,enter,enter") || fail "viewer report-only: render exited non-zero"
 assert_contains "$frame_v" "would view /fixture/firstmate/data/scout-beta/report.md with $FAKE_BIN/glow -p (glow)" "fake glow on PATH is the resolved viewer, reported with its path and -p"
 assert_not_viewed "without --viewer-cmd the resolved viewer is never spawned"
 # With --viewer-cmd the report path is the only appended argument (falsify: drop reportPath from the
 # report rows of landedRows).
-frame_v=$(render_view lost.json "tab,tab,enter") || fail "viewer main: render exited non-zero"
+frame_v=$(render_view lost.json "tab,tab,enter,enter") || fail "viewer main: render exited non-zero"
 assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "enter on a main-home scout report hands its absolute path to the viewer"
 assert_contains "$frame_v" "viewed /fixture/firstmate/data/scout-beta/report.md (viewer-cmd)" "footer names the viewed report"
-frame_v=$(render_view lost.json "tab,tab,j,j,enter") || fail "viewer secondmate: render exited non-zero"
+frame_v=$(render_view lost.json "tab,tab,j,j,enter,enter") || fail "viewer secondmate: render exited non-zero"
 assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "a secondmate report resolves against its own home, not FM_HOME (falsify: use fmHome for ledger reports)"
-frame_v=$(render_view lost.json "tab,tab,enter" "$FAKE_VIEWER -p") || fail "viewer flags: render exited non-zero"
+frame_v=$(render_view lost.json "tab,tab,enter,enter" "$FAKE_VIEWER -p") || fail "viewer flags: render exited non-zero"
 assert_viewed "-p
 /fixture/firstmate/data/scout-beta/report.md" "viewer flags stay separate argv elements, the path last (falsify: join argv into one string)"
 frame_v=$(render_view lost.json "tab,enter") || fail "viewer wrong pane: render exited non-zero"
 assert_not_viewed "enter on an Underway worker row never runs the viewer (a Captain's Call row would show its hold card through it; the hold section covers that)"
 frame_v=$(render lost.json --keys "?") || fail "help: render exited non-zero"
-assert_contains "$frame_v" "Recently Landed row without a PR: view its report (glow, \$EDITOR, vim, less), else" "help overlay documents the viewer"
+assert_contains "$frame_v" "in the board; enter there shows the full card or report in the viewer (glow, \$EDITOR, vim," "help overlay documents the summary view and the viewer behind it"
 assert_contains "$frame_v" "x            hide the selected row from view" "help overlay documents x"
 assert_contains "$frame_v" "1 - 6        show or hide a pane" "help overlay documents 1-5"
 assert_contains "$frame_v" "r            refresh now: the fleet snapshot and the PR checks (unless --no-prs)" "help overlay documents r"
@@ -892,7 +901,8 @@ assert_contains "$frame_v" "F            focus the selected row's herdr pane, in
 assert_contains "$frame_v" "f            search all panes: type loosely (any order, any case, letters apart), enter jumps, esc closes" "help overlay documents f as the search (falsify: drop the search line from HELP_LINES)"
 assert_contains "$frame_v" "d            discard the selected hold: asks y first, then runs fm-captain-hold.sh answer" "help overlay documents d"
 assert_contains "$frame_v" "D            defer the selected hold to a date (default today + 14 days): fm-captain-hold.sh hold" "help overlay documents D"
-assert_contains "$frame_v" "show its card in the viewer" "help overlay documents enter on a held row"
+assert_contains "$frame_v" "or a Recently Landed report: show its plain-English summary" "help overlay documents enter on a held row"
+assert_contains "$frame_v" "w            show or hide Charted Next bookkeeping warnings" "help overlay documents w (falsify: drop the w line from HELP_LINES)"
 assert_contains "$frame_v" "Its three writes, a, d and D," "help overlay names the board's three writes (falsify: put the read-only sentence back)"
 
 # ------------------------------------------------------------- lost panes
@@ -969,13 +979,14 @@ assert_contains "$frame_t" "opened https://github.com/acme/etl/pull/12 (etl-inde
 frame_t=$(render_targets "tab,tab,tab,j,j,j,enter" --no-herdr) || fail "landed enter PR lost pane: render exited non-zero"
 assert_opened "https://github.com/acme/widgets/pull/30" "enter on a main Recently Landed row with a PR and a lost pane opens the PR"
 assert_not_contains "$frame_t" "nothing to focus" "the lost pane is not reported when the PR opens"
-# Rung 2, a report on this host: the viewer gets the absolute path resolved against the owning home,
-# the opener nothing (falsify: drop reportPath from landedRows, or the report rung from landedTarget).
-frame_t=$(render_targets "tab,tab,tab,j,j,j,j,enter" --no-herdr) || fail "landed enter secondmate report: render exited non-zero"
+# Rung 2, a report on this host: enter opens its summary view and enter there gives the viewer the
+# absolute path resolved against the owning home, the opener nothing (falsify: drop reportPath from
+# landedRows, or the report rung from landedTarget).
+frame_t=$(render_targets "tab,tab,tab,j,j,j,j,enter,enter" --no-herdr) || fail "landed enter secondmate report: render exited non-zero"
 assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "enter on a secondmate Recently Landed row with a report views it against its own home"
 assert_not_opened "a Recently Landed row with a report and no PR calls no opener"
 assert_contains "$frame_t" "viewed /fixture/homes/delegate-a/data/etl-report/report.md (viewer-cmd)" "footer names the viewed report"
-frame_t=$(render_targets "tab,tab,tab,j,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter main report: render exited non-zero"
+frame_t=$(render_targets "tab,tab,tab,j,j,j,j,j,j,j,j,enter,enter" --no-herdr) || fail "landed enter main report: render exited non-zero"
 assert_viewed "/fixture/firstmate/data/old-scout/report.md" "enter on a main Recently Landed row with a report views it against the main home"
 assert_not_contains "$frame_t" "no PR URL" "a report-only Recently Landed row is no longer an error"
 # A remote home's report is skipped, not refused: nothing here can show it, so with no pane either
@@ -1021,8 +1032,9 @@ assert_not_contains "$tags_t" "{red-fg}plain-done: nothing to open" "the nothing
 frame_t=$(render_targets "tab,tab,tab,j,j,j,j,j,j,j,enter" --no-herdr) || fail "landed enter none secondmate: render exited non-zero"
 assert_contains "$frame_t" "etl-none: nothing to open (no PR, report or pane)" "enter on a secondmate Recently Landed row with nothing reads nothing to open"
 # A double-click follows the same rungs, because mouseAction reuses keyAction enter (falsify: give
-# 'activate' a PR-only action of its own). Line 37 is etl-report, the report-only secondmate row.
-frame_t=$(render_mouse landed-targets.json "dblclick:60,37") || fail "landed dblclick report: render exited non-zero"
+# 'activate' a PR-only action of its own). Line 37 is etl-report, the report-only secondmate row; the
+# double-click opens its summary view and enter there views it.
+frame_t=$(render_mouse landed-targets.json "dblclick:60,37 enter") || fail "landed dblclick report: render exited non-zero"
 assert_viewed "/fixture/homes/delegate-a/data/etl-report/report.md" "double-click on a report-only Recently Landed row views the report"
 assert_not_opened "double-click on a report-only Recently Landed row calls no opener"
 assert_contains "$frame_t" "viewed /fixture/homes/delegate-a/data/etl-report/report.md (viewer-cmd)" "double-click: the footer names the viewed report"
@@ -1195,10 +1207,12 @@ assert_row "$(render_hold "j,j,j,j,j,j")" '^ j/k move  tab pane  enter open/focu
 assert_row "$(render_hold "tab,tab,tab,tab,j")" '^ j/k move  tab pane  enter card  x hide ' "holds footer: the finished hold in Recently Landed has its card, no pane and nothing to act on"
 assert_widths "$frame_h" 160 "holds frame lines are 160 columns"
 
-# The card of the main hold: every section, read from the scratch home, shown through the fake viewer
-# from a temp file that is gone once the viewer exits (falsify: drop a section from buildHoldCard, read
-# the report whole in readHoldMaterials, tail the status log by another count, or skip removeTempDir).
-frame_h=$(render_hold "j,enter") || fail "holds card main: render exited non-zero"
+# The card of the main hold: every section, read from the scratch home; enter opens its summary view
+# and enter there shows it through the fake viewer from a temp file that is gone once the viewer exits
+# (falsify: drop a section from buildHoldCard, read the report whole in readHoldMaterials, tail the
+# status log by another count, or skip removeTempDir). Every card check below presses enter twice the
+# same way; the summary view section checks the view itself.
+frame_h=$(render_hold "j,enter,enter") || fail "holds card main: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of main-hold (viewer-cmd)" "card main: the footer names the card and the viewer"
 assert_row "$(cat "$VIEWER_LOG")" '/firstmate-tui-[^/]+/main-hold\.md$' "card main: the viewer got a temp file named after the task under a firstmate-tui temp directory"
 if [ -e "$(cat "$VIEWER_LOG")" ]; then fail "card main: the temp file $(cat "$VIEWER_LOG") is still there after the viewer exited"; else pass; fi
@@ -1239,7 +1253,7 @@ assert_not_opened "card main: the card opens no PR"
 assert_no_hold "card main: the card runs no hold command"
 # The hold with nothing on disk: one line per empty section (falsify: crash on a missing data/<id>/, or
 # leave a section out).
-frame_h=$(render_hold "j,j,enter") || fail "holds card bare: render exited non-zero"
+frame_h=$(render_hold "j,j,enter,enter") || fail "holds card bare: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of bare-hold (viewer-cmd)" "card bare: the footer names the card"
 assert_row "$(card)" '^# Keep or drop the legacy importer$' "card bare: the title"
 assert_contains "$(card)" "| set | - |" "card bare: no hold-set stamp reads -"
@@ -1254,16 +1268,16 @@ assert_row "$(card)" '^no status log at state/bare-hold\.status$' "card bare: th
 # card in Charted Next, the finished hold's card in Recently Landed with its done state, and a Recently
 # Landed row without a hold keeps enter = open its PR (falsify: route Recently Landed's enter through the
 # card for every row, or drop mainCard from chartedRow's fields).
-frame_h=$(render_hold "k,enter") || fail "holds card decision: render exited non-zero"
+frame_h=$(render_hold "k,enter,enter") || fail "holds card decision: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of decide-task (viewer-cmd)" "card decision: enter on the keyed decision row shows its task's card"
 assert_contains "$(card)" "| hold kind | - |" "card decision: a task without a hold reads - for the hold kind"
 assert_row "$(card)" '^no hold reason recorded$' "card decision: the empty reason line"
 assert_row "$(card)" '^Cache the widget lookups; the vendor question gates the design\.$' "card decision: the body comes from the backlog record"
-frame_h=$(render_hold "tab,tab,tab,enter") || fail "holds card charted: render exited non-zero"
+frame_h=$(render_hold "tab,tab,tab,enter,enter") || fail "holds card charted: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of held-worker (viewer-cmd)" "card charted: enter on the Charted Next row whose record is a dated hold shows the card"
 assert_contains "$(card)" "| bucket | dated |" "card charted: the dated bucket"
 assert_contains "$(card)" "| until | 2026-10-01 |" "card charted: the until date"
-frame_h=$(render_hold "tab,tab,tab,tab,j,enter") || fail "holds card landed: render exited non-zero"
+frame_h=$(render_hold "tab,tab,tab,tab,j,enter,enter") || fail "holds card landed: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of landed-hold (viewer-cmd)" "card landed: enter on the finished hold in Recently Landed shows its card"
 assert_contains "$(card)" "| state | done |" "card landed: the done state"
 assert_row "$(card)" '^Answered: keep the old name$' "card landed: the recorded reason"
@@ -1273,7 +1287,7 @@ assert_not_viewed "a Recently Landed row without a hold runs no viewer"
 # The delegate home's card: the full record read through that home's own fm-fleet-snapshot.sh (the log
 # names the home), the home on the card, the report head from that home's files (falsify: build a
 # delegate card from the ledger alone, or run the main home's snapshot instead).
-frame_h=$(render_hold "j,j,j,enter") || fail "holds card delegate: render exited non-zero"
+frame_h=$(render_hold "j,j,j,enter,enter") || fail "holds card delegate: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of delegate-hold (viewer-cmd)" "card delegate: the footer names the card, not partial"
 assert_hold_log "snapshot FM_HOME=$HOLD_DELEGATE" "card delegate: the delegate home's snapshot script ran once, with FM_HOME set to that home, and no hold command"
 assert_row "$(card)" '^# Approve the warehouse index$' "card delegate: the title"
@@ -1285,14 +1299,14 @@ assert_not_contains "$(card)" "more line" "card delegate: a report shorter than 
 assert_not_contains "$(card)" "Partial record" "card delegate: a record the home answered is not partial"
 # The same card when the delegate's snapshot fails: the ledger's fields under a partial notice that
 # names the failure, the files still read (falsify: refuse the card, or drop the partial line).
-frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "j,j,j,enter") || fail "holds card delegate fail: render exited non-zero"
+frame_h=$(FAKE_SNAPSHOT_FAIL=1 render_hold "j,j,j,enter,enter") || fail "holds card delegate fail: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of delegate-hold (partial record) (viewer-cmd)" "card delegate fail: the footer says partial"
 assert_row "$(card)" "^> Partial record: delegate's fm-fleet-snapshot.sh gave no record for delegate-hold \(exit 1: fm-fleet-snapshot: jq not found\); the title, the reason \(cut at 160 characters\) and the hold fields come from its ledger\.$" "card delegate fail: the first line says why the record is partial"
 assert_row "$(card)" '^Ledger copy of the reason, cut at 160 characters$' "card delegate fail: the ledger's reason stands in"
 assert_contains "$(card)" "data/delegate-hold/report.md (3 lines; the first 3 follow)" "card delegate fail: the home's files are still read"
 # A remote home's hold: the card from the ledger, marked partial, with no file read (falsify: try to
 # read a remote home's files).
-frame_h=$(render_hold "j,j,j,j,j,enter") || fail "holds card remote: render exited non-zero"
+frame_h=$(render_hold "j,j,j,j,j,enter,enter") || fail "holds card remote: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of remote-hold (partial record) (viewer-cmd)" "card remote: the footer says partial"
 assert_row "$(card)" '^> Partial record: remote-sm is a remote home whose files are not readable here; the title, the reason \(cut at 160 characters\) and the hold fields come from its ledger\.$' "card remote: the first line names the remote home"
 assert_row "$(card)" '^Remote ledger reason$' "card remote: the ledger's reason"
@@ -1300,7 +1314,7 @@ assert_row "$(card)" '^data/remote-hold/report\.md: not readable from here$' "ca
 assert_no_hold "card remote: no snapshot and no command runs for a remote home"
 # A held worker drawn directly in Underway carries the same card (falsify: drop ledgerCard from
 # ledgerChildRows).
-frame_h=$(render_hold "tab,j,enter") || fail "holds card child: render exited non-zero"
+frame_h=$(render_hold "tab,j,enter,enter") || fail "holds card child: render exited non-zero"
 assert_contains "$frame_h" "viewed the hold card of child-held (viewer-cmd)" "card child: enter on the held worker's Underway row shows its card"
 assert_row "$(card)" '^# Cut over the nightly ETL$' "card child: the title from the delegate's record"
 assert_row "$(card)" '^The full child-held reason from the delegate home$' "card child: the full reason"
@@ -1309,7 +1323,7 @@ assert_row "$(card)" '^The full child-held reason from the delegate home$' "card
 frame_h=$(render_hold "j,j,j,j,j,j,enter") || fail "holds review enter: render exited non-zero"
 assert_opened "https://github.com/acme/api/pull/7" "enter on the review row still opens its PR"
 assert_not_viewed "enter on the review row runs no viewer"
-frame_h=$(render_hold "tab,tab,tab,tab,j,j,enter") || fail "holds report enter: render exited non-zero"
+frame_h=$(render_hold "tab,tab,tab,tab,j,j,enter,enter") || fail "holds report enter: render exited non-zero"
 assert_viewed "$HOLD_HOME/data/scout-x/report.md" "enter on the report row of Recently Landed views its report"
 assert_no_hold "neither enter runs a hold command"
 # F (falsify: drop the F case from keyAction).
@@ -1832,23 +1846,23 @@ frame_rh=$(render "$(variant relayed-hold.json relayed-unreadable '{"ledgers": [
 assert_contains "$frame_rh" "Captain's Call (2)" "relayed-hold unreadable: both relayed calls draw"
 assert_row "$frame_rh" '^│ decide +captain-hold-etl[^ ]* +delegate-a +captain hold etl-cutover: Cut over the nightly ETL on Friday\? ' "relayed-hold unreadable: the relayed hold draws from the task record when its ledger cannot be read"
 assert_contains "$frame_rh" "Underway (1)" "relayed-hold unreadable: no worker rows from a home without a ledger"
-assert_row "$frame_rh" '^│ warning +- +delegate-a +structured state unreadable: no ledger +- +delegate-a +- │$' "relayed-hold unreadable: the home is a Charted Next warning"
+assert_row "$frame_rh" "^│ warning +- +delegate-a +firstmate cannot read this home's work list, so its items are missing here \\(no ledger\\) +- +delegate-a +- │\$" "relayed-hold unreadable: the home is a Charted Next warning in plain words, shown without w"
 assert_contains "$frame_rh" "Charted Next (0, 1 warning)" "relayed-hold unreadable: one warning, not counted"
 
 # charted.json (its _comment names every row): the Charted Next rules, one row type each, warnings
 # first and left out of the count, items newest filed first with undated items last, a captain hold in
 # exactly one pane (falsify: drop a bucket from chartedState or chartedWhy, let chartedItem take a live
 # or a worked held item, sort by record order, count the warnings, or warn on a live or done endpoint).
-frame_ch=$(render charted.json) || fail "charted: render exited non-zero"
+frame_ch=$(render charted.json --keys w) || fail "charted: render exited non-zero" # w shows the three bookkeeping warnings too
 charted_ch=$(pane_lines "$frame_ch" 5)
-assert_contains "$frame_ch" "Charted Next (9, 6 warnings)" "charted: nine items and six warnings, the warnings left out of the count"
+assert_contains "$frame_ch" "Charted Next (9, 6 warnings: 3 bookkeeping, w hides)" "charted: nine items and six warnings, the warnings left out of the count"
 assert_row "$frame_ch" '^│ STATE +WHY +ID +WHAT +REPO +HOME +FILED │$' "charted: the pane's columns"
-assert_row "$frame_ch" '^│ warning +- +main inventory +main in-flight backlog item has no child metadata: orphan-item +- +main +- │$' "charted: the invalid main inventory is a warning"
+assert_row "$(render charted.json --cols 200)" "^│ warning +- +main inventory +firstmate's main backlog does not add up: main in-flight backlog item has no child metadata: orphan-item +- +main +- │\$" "charted: the invalid main inventory is a warning, in plain words (read at 200 columns)"
 assert_row "$frame_ch" '^│ warning +- +child-gone +endpoint default:w2B:p2 is gone \(exists: false\) +- +delegate-a +- │$' "charted: an unknown endpoint whose pane is gone is a warning"
 assert_row "$frame_ch" '^│ warning +- +child-lost +child current state unavailable \(endpoint default:w2C:p2, run-step' "charted: an unknown endpoint under a home with no home-level warning is a warning of its own (its herdr agent reads done, so the unknown-state rule leaves it a warning)"
-assert_row "$(render charted.json --cols 200)" '^│ warning +- +child-lost +child current state unavailable \(endpoint default:w2C:p2, run-step; pane alive, agent done\) +- +delegate-a +- │$' "charted: the warning names the case, the pane alive and herdr's word for the agent (read at 200 columns, where the WHAT column has the room)"
-assert_row "$frame_ch" '^│ warning +- +delegate-b +in-flight backlog item has terminal child state: old-child=done +- +delegate-b +- │$' "charted: an invalid ledger is one home-level warning; its done endpoint draws nothing"
-assert_row "$frame_ch" '^│ warning +- +delegate-c +structured state unreadable: no ledger +- +delegate-c +- │$' "charted: a home with no ledger is a warning"
+assert_row "$(render charted.json --cols 200 --keys w)" '^│ warning +- +child-lost +child current state unavailable \(endpoint default:w2C:p2, run-step; pane alive, agent done\) +- +delegate-a +- │$' "charted: the warning names the case, the pane alive and herdr's word for the agent (read at 200 columns, where the WHAT column has the room)"
+assert_row "$(render charted.json --cols 200)" "^│ warning +- +delegate-b +firstmate cannot read this home's current state \\(in-flight backlog item has terminal child state: old-chil" "charted: an invalid ledger is one home-level warning, in plain words; its done endpoint draws nothing"
+assert_row "$(render charted.json --cols 200)" "^│ warning +- +delegate-c +firstmate cannot read this home's work list, so its items are missing here \\(no ledger\\) +- +delegate-c +- │\$" "charted: a home with no ledger is a warning, in plain words"
 assert_row "$frame_ch" '^│ warning +- +delegate-d +child current state unavailable: ghost-child +- +delegate-d +- │$' "charted: a home the canonical snapshot reads unknown is a warning carrying its reason"
 assert_no_row "$charted_ch" '^│ warning +- +ghost-child ' "charted: the unknown child of a home with a home-level warning draws no row of its own"
 assert_no_row "$frame_ch" '^│ [a-z]+ +[^│]*  old-child +[A-Za-z]' "charted: a done endpoint is neither a warning nor a worker row"
@@ -1881,21 +1895,22 @@ assert_widths "$frame_ch" 160 "charted frame lines are 160 columns"
 assert_lines "$frame_ch" 60 "charted frame is 60 lines"
 # Charted Next rows act: a warning row has nothing to open and takes neither d nor D; a queued row has
 # its card; a held row has its card and both hold actions, and D opens the same date prompt as in
-# Captain's Call. The two PR panes are empty here, so two tabs reach the pane (falsify: drop the
-# charted case from keyAction, or mainCard from chartedRow's fields).
+# Captain's Call. The two PR panes are empty here, so two tabs reach the pane, and with the bookkeeping
+# warnings hidden the three shown warnings come before the items (falsify: drop the charted case from
+# keyAction, or mainCard from chartedRow's fields).
 frame_ch=$(render charted.json --keys "tab,tab") || fail "charted footer warning: render exited non-zero"
 assert_row "$frame_ch" '^ j/k move  tab pane  enter open/focus/view  f search  a accept ' "charted: a warning row keeps the standard hints"
 frame_ch=$(render charted.json --keys "tab,tab,enter") || fail "charted enter warning: render exited non-zero"
 assert_contains "$frame_ch" "main inventory: a warning row; nothing to open" "charted: enter on a warning is a plain notice"
 frame_ch=$(render charted.json --keys "tab,tab,d") || fail "charted d warning: render exited non-zero"
 assert_contains "$frame_ch" "main inventory: no captain hold to discard" "charted: d on a warning is refused"
-frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j") || fail "charted footer queued: render exited non-zero"
+frame_ch=$(render charted.json --keys "tab,tab,j,j,j") || fail "charted footer queued: render exited non-zero"
 assert_row "$frame_ch" '^ j/k move  tab pane  enter card  x hide ' "charted: a queued row carries its card and nothing to act on"
-frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j,j,j,j") || fail "charted footer held: render exited non-zero"
+frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j") || fail "charted footer held: render exited non-zero"
 assert_row "$frame_ch" '^ j/k move  tab pane  enter card  a accept  d discard  D defer  x hide ' "charted: a held row carries its card and both hold actions"
-frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j,j,j,j,D") || fail "charted D held: render exited non-zero"
+frame_ch=$(render charted.json --keys "tab,tab,j,j,j,j,j,j,D") || fail "charted D held: render exited non-zero"
 assert_row "$frame_ch" "^ defer hold-blocked until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "charted: D on a held row opens the date prompt"
-frame_ch=$(render_view charted.json "tab,tab,j,j,j,j,j,j,j,j,j,enter") || fail "charted card: render exited non-zero"
+frame_ch=$(render_view charted.json "tab,tab,j,j,j,j,j,j,enter,enter") || fail "charted card: render exited non-zero"
 assert_contains "$frame_ch" "viewed the hold card of hold-blocked (viewer-cmd)" "charted: enter on a held row shows its card"
 
 # unknown-live.json (its _comment names every row): the unknown-state rule. firstmate's current-state
@@ -1909,7 +1924,7 @@ assert_contains "$frame_ch" "viewed the hold card of hold-blocked (viewer-cmd)" 
 # branch from ledgerChildRows or the unknownTaskLive one from mainTaskRow, read the reason text instead
 # of herdrColumn's status, let a dead or lost pane through, count idle as busy, or leave the home-level
 # reason uncut in homeWarningText).
-frame_ul=$(render unknown-live.json) || fail "unknown-live: render exited non-zero"
+frame_ul=$(render unknown-live.json --keys w) || fail "unknown-live: render exited non-zero" # w shows the bookkeeping warnings this section checks
 inflight_ul=$(pane_lines "$frame_ul" 2)
 charted_ul=$(pane_lines "$frame_ul" 5)
 assert_contains "$frame_ul" "Underway (3)" "unknown-live: two main workers and the delegate's group, nothing else"
@@ -1923,7 +1938,7 @@ assert_contains "$frame_ulx" "Underway (5)" "unknown-live expanded: the two chil
 assert_row "$frame_ulx" '^│ working +working +↳ child-a +child-a · validation state unreadable +- +delegate-a +30m │$' "unknown-live expanded: a child with no title reads its id, then the unreadable text; HERDR herdr's working"
 assert_row "$frame_ulx" '^│ working +busy +↳ child-b +child-b · validation state unreadable +- +delegate-a +5m │$' "unknown-live expanded: a busy agent counts as live too; HERDR reads busy"
 assert_no_row "$(pane_lines "$frame_ulx" 2)" 'child-(gone|idle)' "unknown-live expanded: the gone and the idle child are not listed"
-assert_contains "$frame_ul" "Charted Next (0, 6 warnings)" "unknown-live: six warnings, none for the two live children or the two live main tasks"
+assert_contains "$frame_ul" "Charted Next (0, 6 warnings: 6 bookkeeping, w hides)" "unknown-live: six warnings, all bookkeeping, none for the two live children or the two live main tasks"
 assert_row "$frame_ul" '^│ warning +- +main-gone +endpoint default:w1C:p1 is gone \(exists: false\) +- +main +- │$' "unknown-live: a main task whose pane is gone keeps the gone warning"
 assert_row "$frame_ul" '^│ warning +- +main-dead +current state unavailable \(endpoint default:w1D:p1, run-step; agent dead\) +- +main +- │$' "unknown-live: agent_alive dead is a warning even while herdr reads the pane working"
 assert_row "$frame_ul" '^│ warning +- +main-idle +current state unavailable \(endpoint default:w1E:p1, run-step; pane alive, agent idle\) +- +main +- │$' "unknown-live: an idle agent whose last event is paused is a warning naming the idle agent"
@@ -1953,29 +1968,226 @@ assert_row "$frame_ulk" '^ Underway +working +working +↳ child-a +child-a · v
 # The home-level warning is cut to the ids the rule does not draw, and kept when one remains; the cut
 # reads the ledger's own reason when the canonical record is absent (falsify: drop unavailableIds, or
 # apply the cut to the canonical reason alone).
-frame_ulv=$(render "$(variant_at unknown-live.json unknown-reason-idle snapshot.secondmate_current.records.0.current '{"state": "unknown", "reason": "child current state unavailable: child-a, child-b, child-idle"}')") || fail "unknown-live reason-idle: render exited non-zero"
+frame_ulv=$(render "$(variant_at unknown-live.json unknown-reason-idle snapshot.secondmate_current.records.0.current '{"state": "unknown", "reason": "child current state unavailable: child-a, child-b, child-idle"}')" --keys w) || fail "unknown-live reason-idle: render exited non-zero"
 assert_row "$frame_ulv" '^│ warning +- +delegate-a +child current state unavailable: child-idle +- +delegate-a +- │$' "unknown-live: a home-level reason naming a child the rule does not draw is kept, naming that child alone"
 assert_no_row "$(pane_lines "$frame_ulv" 5)" '^│ warning +- +child-idle ' "unknown-live: the per-child warning yields to the home-level one that names it, as before"
-assert_contains "$frame_ulv" "Charted Next (0, 6 warnings)" "unknown-live: the home-level warning replaces the per-child one, so the count holds"
+assert_contains "$frame_ulv" "Charted Next (0, 6 warnings: 6 bookkeeping, w hides)" "unknown-live: the home-level warning replaces the per-child one, so the count holds"
 assert_contains "$frame_ulv" "Underway (3)" "unknown-live: the live children still draw when the reason names another child"
-frame_ulv=$(render "$(variant_at unknown-live.json unknown-ledger-only snapshot.secondmate_current '{"records": []}')") || fail "unknown-live ledger-only: render exited non-zero"
+frame_ulv=$(render "$(variant_at unknown-live.json unknown-ledger-only snapshot.secondmate_current '{"records": []}')" --keys w) || fail "unknown-live ledger-only: render exited non-zero"
 assert_no_row "$(pane_lines "$frame_ulv" 5)" '^│ warning +- +delegate-a ' "unknown-live: the ledger's own invalid reason is cut the same way when the canonical record is absent"
-assert_contains "$frame_ulv" "Charted Next (0, 6 warnings)" "unknown-live ledger-only: the same six warnings"
+assert_contains "$frame_ulv" "Charted Next (0, 6 warnings: 6 bookkeeping, w hides)" "unknown-live ledger-only: the same six warnings"
 # With herdr disconnected and nothing known about the panes, a child cannot be proved busy and stays a
 # warning under the uncut home-level reason, while a main task's working last event still counts and a
 # pane herdr cannot see is not lost (falsify: treat a null status as busy, or a disconnected herdr as lost).
-frame_ulv=$(render "$(variant unknown-live.json unknown-disconnected '{"herdr": {"state": "disconnected", "agents": []}}')") || fail "unknown-live disconnected: render exited non-zero"
+frame_ulv=$(render "$(variant unknown-live.json unknown-disconnected '{"herdr": {"state": "disconnected", "agents": []}}')" --keys w) || fail "unknown-live disconnected: render exited non-zero"
 assert_contains "$frame_ulv" "Underway (3)" "unknown-live disconnected: the three main tasks with a working last event, main-lost among them since its absence is unproved"
 assert_row "$frame_ulv" '^│ working +unknown +main-lost +Index the warehouse table · validation state unreadable ' "unknown-live disconnected: the status log's working line carries a main task whose pane herdr cannot see"
 assert_no_row "$frame_ulv" 'delegate-a +child-a, child-b' "unknown-live disconnected: no group over children herdr cannot vouch for"
 assert_row "$frame_ulv" '^│ warning +- +delegate-a +child current state unavailable: child-a, child-b +- +delegate-a +- │$' "unknown-live disconnected: the home-level reason stays whole"
 assert_row "$frame_ulv" '^│ warning +- +main-idle +current state unavailable \(endpoint default:w1E:p1, run-step; pane alive, agent unknown\) +- +main +- │$' "unknown-live disconnected: a main task with no working event names the agent unknown"
-assert_contains "$frame_ulv" "Charted Next (0, 5 warnings)" "unknown-live disconnected: main-gone, main-dead, main-idle, child-gone and the home"
+assert_contains "$frame_ulv" "Charted Next (0, 5 warnings: 5 bookkeeping, w hides)" "unknown-live disconnected: main-gone, main-dead, main-idle, child-gone and the home"
 # A live unknown task under an external hold is a worker, not a gate: its held item stays out of Charted
 # Next as a working task's does (falsify: leave unknownTaskLive out of chartedRows' workingIds).
 frame_ulv=$(render "$(variant_at unknown-live.json unknown-held snapshot.backlog.records.0 '{"id": "main-live", "state": "in_flight", "structured": true, "current_role": "held", "title": "Retry on 429 from the address API", "repo": "example-org/example-repo", "kind": "ship", "hold_kind": "external", "hold_reason": "waiting on the vendor", "hold_until": null, "hold_bucket": null, "hold_age_days": null, "captain_actionable": false, "unresolved_blocker_ids": [], "since": "2026-09-21", "pr_url": null, "report_path": null, "completion": {"verb": null, "date": null}}')") || fail "unknown-live held: render exited non-zero"
 assert_row "$frame_ulv" '^│ working +working +main-live +Retry on 429 from the address API · validation state unreadable ' "unknown-live held: the live task under an external hold keeps its worker row"
 assert_no_row "$(pane_lines "$frame_ulv" 5)" 'main-live' "unknown-live held: its held item is no Charted Next gate while the pane is busy"
+
+# --------------------------------------------------------------- summaries
+# lib/summary.mjs: one headless claude call per text, kept under --summary-dir by the SHA-256 of the
+# prompt version and the text. A one-shot render summarizes only with --summary-dir and awaits every
+# call before the frame, so these renders put the fake claude (tests/fake-claude.sh) first on PATH and
+# read its call log. charted.json's Charted Next sends six items (the three whose record holds only a
+# short title, del-queued, queue-plain and undated-queue, are never sent).
+# render_sum <dir> [flags...]: charted.json with the fake claude first on PATH, the call log reset.
+render_sum() {
+  local dir=$1
+  shift
+  rm -f "${CLAUDE_LOG:?}"
+  FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render charted.json --summary-dir "$dir" "$@"
+}
+claude_calls() { # the call log, or nothing
+  cat "$CLAUDE_LOG" 2>/dev/null
+}
+SUM_DIR="$SCRATCH/summaries-a"
+# Without --summary-dir a one-shot render calls nothing and draws the raw text (falsify: create the
+# store without the flag in driveOnce).
+rm -f "$CLAUDE_LOG"
+frame_s=$(FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render charted.json) || fail "summaries off by default: render exited non-zero"
+if [ -e "$CLAUDE_LOG" ]; then fail "a one-shot render without --summary-dir called claude: $(cat "$CLAUDE_LOG")"; else pass; fi
+assert_row "$frame_s" '^│ queued +- +held-external +Vendor cutover · waiting on the vendor ' "without --summary-dir WHAT is the raw title and reason"
+# The first render: the six items are summarized once each, with the fixed flags, and drawn; WHY keeps
+# the structured reason and takes the summary's only where the record names none (falsify: drop
+# summarySource from chartedRow, swap the WHY rule, or drop a flag from claudeArgv).
+frame_s=$(render_sum "$SUM_DIR") || fail "summaries first: render exited non-zero"
+assert_lines "$(claude_calls)" 6 "summaries first: one call per item worth summarizing"
+assert_count "$(claude_calls)" "claude row " 6 "summaries first: every call is the row kind"
+assert_count "$(claude_calls)" "| -p --model claude-haiku-4-5-20251001 --tools '' --no-session-persistence --safe-mode --output-format text --system-prompt <prompt>" 6 "summaries first: each call is one headless, toolless, unsaved, safe-mode call with the default model"
+assert_not_contains "$(claude_calls)" "Add the export button" "summaries first: a title-only item is never sent"
+assert_not_contains "$(claude_calls)" "Index the warehouse table" "summaries first: a delegate's title-only item is never sent"
+assert_row "$frame_s" '^│ queued +fake why +held-external +Summary of Vendor cutover ' "summaries: WHAT is the summary and WHY the summary's answer when the record names no reason of its own"
+assert_row "$frame_s" '^│ blocked +by queue-plain \+1 +queue-blocked +Summary of Ship the export report ' "summaries: a structured WHY is kept over the summary's"
+assert_row "$frame_s" '^│ dated +until 10-01 +hold-dated +Summary of Revisit the pricing page ' "summaries: a dated hold keeps its until date"
+assert_row "$frame_s" '^│ queued +- +queue-plain +Add the export button ' "summaries: a title-only item keeps its title"
+if [ "$(find "$SUM_DIR" -name '*.json' | wc -l | tr -d ' ')" = 6 ]; then pass; else fail "summaries first: six files under the summary dir, got $(find "$SUM_DIR" -name '*.json' | wc -l)"; fi
+sum_file=$(grep -l 'Summary of Vendor cutover' "$SUM_DIR"/*.json | head -n 1)
+assert_file_contains "$sum_file" '"schema": "fm-board-summary.v1"' "summaries: a file names its schema"
+assert_file_contains "$sum_file" '"kind": "row"' "summaries: a file names its kind"
+assert_file_contains "$sum_file" '"version": "row-v1"' "summaries: a file names the prompt version"
+assert_file_contains "$sum_file" '"model": "claude-haiku-4-5-20251001"' "summaries: a file names the model"
+# A cache hit costs no call: the same render again is the same frame with no call (falsify: skip
+# readCached, or key by something that changes per run).
+frame_s2=$(render_sum "$SUM_DIR") || fail "summaries hit: render exited non-zero"
+if [ -e "$CLAUDE_LOG" ]; then fail "summaries hit: a render over a filled summary dir called claude: $(cat "$CLAUDE_LOG")"; else pass; fi
+if [ "$frame_s2" = "$frame_s" ]; then pass; else fail "summaries hit: the cached frame differs from the first"; fi
+# A changed text is summarized again, alone: held-external's reason changes, the five others hit
+# (falsify: key by the item id instead of the text).
+changed=$(variant_at charted.json sum-changed snapshot.backlog.records.0.hold_reason '"waiting on the new vendor"')
+rm -f "$CLAUDE_LOG"
+frame_s=$(FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render "$changed" --summary-dir "$SUM_DIR") || fail "summaries changed: render exited non-zero"
+assert_lines "$(claude_calls)" 1 "summaries changed: one call, for the changed item only"
+assert_contains "$(claude_calls)" "claude row Vendor cutover |" "summaries changed: the call is the changed item's"
+# A failing claude: the raw text stays, the footer says so once with claude's own last line, three
+# failures in a row stop the calls, and nothing is written (falsify: drop the raw fallback in
+# chartedRow, the onFailure notice, or SUMMARY_MAX_FAILURES).
+rm -f "$CLAUDE_LOG"
+frame_s=$(FAKE_CLAUDE_FAIL=1 render_sum "$SCRATCH/summaries-fail") || fail "summaries fail: render exited non-zero"
+assert_lines "$(claude_calls)" 5 "summaries fail: five calls of six, then the store stops (three start at once, each of the first two failures starts the next, the third stops the store)"
+assert_row "$frame_s" '^│ queued +- +held-external +Vendor cutover · waiting on the vendor ' "summaries fail: WHAT keeps the raw text"
+assert_contains "$frame_s" "summaries: claude exited 1: API Error: 401 authentication required; showing the raw text" "summaries fail: the footer names claude's error once"
+if [ -n "$(find "$SCRATCH/summaries-fail" -name '*.json' 2>/dev/null)" ]; then fail "summaries fail: a failed call wrote a file"; else pass; fi
+frame_s=$(FAKE_CLAUDE_EMPTY=1 render_sum "$SCRATCH/summaries-empty") || fail "summaries empty: render exited non-zero"
+assert_contains "$frame_s" "summaries: claude gave no usable summary; showing the raw text" "summaries empty: an answer with no WHAT line is a failure, not a summary"
+# claude missing from PATH: no call can start, the raw text stays and the footer says why (falsify:
+# drop the whichOnPath check in the store).
+empty_bin="$SCRATCH/empty-bin"
+mkdir -p "$empty_bin"
+frame_s=$(PATH="$empty_bin" "$(command -v node)" "$ROOT/bin/firstmate-tui/index.mjs" --render-once --fixture "$FIX/charted.json" --no-herdr --summary-dir "$SCRATCH/summaries-missing") || fail "summaries missing: render exited non-zero"
+assert_contains "$frame_s" "summaries: claude not on PATH; showing the raw text" "summaries missing: the footer says claude is not on PATH"
+assert_row "$frame_s" '^│ dated +until 10-01 +hold-dated +Revisit the pricing page · Revisit after launch ' "summaries missing: the raw text stays"
+# The switch: --no-summaries and the config file's summaries.enabled false call nothing (falsify: ignore
+# either in driveOnce).
+frame_s=$(render_sum "$SCRATCH/summaries-off" --no-summaries) || fail "summaries --no-summaries: render exited non-zero"
+if [ -e "$CLAUDE_LOG" ]; then fail "--no-summaries still called claude: $(cat "$CLAUDE_LOG")"; else pass; fi
+printf '{"summaries": {"enabled": false}}\n' > "$SCRATCH/summaries-off.json"
+frame_s=$(render_sum "$SCRATCH/summaries-off" --config "$SCRATCH/summaries-off.json") || fail "summaries config off: render exited non-zero"
+if [ -e "$CLAUDE_LOG" ]; then fail "summaries.enabled false still called claude: $(cat "$CLAUDE_LOG")"; else pass; fi
+assert_row "$frame_s" '^│ queued +- +held-external +Vendor cutover · waiting on the vendor ' "summaries off: the raw text"
+printf '{"summaries": {"model": "claude-test-model"}}\n' > "$SCRATCH/summaries-model.json"
+frame_s=$(render_sum "$SCRATCH/summaries-model" --config "$SCRATCH/summaries-model.json") || fail "summaries model: render exited non-zero"
+assert_count "$(claude_calls)" "--model claude-test-model " 6 "summaries: the config file's summaries.model reaches --model (falsify: drop the model from the store)"
+printf '{"summaries": {"model": "--evil"}}\n' > "$SCRATCH/summaries-badmodel.json"
+frame_s=$(render_sum "$SCRATCH/summaries-badmodel" --config "$SCRATCH/summaries-badmodel.json") || fail "summaries bad model: render exited non-zero"
+assert_contains "$frame_s" 'summaries.model is not a model name' "summaries: a model name that reads as a flag is refused (falsify: drop MODEL_RE)"
+# The search still finds an item by its raw words once its WHAT is a summary (falsify: drop rawText
+# from searchTextOf).
+frame_s=$(render_sum "$SUM_DIR" --keys "f,w,a,i,t,i,n,g,space,o,n,space,t,h,e,space,v,e,n,d,o,r") || fail "summaries search: render exited non-zero"
+assert_row "$frame_s" '^ Charted Next +queued +fake why +held-external +Summary of Vendor cutover ' "summaries: the search matches the raw reason of a summarized row"
+# The pure parts (falsify: change the key's inputs, the parse, the refused directory or the prune rule).
+pure=$(node --input-type=module -e "
+  import { createSummaryStore, parseRowSummary, parseDocSummary, summaryKey, summaryInput, resolveSummaryDir, pruneSummaries } from '$ROOT/bin/firstmate-tui/lib/summary.mjs';
+  import { mkdirSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
+  console.log(summaryKey('row', 'a') === summaryKey('row', 'a'), summaryKey('row', 'a') !== summaryKey('row', 'b'), summaryKey('row', 'a') !== summaryKey('doc', 'a'), /^[0-9a-f]{64}\$/.test(summaryKey('doc', 'x')));
+  console.log(JSON.stringify(parseRowSummary('WHAT: Move the cache\nWHY: vendor contract')));
+  console.log(JSON.stringify(parseRowSummary('what: lower case works\nwhy: -')));
+  console.log(JSON.stringify(parseRowSummary('I need more details before I can help.')));
+  console.log(JSON.stringify(parseDocSummary('\n- a\n- b\n\n')));
+  console.log(JSON.stringify(summaryInput('row', 'Title: x')));
+  console.log(JSON.stringify(resolveSummaryDir({ explicit: '/h/fm/sum', viewStatePath: '/c/fm-board/view-state.json', fmHome: '/h/fm' })));
+  console.log(JSON.stringify(resolveSummaryDir({ viewStatePath: '/c/fm-board/view-state.json', fmHome: '/h/fm' })));
+  const d = '$SCRATCH/prune';
+  mkdirSync(d, { recursive: true });
+  const old = 'a'.repeat(64) + '.json', fresh = 'b'.repeat(64) + '.json', other = 'notes.json';
+  for (const n of [old, fresh, other]) writeFileSync(d + '/' + n, '{}');
+  const past = new Date(Date.now() - 40 * 86400000);
+  utimesSync(d + '/' + old, past, past);
+  utimesSync(d + '/' + other, past, past);
+  console.log(pruneSummaries(d), existsSync(d + '/' + old), existsSync(d + '/' + fresh), existsSync(d + '/' + other));
+  console.log(JSON.stringify(createSummaryStore().status('doc', ' \\n')));
+")
+assert_row "$pure" '^true true true true$' "summaryKey: the same text, the same key; another text or kind, another key; 64 hex digits"
+assert_row "$pure" '^\{"what":"Move the cache","why":"vendor contract"\}$' "parseRowSummary: the two lines"
+assert_row "$pure" '^\{"what":"lower case works","why":null\}$' "parseRowSummary: any case, and - is no WHY"
+assert_row "$pure" '^null$' "parseRowSummary: an answer with no WHAT line is null"
+assert_row "$pure" '^"- a\\n- b"$' "parseDocSummary: trimmed"
+assert_row "$pure" '^"<item>\\nTitle: x\\n</item>\\n"$' "summaryInput: the text between the kind's tags"
+assert_row "$pure" '^\{"path":"/c/fm-board/summaries","problem":"refusing --summary-dir inside FM_HOME \(/h/fm/sum\)"\}$' "resolveSummaryDir: a dir inside FM_HOME is refused for the one beside the view state"
+assert_row "$pure" '^\{"path":"/c/fm-board/summaries","problem":null\}$' "resolveSummaryDir: summaries/ beside the view-state file by default"
+assert_row "$pure" '^1 false true true$' "pruneSummaries: only a key-named file older than the limit goes"
+assert_row "$pure" '^\{"state":"failed","error":"the text is empty"\}$' "store status: an empty document is a failure, never a summary that stays pending (an empty report file)"
+
+# Bookkeeping warnings (a gone endpoint, an unreadable child state) hide until w; the title counts them
+# either way and names the key; the warnings that need the captain stay, in plain words (falsify: drop
+# bookkeeping from warningRows, the showBookkeeping filter in buildModel, or the w case in keyAction).
+frame_s=$(render charted.json) || fail "bookkeeping hidden: render exited non-zero"
+assert_contains "$frame_s" "Charted Next (9, 6 warnings: 3 bookkeeping, w shows)" "bookkeeping: the title counts all six warnings and names the three hidden ones and the key"
+assert_not_contains "$frame_s" "child-gone" "bookkeeping: a gone endpoint is hidden by default"
+assert_not_contains "$frame_s" "ghost-child" "bookkeeping: an unreadable child state is hidden by default"
+assert_row "$frame_s" "^│ warning +- +main inventory +firstmate's main backlog does not add up: main in-flight backlog " "bookkeeping: the main inventory stays, in plain words"
+assert_row "$frame_s" "^│ warning +- +delegate-c +firstmate cannot read this home's work list, so its items are miss" "bookkeeping: an unreadable delegate home stays, in plain words"
+frame_s=$(render charted.json --keys w) || fail "bookkeeping shown: render exited non-zero"
+assert_contains "$frame_s" "Charted Next (9, 6 warnings: 3 bookkeeping, w hides)" "bookkeeping: w shows them and the title says w hides them"
+assert_row "$frame_s" '^│ warning +- +child-gone +endpoint default:w2B:p2 is gone \(exists: false\) +- +delegate-a +- │$' "bookkeeping: w shows the gone endpoint"
+assert_contains "$frame_s" "showing bookkeeping warnings in Charted Next; w hides them" "bookkeeping: the footer says what w did"
+frame_s=$(render charted.json --keys w,w) || fail "bookkeeping toggled back: render exited non-zero"
+assert_not_contains "$frame_s" "child-gone" "bookkeeping: a second w hides them again"
+
+# The summary view: enter on a card row draws the card inside the board under a heading and a status
+# line, the summary on top once claude has made it and the full card below; enter there shows the full
+# card in the viewer (the hold section above), esc and q close it, j/k scroll it, and d, D, a and F act
+# on its row (falsify: send the card's enter to the viewer again, drop the summary block from
+# renderSummary, or the summary-key case from applyAction).
+frame_s=$(render_hold "j,enter") || fail "summary view off: render exited non-zero"
+assert_row "$frame_s" '^ Card main-hold: Pick the vendor for the address API  \(lines 1-[0-9]+ of [0-9]+; j/k and pageup/pagedown scroll\) +$' "summary view: the heading names the card and the lines in view"
+assert_contains "$frame_s" "no summary: off (no --summary-dir in --render-once); the full card follows" "summary view: without --summary-dir the status line says summaries are off"
+assert_row "$frame_s" '^ # Pick the vendor for the address API +$' "summary view: the full card follows in the frame"
+assert_row "$frame_s" '^ enter full card in the viewer  j/k scroll  a accept  d discard  D defer  esc back +$' "summary view: the footer names its keys, the hold actions included"
+assert_not_viewed "summary view: the first enter runs no viewer"
+assert_no_row "$frame_s" '^┌─ \[1\]' "summary view: the grid gives way to the card"
+rm -f "$CLAUDE_LOG"
+frame_s=$(FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render_hold "j,enter" --summary-dir "$SCRATCH/summaries-cards") || fail "summary view: render exited non-zero"
+assert_count "$(claude_calls)" "claude doc " 1 "summary view: one document call for the card"
+assert_contains "$(claude_calls)" "claude doc Pick the vendor for the address API |" "summary view: the call carries the card's text"
+assert_row "$frame_s" "^ summary by claude-haiku-4-5-20251001, made $TODAY; the full card follows +\$" "summary view: the status line names the model and the local day it was made (falsify: print the UTC date of created_at)"
+assert_row "$frame_s" '^ - Summary of Pick the vendor for the address API +$' "summary view: the summary's first line"
+assert_row "$frame_s" '^ - Fake summary line three +$' "summary view: the summary's last line"
+assert_row "$frame_s" '^ ── full card ─+ +$' "summary view: a rule separates the summary from the full card"
+assert_before "$frame_s" 'Summary of Pick the vendor' '^ # Pick the vendor for the address API' "summary view: the summary comes before the full card"
+rm -f "$CLAUDE_LOG"
+frame_s=$(FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render_hold "j,enter" --summary-dir "$SCRATCH/summaries-cards") || fail "summary view hit: render exited non-zero"
+assert_count "$(claude_calls)" "claude doc " 0 "summary view: the same card again costs no call"
+HOLD_FIX_ORIG=$HOLD_FIX
+HOLD_FIX="$SCRATCH/holds-older.json"
+sed 's/"hold_age_days": 3,/"hold_age_days": 4,/' "$HOLD_FIX_ORIG" > "$HOLD_FIX"
+rm -f "$CLAUDE_LOG"
+frame_s=$(FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render_hold "j,enter" --summary-dir "$SCRATCH/summaries-cards") || fail "summary view older: render exited non-zero"
+HOLD_FIX=$HOLD_FIX_ORIG
+assert_contains "$frame_s" "| age | 4 days |" "summary view: the older card draws its new age (the variant fixture took effect)"
+assert_count "$(claude_calls)" "claude doc " 0 "summary view: the same hold one day older costs no call (falsify: key the summary on the whole card text, age row included)"
+assert_row "$frame_s" '^ - Summary of Pick the vendor for the address API +$' "summary view: the cached summary is drawn"
+rm -f "$CLAUDE_LOG"
+frame_s=$(FAKE_CLAUDE_FAIL=1 FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render_hold "j,j,enter" --summary-dir "$SCRATCH/summaries-cards-fail") || fail "summary view fail: render exited non-zero"
+assert_contains "$frame_s" "no summary (claude exited 1: API Error: 401 authentication required); the full card follows" "summary view: a failed call names claude's error and keeps the full card"
+assert_row "$frame_s" '^ # Keep or drop the legacy importer +$' "summary view: the full card is drawn after a failed call"
+frame_s=$(render_hold "j,enter,j,j") || fail "summary view scroll: render exited non-zero"
+assert_row "$frame_s" '^ Card main-hold: Pick the vendor for the address API  \(lines 3-' "summary view: j scrolls the card"
+frame_s=$(render_hold "j,enter,escape") || fail "summary view esc: render exited non-zero"
+assert_row "$frame_s" '^ j/k move  tab pane  enter card  a accept  d discard  D defer  x hide ' "summary view: esc brings the board back on the same row"
+frame_s=$(render_hold "j,enter,q") || fail "summary view q: render exited non-zero"
+assert_row "$frame_s" '^┌─ \[1\] Captain' "summary view: q closes the view and leaves the board running"
+frame_s=$(render_hold "j,enter,d,y") || fail "summary view d: render exited non-zero"
+assert_file_contains "$HOLD_LOG" "argv=answer main-hold --decision-file" "summary view: d,y discards the view's own hold"
+assert_contains "$frame_s" "discarded main-hold" "summary view: the footer names the discard"
+frame_s=$(render_hold "j,enter,D") || fail "summary view D: render exited non-zero"
+assert_row "$frame_s" "^ defer main-hold until \(YYYY-MM-DD\): $PLUS14  enter defers  esc cancels +\$" "summary view: D opens the defer prompt for the view's row"
+# A report: the file read into the same view (holds.json's scout-x report), and a file that cannot be
+# read opens the view with the reason while enter still hands the path to the viewer (falsify: drop
+# readReportText, or the error branch of summaryStatusText).
+frame_s=$(render_hold "tab,tab,tab,tab,j,j,enter") || fail "summary view report: render exited non-zero"
+assert_row "$frame_s" "^ Report scout-x: $HOLD_HOME/data/scout-x/report.md +\$" "summary view: the heading names the report and its path"
+assert_row "$frame_s" '^ # scout report +$' "summary view: the report's text is drawn"
+assert_row "$frame_s" '^ enter full report in the viewer  j/k scroll  esc back +$' "summary view: a report row has no hold actions"
+frame_s=$(render lost.json --keys "tab,tab,enter") || fail "summary view missing report: render exited non-zero"
+assert_contains "$frame_s" "the report cannot be read here (ENOENT); enter still hands its path to the viewer" "summary view: a missing report names the reason"
 
 # -------------------------------------------------------------------- hide
 vs="$SCRATCH/view-state.json"
@@ -4501,7 +4713,7 @@ assert_contains "$frame_m" "hidden mobile-fix" "x after a click names the clicke
 tags_m=$(render populated.json --mouse "click:5,35" --tags) || fail "mouse title click: render exited non-zero"
 assert_row "$tags_m" '\{bold\}\{214-fg\}┌─ .*\[6\].*Recently Landed \(5\)' "click on the Recently Landed title focuses Recently Landed"
 assert_row "$tags_m" "${SEL}report +${SEL_END}.*scout-beta" "click on the Recently Landed title puts the cursor on its first row"
-frame_m=$(render populated.json --mouse "click:5,35" --keys "enter") || fail "mouse title click then enter: render exited non-zero"
+frame_m=$(render populated.json --mouse "click:5,35" --keys "enter,enter") || fail "mouse title click then enter: render exited non-zero"
 assert_contains "$frame_m" "would view /fixture/firstmate/data/scout-beta/report.md" "enter after a title click acts on that pane's first row"
 # A click on a pane's empty space (its column header) focuses the pane too (falsify: drop the pane zone).
 tags_m=$(render populated.json --mouse "click:30,11" --tags) || fail "mouse empty click: render exited non-zero"
@@ -4532,13 +4744,13 @@ assert_contains "$frame_m" "Underway (8)" "double-click on a group: only that gr
 assert_not_opened "double-click on a group row opens no PR"
 frame_m=$(render_mouse populated.json "dblclick:30,14 dblclick:30,14") || fail "mouse dblclick group twice: render exited non-zero"
 assert_row "$frame_m" '^│ working +1 live +!▸ delegate-a ' "a second double-click on the group row collapses it again"
-frame_m=$(render_mouse populated.json "dblclick:60,37") || fail "mouse dblclick report: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:60,37 enter") || fail "mouse dblclick report: render exited non-zero"
 assert_viewed "/fixture/firstmate/data/scout-beta/report.md" "double-click on a Recently Landed report row views its report through --viewer-cmd"
 frame_m=$(render_mouse populated.json "dblclick:30,12") || fail "mouse dblclick worker: render exited non-zero"
 assert_contains "$frame_m" "herdr is off (--no-herdr); cannot focus" "double-click on an Underway worker means herdr focus, refused here as enter is"
 assert_not_opened "double-click on a worker opens no PR"
 assert_not_viewed "double-click on a worker views no report"
-frame_m=$(render_mouse populated.json "dblclick:60,41") || fail "mouse dblclick landed no url: render exited non-zero"
+frame_m=$(render_mouse populated.json "dblclick:60,41 enter") || fail "mouse dblclick landed no url: render exited non-zero"
 assert_not_opened "double-click on a Recently Landed row without a PR opens nothing"
 assert_viewed "/fixture/firstmate/data/old-scout/report.md" "double-click on a Recently Landed row without a PR views its report, as enter does (falsify: give the double-click its own action instead of keyAction enter)"
 
@@ -5045,9 +5257,9 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
   run_pty() { # <term> <name> <actions...>: the interactive board on a pty against the stand-in home, with every fake wired
     local term=$1 name=$2
     shift 2
-    rm -f "${OPENER_LOG:?}" "${PTY_TRACE:?}" "${UPGRADE_LOG:?}" "${CURL_LOG:?}" "${HOLD_LOG:?}"
+    rm -f "${OPENER_LOG:?}" "${PTY_TRACE:?}" "${UPGRADE_LOG:?}" "${CURL_LOG:?}" "${HOLD_LOG:?}" "${CLAUDE_LOG:?}"
     mkdir -p "$SCRATCH/pty-$name"
-    FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" PATH="$FAKE_BIN:$PATH" \
+    FM_HOME="$FAKE_HOME" XDG_CONFIG_HOME="$SCRATCH/xdg" FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" PATH="$FAKE_BIN:$PATH" FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" \
       FM_BOARD_TEST_OPENER_LOG="$OPENER_LOG" FM_BOARD_TEST_OPENER_TRACE="$PTY_TRACE" FM_BOARD_TEST_UPGRADE_LOG="$UPGRADE_LOG" FM_BOARD_TEST_HOLD_LOG="$HOLD_LOG" \
       FAKE_CURL_ROOT="$REL" FAKE_CURL_LOG="$CURL_LOG" \
       python3 "$PTY" --term "$term" --timeout 20 --capture "$SCRATCH/pty-$name.bin" "$@" -- \
@@ -5078,6 +5290,17 @@ if command -v python3 >/dev/null 2>&1 && [ -d "$ROOT/bin/firstmate-tui/node_modu
     assert_upgrade_log "upgrade --version 0.2.0" "pty $t: one carriage return opens the prompt and y then runs the launcher exactly once"
     assert_not_opened "pty $t: nothing on the Settings page opens a PR"
   done
+  # The summary view on a real terminal: one carriage return on Captain's Call's first row, the blocked
+  # scout-beta, loads its card, draws the view and asks the fake claude for the card's summary in the
+  # background with no further key; q closes the view and a second q quits. The driver sees only the
+  # cells the library repaints, so a summary drawn over the card's own text cannot be read back here:
+  # the call log proves the request, and the render-once checks above prove the drawing (falsify: ask
+  # for the summary only on the next key, or let q quit from inside the view).
+  pty_term=${pty_terms# }
+  pty_term=${pty_term%% *}
+  run_pty "$pty_term" summary "wait:$PTY_URL" "send:\r" "wait:Cardscout-beta:Scout:ratelimits" "sleep:2" "send:q" "wait:Captain'sCall" "sleep:0.3" "send:q" exit
+  pty_ok summary "pty: enter on a card row draws the summary view, q closes it and q quits"
+  assert_count "$(cat "$CLAUDE_LOG" 2>/dev/null)" "claude doc Scout: rate limits on the address API |" 1 "pty: the card's summary is one call to the fake claude, made with no key after enter"
   # The colour bytes, from the same captures. The selected row is the terminal's inverse video (SGR 7)
   # whatever TERM says. The focused pane's border is lib/tui-blessed.mjs accentStyle: bold palette 214
   # (38;5;214) when the terminal reports 256 colours, bold yellow (1;33) below that, so the library
