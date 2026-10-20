@@ -366,7 +366,7 @@ export async function runApp(opts) {
   const syncSummaries = () => {
     for (const want of state.model.summaryWants) summaries.request(want.kind, want.text);
     const p = state.view.prompt;
-    if (p && p.kind === 'summary') p.summary = p.error ? null : summaries.status('doc', p.text);
+    if (p && p.kind === 'summary') p.summary = p.error ? null : summaries.status('doc', p.summaryText);
   };
 
   const draw = () => {
@@ -747,7 +747,7 @@ export async function runApp(opts) {
     }
     state.view.busy = null;
     openSummaryPrompt(state.view, row, { source: 'card', id: row.card.id, title: (loaded.record && loaded.record.title) || row.card.id, text: loaded.text, partial: loaded.partial });
-    summaries.request('doc', loaded.text);
+    summaries.request('doc', state.view.prompt.summaryText);
     notice('', false, 1);
     draw();
   };

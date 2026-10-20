@@ -38,7 +38,7 @@ Each summary comes from one `claude -p` call: a small fast model (`claude-haiku-
 The call never reaches a running firstmate or agent session and never writes into a firstmate home.
 The text leaves the machine: claude sends it to Anthropic as any `claude -p` call does.
 
-Each answer is kept as one small file under `summaries/` beside `view-state.json` ([Configuration](configuration.md#summaries)), named by the SHA-256 of the prompt version and the exact text.
+Each answer is kept as one small file under `summaries/` beside `view-state.json` ([Configuration](configuration.md#summaries)), named by the SHA-256 of the prompt version and the exact text; a hold card is summarized without its age row, which changes every day, so one hold costs one call.
 The board looks there first, so a text it summarized before costs no call, on this launch or the next; a changed text is summarized again.
 Calls run in the background, three at a time, and each row repaints when its summary lands; a row shows its raw text meanwhile, and the summary view shows the whole card or report under a `summarizing with claude...` line.
 When claude is not on `PATH`, or a call fails or times out (90 seconds), the row keeps its raw text, the summary view says why, and the footer says so once; three failures in a row stop the calls until the board restarts.

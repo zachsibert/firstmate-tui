@@ -2155,6 +2155,14 @@ assert_before "$frame_s" 'Summary of Pick the vendor' '^ # Pick the vendor for t
 rm -f "$CLAUDE_LOG"
 frame_s=$(FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render_hold "j,enter" --summary-dir "$SCRATCH/summaries-cards") || fail "summary view hit: render exited non-zero"
 assert_count "$(claude_calls)" "claude doc " 0 "summary view: the same card again costs no call"
+HOLD_FIX_ORIG=$HOLD_FIX
+HOLD_FIX="$SCRATCH/holds-older.json"
+sed 's/"hold_age_days": 3,/"hold_age_days": 4,/' "$HOLD_FIX_ORIG" > "$HOLD_FIX"
+rm -f "$CLAUDE_LOG"
+frame_s=$(FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render_hold "j,enter" --summary-dir "$SCRATCH/summaries-cards") || fail "summary view older: render exited non-zero"
+HOLD_FIX=$HOLD_FIX_ORIG
+assert_contains "$frame_s" "| age | 4 days |" "summary view: the older card draws its new age (the variant fixture took effect)"
+assert_count "$(claude_calls)" "claude doc " 0 "summary view: the same hold one day older costs no call (falsify: key the summary on the whole card text, age row included)"
 assert_row "$frame_s" '^ - Summary of Pick the vendor for the address API +$' "summary view: the cached summary is drawn"
 rm -f "$CLAUDE_LOG"
 frame_s=$(FAKE_CLAUDE_FAIL=1 FM_BOARD_TEST_CLAUDE_LOG="$CLAUDE_LOG" PATH="$FAKE_BIN:$PATH" render_hold "j,j,enter" --summary-dir "$SCRATCH/summaries-cards-fail") || fail "summary view fail: render exited non-zero"

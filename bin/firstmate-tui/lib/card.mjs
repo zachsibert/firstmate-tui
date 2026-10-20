@@ -253,9 +253,17 @@ export function deferPrompt(row, reason, today) {
   return { kind: 'defer', row, id: row.hold.id, reason, value: plusDays(today, DEFER_DEFAULT_DAYS) };
 }
 
+// The card text a summary is asked for and keyed on: the card without its age
+// row, which changes every day and would summarize the same hold again.
+export function cardSummarySource(text) {
+  return String(text || '').split('\n').filter((l) => !l.startsWith('| age |')).join('\n');
+}
+
 // The summary view over one document, before its summary status is known.
+// `summaryText` is the text its summary is requested and read back by.
 export function summaryPrompt({ row, source, id, title, text = '', path = null, partial = null, error = null }) {
-  return { kind: 'summary', row, source, id, title: title || id, text: String(text || ''), path, partial, error, summary: null };
+  const full = String(text || '');
+  return { kind: 'summary', row, source, id, title: title || id, text: full, summaryText: source === 'card' ? cardSummarySource(full) : full, path, partial, error, summary: null };
 }
 
 // What the summary view calls its document: `card` or `report`.

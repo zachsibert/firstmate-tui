@@ -415,7 +415,7 @@ async function driveOnce(facts, opts, size, cfg) {
     for (const want of model.summaryWants) summaries.request(want.kind, want.text);
     await summaries.idle();
     model = build();
-    if (view.prompt && view.prompt.kind === 'summary') view.prompt.summary = view.prompt.error ? null : summaries.status('doc', view.prompt.text);
+    if (view.prompt && view.prompt.kind === 'summary') view.prompt.summary = view.prompt.error ? null : summaries.status('doc', view.prompt.summaryText);
   };
   // The cursor onto a row that still exists, as the app clamps it on every draw.
   const clamp = () => {
@@ -513,7 +513,7 @@ async function driveOnce(facts, opts, size, cfg) {
             return;
           }
           openSummaryPrompt(view, row, { source: 'card', id: row.card.id, title: (loaded.record && loaded.record.title) || row.card.id, text: loaded.text, partial: loaded.partial });
-          summaries.request('doc', loaded.text);
+          summaries.request('doc', view.prompt.summaryText);
           await settleSummaries();
         })().finally(() => {
           view.busy = null;
