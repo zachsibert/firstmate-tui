@@ -4684,6 +4684,56 @@ if cmp -s "$HL/before-fail.json" "$cache_h"; then pass; else fail "headless fail
 assert_file_contains "$vs_h" '"row": "needs:main:scout-beta"' "headless failing home: the saved selection survives a run that never had data"
 if [ -s "$HL/out-fail.log" ]; then fail "headless failing run wrote to the terminal: $(head -c 300 "$HL/out-fail.log")"; else pass; fi
 
+# ----------------------------------------------------------- createApp host
+# lib/app.mjs createApp is the board without a process of its own (pi/index.ts hosts it inside Pi).
+# A plain node script hosts it against the stand-in home with a recording screen and --refresh 5,
+# the fake gh answering each graphql call after 3 s, so the GitHub cycle is still in flight when the
+# script presses q and calls stop(). The script never calls process.exit: q reaching the host's quit
+# while the script goes on, the process ending by itself, one snapshot line in the fetch log (the
+# refresh timer was due 5 s after the start, while the fetch still ran) and the cache unchanged
+# between stop() and exit (the fetch landed after stop) are the evidence (falsify: exit the process
+# in createApp's quit: no result line; leave the refresh timer armed in stop: two snapshot lines;
+# drop the quitting guard in writeCache: the cache moves after stop).
+CA="$SCRATCH/create-app"
+mkdir -p "$CA"
+rm -f "${FETCH_LOG:?}"
+# shellcheck disable=SC2016 # the script is node's, not the shell's
+FM_BOARD_TEST_FETCH_LOG="$FETCH_LOG" FAKE_GH_SLEEP=3 XDG_CONFIG_HOME="$SCRATCH/xdg" PATH="$FAKE_BIN:$PATH" node --input-type=module -e '
+import { statSync } from "node:fs";
+const [root, home, vs, cache] = process.argv.slice(1);
+const { createApp } = await import(`${root}/bin/firstmate-tui/lib/app.mjs`);
+const { parseArgs } = await import(`${root}/bin/firstmate-tui/lib/args.mjs`);
+const opts = parseArgs(["--no-herdr", "--no-summaries", "--refresh", "5", "--view-state", vs, "--cache", cache], { FM_HOME: home });
+let quits = 0;
+let text = "";
+const screen = { size: () => ({ cols: 120, rows: 40 }), draw: (lines) => { text = lines.map((l) => l.map((s) => s.text).join("")).join("\n"); }, suspended: () => false, suspend() {}, resume() {}, destroy() {} };
+const app = createApp(opts, { quit: () => { quits += 1; }, relaunch: () => {} });
+app.attach(screen);
+app.start();
+const deadline = Date.now() + 5000;
+while (!text.includes("ship-alpha") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+app.onKey("q");
+app.stop();
+const mtime = () => statSync(cache, { throwIfNoEntry: false })?.mtimeMs ?? null;
+const atStop = mtime();
+process.on("exit", () => process.stdout.write(`${JSON.stringify({ landed: text.includes("ship-alpha"), quits, cacheMoved: atStop !== mtime() })}\n`));
+' "$ROOT" "$FAKE_HOME" "$CA/view-state.json" "$CA/state-cache.json" > "$CA/out.log" 2>&1 &
+ca_pid=$!
+ca_waited=0
+while kill -0 "$ca_pid" 2>/dev/null && [ "$ca_waited" -lt 150 ]; do
+  sleep 0.1
+  ca_waited=$((ca_waited + 1))
+done
+if kill -0 "$ca_pid" 2>/dev/null; then
+  fail "createApp host: the process was still running 15 s after stop(); a timer or socket was left"
+  kill -TERM "$ca_pid" 2>/dev/null
+fi
+wait "$ca_pid" 2>/dev/null
+assert_file_contains "$CA/out.log" '{"landed":true,"quits":1,"cacheMoved":false}' "createApp host: the snapshot drew, q reached the host's quit once and nothing was written after stop()"
+if [ "$(grep -c '^snapshot$' "$FETCH_LOG" 2>/dev/null)" = 1 ]; then pass; else fail "createApp host: stop() left no refresh timer (fetch log: $(tr '\n' ' ' < "$FETCH_LOG" 2>/dev/null))"; fi
+if grep -q '^gh api graphql ' "$FETCH_LOG" 2>/dev/null; then pass; else fail "createApp host: the GitHub cycle was in flight at stop() ($(tr '\n' ' ' < "$FETCH_LOG" 2>/dev/null))"; fi
+assert_file_contains "$CA/view-state.json" '"pane": "needs"' "createApp host: stop() saved the selection"
+
 # ------------------------------------------------------------------- mouse
 # Cells are column,line from 0 at the top-left. In populated.json at 160x44 the lines are: 0 title,
 # 1 Captain's Call title, 2 its column header, 3-8 its rows (scout-beta, ship-alpha, delegate-a's

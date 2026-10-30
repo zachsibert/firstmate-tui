@@ -130,6 +130,13 @@
 // output and each line is drawn as it arrives; the relaunch key exits the
 // process with RELAUNCH_EXIT, which bin/firstmate-tui.sh run answers by starting
 // the copy at the same path again (Node cannot exec in place).
+//
+// Hosts: createApp is the board without a process of its own. It never exits,
+// installs no signal handler and draws only while a screen is attached; its
+// host supplies quit and relaunch and may replace any controller effect
+// (effects). stop() saves the selection and the cache, clears every timer and
+// closes the herdr link. runApp is the terminal host: the blessed or headless
+// screen, the signals and process.exit. pi/index.ts is the Pi host.
 
 import { userInfo } from 'node:os';
 import { buildModel, dismissKey, initialPrs, mergePrs, parseTarget, prsFailureText, pruneDismissed } from './model.mjs';
@@ -176,7 +183,7 @@ export function knownPaneIds(snapshot, ledgers) {
   return [...ids];
 }
 
-export async function runApp(opts) {
+export function createApp(opts, host = {}) {
   const viewStatePath = resolveViewStatePath({ explicit: opts.viewState, fmHome: opts.fmHome, env: process.env });
   const loaded = loadViewState(viewStatePath.path);
   // The config file, read once (and written from the example when absent).
@@ -319,7 +326,7 @@ export async function runApp(opts) {
   // timer is what keeps a headless run alive.
   const syncSpinner = () => {
     const loading = Boolean(state.model && state.model.panes.some((p) => p.loading));
-    if (loading && !state.spinnerTimer) {
+    if (loading && !state.spinnerTimer && !quitting) {
       state.spinnerTimer = setInterval(() => {
         state.loadingFrame += 1;
         draw();
@@ -387,7 +394,7 @@ export async function runApp(opts) {
   // notice still inside its time to live, so the result of a hold action
   // stays on screen through the refresh it starts.
   const notice = (text, bad = false, ttlMs = 6000, { weak = false } = {}) => {
-    if (weak && state.noticeStrongUntil > Date.now()) return;
+    if (quitting || (weak && state.noticeStrongUntil > Date.now())) return;
     state.noticeStrongUntil = weak ? 0 : Date.now() + ttlMs;
     state.view.notice = text;
     state.view.noticeBad = bad;
@@ -436,7 +443,7 @@ export async function runApp(opts) {
     persist();
   };
   const schedulePersist = () => {
-    if (!viewStatePath.path || loaded.error) return;
+    if (!viewStatePath.path || loaded.error || quitting) return;
     if (state.persistTimer) clearTimeout(state.persistTimer);
     state.persistTimer = setTimeout(() => {
       state.persistTimer = null;
@@ -452,7 +459,7 @@ export async function runApp(opts) {
   // reaches the file, not even through a quit. A write that fails is named
   // once per distinct error.
   const writeCache = () => {
-    if (!cachePath.path || !state.fetchedAt || !state.snapshot || state.lastFailure) return;
+    if (quitting || !cachePath.path || !state.fetchedAt || !state.snapshot || state.lastFailure) return;
     const agents = herdr ? (state.cachedAgents && !state.herdrLive ? state.cachedAgents : herdr.agents) : {};
     const err = saveStateCache(cachePath.path, { fmHome: state.fmHome, snapshot: state.snapshot, snapshotAt: state.snapshotAt, ledgers: state.ledgers, prs: state.prs, identity: state.identity, herdr: { agents } }, { fetchedAt: state.fetchedAt });
     if (err && err !== state.cacheErrorShown) {
@@ -469,6 +476,7 @@ export async function runApp(opts) {
   // pending timer and re-arms it on landing: that is what resets the
   // countdown. Headless, this timer is what keeps the process alive.
   const armRefreshTimer = () => {
+    if (quitting) return;
     if (state.refreshTimer) clearTimeout(state.refreshTimer);
     state.nextRefreshAt = state.lastSnapshotStart + opts.refresh * 1000;
     state.refreshTimer = setTimeout(() => {
@@ -556,7 +564,7 @@ export async function runApp(opts) {
   // when the current fetch returns. Under --no-prs there is nothing to fetch,
   // so a request runs only while the identity is wanted.
   const requestFetch = (manual) => {
-    if (!state.prs.enabled && !identityWanted(manual)) return;
+    if (quitting || (!state.prs.enabled && !identityWanted(manual))) return;
     if (state.fetching) {
       state.fetchPending = { manual: manual || Boolean(state.fetchPending && state.fetchPending.manual) };
       return;
@@ -618,7 +626,7 @@ export async function runApp(opts) {
       state.identityShown = true;
       notice(`GitHub identity unknown (${state.identity.reason}); set identity.github_login in ${cfg.path || 'the config file'} or run gh auth login`, true, 30000);
     }
-    if (state.fetchPending) {
+    if (state.fetchPending && !quitting) {
       const next = state.fetchPending;
       state.fetchPending = null;
       fetchCycle(next.manual);
@@ -627,7 +635,7 @@ export async function runApp(opts) {
 
   // Event-triggered refresh, debounced to one snapshot start per 10 s.
   const scheduleRefresh = (why) => {
-    if (state.debounceTimer) return;
+    if (quitting || state.debounceTimer) return;
     const wait = Math.max(0, SNAPSHOT_DEBOUNCE_MS - (Date.now() - state.lastSnapshotStart));
     state.debounceTimer = setTimeout(() => {
       state.debounceTimer = null;
@@ -900,7 +908,8 @@ export async function runApp(opts) {
     draw();
   };
 
-  const shutdown = (code) => {
+  let clock = null;
+  const stop = () => {
     if (quitting) return;
     // The selection and the cache, saved where the board stands (writeCache
     // writes nothing when no refresh of this session landed cleanly, so a
@@ -908,11 +917,11 @@ export async function runApp(opts) {
     autoPersist();
     writeCache();
     quitting = true;
+    for (const timer of [state.refreshTimer, state.debounceTimer, state.noticeTimer, state.persistTimer]) if (timer) clearTimeout(timer);
+    if (state.spinnerTimer) clearInterval(state.spinnerTimer);
+    if (clock) clearInterval(clock);
     if (herdr) herdr.close();
-    if (screen) screen.destroy();
-    process.exit(code);
   };
-  const quit = () => shutdown(0);
 
   // Settings page: the release data, fetched on open and on r (never on the
   // tick), and the upgrade child, whose lines are drawn as they arrive.
@@ -985,9 +994,10 @@ export async function runApp(opts) {
     persist,
     settingsFetch,
     settingsUpgrade,
-    relaunch: () => shutdown(RELAUNCH_EXIT),
-    quit,
+    relaunch: () => host.relaunch(),
+    quit: () => host.quit(),
   };
+  Object.assign(ctx, host.effects);
 
   const onKey = (key) => {
     if (state.viewing) return;
@@ -1002,46 +1012,84 @@ export async function runApp(opts) {
     schedulePersist();
   };
 
+  const start = () => {
+    draw();
+    if (loaded.error) notice(`view state: ${loaded.error}`, true, 15000);
+    if (viewStatePath.problem) notice(viewStatePath.problem, true, 15000);
+    if (cache.error) notice(`state cache ignored: ${cache.error}`, true, 15000);
+    if (cachePath.problem) notice(cachePath.problem, true, 15000);
+    if (cfg.problem) notice(cfg.problem, true, 15000);
+    if (cfg.status === 'defaults' && cfg.error) notice(`config: ${cfg.error}; running with the defaults`, true, 15000);
+    if (summaryDir.problem && !summaryOff) notice(`${summaryDir.problem}; summaries are kept for this session only`, true, 15000);
+    if (herdr) {
+      herdr.on('state', () => draw());
+      herdr.on('event', (ev) => {
+        if (ev.paneId && herdr.panes.has(ev.paneId)) scheduleRefresh(`herdr ${ev.type}`);
+        draw();
+      });
+      // The client starts out "off", which the title line would read as
+      // --no-herdr; until the subscription is up it warns "herdr disconnected
+      // (connecting)" instead, and the warning goes as soon as it is acked.
+      herdr.setState('connecting');
+      herdr.bootstrap().then(() => {
+        state.herdrLive = true; // the live agents replace the cached overlay
+        draw();
+        herdr.connect();
+      });
+    }
+    // The first refresh starts now and each completed refresh arms the timer
+    // for the next (armRefreshTimer), so the cadence counts from each start.
+    // The clock redraws once a second so the countdown moves; the render is
+    // pure and cheap, and headless it draws nothing. The screen's input stream
+    // keeps the process alive; headless, the refresh timer does.
+    clock = setInterval(() => draw(), CLOCK_TICK_MS);
+    clock.unref?.();
+    refresh('start');
+  };
+
+  return {
+    view: state.view,
+    ctx,
+    get model() {
+      return state.model || rebuild();
+    },
+    rebuild,
+    draw,
+    notice,
+    onKey,
+    onMouse,
+    attach: (next) => {
+      screen = next;
+    },
+    detach: () => {
+      screen = null;
+    },
+    start,
+    stop,
+  };
+}
+
+export async function runApp(opts) {
+  let screen = null;
+  let exiting = false;
+  const exit = (code) => {
+    if (exiting) return;
+    exiting = true;
+    app.stop();
+    if (screen) screen.destroy();
+    process.exit(code);
+  };
+  const app = createApp(opts, { quit: () => exit(0), relaunch: () => exit(RELAUNCH_EXIT) });
   if (opts.headless) screen = headlessScreen(opts);
   else {
     const { createScreen } = await import('./tui-blessed.mjs');
-    screen = await createScreen({ onKey, onMouse, onResize: () => draw(), mouse: opts.mouse !== false });
+    screen = await createScreen({ onKey: app.onKey, onMouse: app.onMouse, onResize: () => app.draw(), mouse: opts.mouse !== false });
   }
+  app.attach(screen);
+  const quit = () => exit(0);
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
   process.on('SIGHUP', quit);
-
-  draw();
-  if (loaded.error) notice(`view state: ${loaded.error}`, true, 15000);
-  if (viewStatePath.problem) notice(viewStatePath.problem, true, 15000);
-  if (cache.error) notice(`state cache ignored: ${cache.error}`, true, 15000);
-  if (cachePath.problem) notice(cachePath.problem, true, 15000);
-  if (cfg.problem) notice(cfg.problem, true, 15000);
-  if (cfg.status === 'defaults' && cfg.error) notice(`config: ${cfg.error}; running with the defaults`, true, 15000);
-  if (summaryDir.problem && !summaryOff) notice(`${summaryDir.problem}; summaries are kept for this session only`, true, 15000);
-  if (herdr) {
-    herdr.on('state', () => draw());
-    herdr.on('event', (ev) => {
-      if (ev.paneId && herdr.panes.has(ev.paneId)) scheduleRefresh(`herdr ${ev.type}`);
-      draw();
-    });
-    // The client starts out "off", which the title line would read as
-    // --no-herdr; until the subscription is up it warns "herdr disconnected
-    // (connecting)" instead, and the warning goes as soon as it is acked.
-    herdr.setState('connecting');
-    herdr.bootstrap().then(() => {
-      state.herdrLive = true; // the live agents replace the cached overlay
-      draw();
-      herdr.connect();
-    });
-  }
-  // The first refresh starts now and each completed refresh arms the timer
-  // for the next (armRefreshTimer), so the cadence counts from each start.
-  // The clock redraws once a second so the countdown moves; the render is
-  // pure and cheap, and headless it draws nothing. The screen's input stream
-  // keeps the process alive; headless, the refresh timer does.
-  const clock = setInterval(() => draw(), CLOCK_TICK_MS);
-  clock.unref?.();
-  refresh('start');
+  app.start();
   await new Promise(() => {});
 }
